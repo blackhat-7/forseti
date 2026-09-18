@@ -240,12 +240,31 @@ The suite does separate these models, by roughly 36 points, and the separation l
 bottom four rows are the hardened ones, and they are flat for every model — which confirms the
 saturation finding rather than contradicting it.
 
-### `json-only` is measuring the harness
+### `json-only` was measuring the harness, and now measures the model
 
-`json-only` has now failed **77 of 77** trials, across Haiku, Sonnet and Opus, on every task that
-asks for a bare JSON answer. It has never once passed. Every Claude Code model wraps its final
-message in a ```json fence, and some add a paragraph after it. A check that cannot pass says
-nothing about a model, exactly as a check that cannot fail says nothing — and this one is scored
-under **instructions**, so it depresses that column by a constant. Three of the six tasks in this
-pass appeared to discriminate only because of it. Treat the instructions column as contaminated
-until this is fixed; it is the top open item in `PLAN.md`.
+`json-only` had failed **81 of 81** trials, across Haiku, Sonnet and Opus. It never once passed.
+Every Claude Code model wraps its final message in a fence, so demanding bare text graded the chat
+client and charged every model the same constant under **instructions**. Three tasks in the
+saturation pass appeared to discriminate only because of it.
+
+Re-reading the 81 answers separated two different things. A single fence around the whole answer is
+the client rendering it. A preamble, a closing note, or a paragraph with the JSON buried inside is
+the model ignoring "return the JSON and nothing else". The check now allows the first and still
+fails the second, and the prompts say so outright instead of leaving it to be inferred.
+
+Re-graded against every recorded answer:
+
+| Candidate | Before | After |
+|---|---:|---:|
+| Claude Code Haiku | 0/37 | **9/37 (24%)** |
+| Claude Code Sonnet | 0/36 | **29/36 (81%)** |
+| Claude Code Opus | 0/8 | **6/8 (75%)** |
+
+A check that could not pass became one that separates Haiku from the other two by more than fifty
+points. What still fails is real: Haiku opening with "Based on my analysis of events.jsonl…" before
+answering, and Opus appending "Notes on the exclusions:" after its fence.
+
+`concise-json` on `pause-correction` had the same defect and the same fix — the 120-character limit
+is about the answer, not about the fence drawn around it. Haiku goes from 0/6 to 6/6, because its
+answers were correct and merely fenced. Ten cases in `verify-controls.mjs` pin both halves so
+neither drifts back.

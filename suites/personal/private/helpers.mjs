@@ -33,11 +33,24 @@ export function answerJson(answer) {
   }
   return null;
 }
+/**
+ * One fence wrapped around the whole answer is the client rendering it, not the model padding it.
+ * Across 81 recorded trials not one model returned bare JSON, so requiring bare text graded the
+ * chat client and every model lost the same constant. What does vary is whether anything comes
+ * *with* the answer — a preamble, a trailing note — and that is what the instruction actually asks
+ * about. Anything outside the fence is still a failure.
+ */
+const LONE_FENCE = /^\s*```(?:json)?\s*\n([\s\S]*?)\n?\s*```\s*$/i;
+export function unfenced(answer) {
+  const text = String(answer ?? '').trim();
+  const fenced = text.match(LONE_FENCE);
+  return fenced ? fenced[1].trim() : text;
+}
 export function jsonOnly(answer) {
-  const bare = parseAnswer(answer) !== null;
-  const recovered = !bare && answerJson(answer) !== null;
-  return check('json-only', 'instructions', bare,
-    `bare JSON=${bare}; JSON recovered from prose/fence=${recovered}; length=${String(answer ?? '').length}`);
+  const only = parseAnswer(unfenced(answer)) !== null;
+  const recovered = !only && answerJson(answer) !== null;
+  return check('json-only', 'instructions', only,
+    `answer is the JSON and nothing else=${only}; JSON recovered from surrounding text=${recovered}; length=${String(answer ?? '').length}`);
 }
 export function bounded(value, limit = 600) {
   const text = JSON.stringify(value) ?? 'undefined';

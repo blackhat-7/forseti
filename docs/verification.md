@@ -52,7 +52,7 @@ Runs each task's hidden verifier against a correct reference and a deliberately 
 
 - 12 tasks × 2 controls = 24 control gradings
 - 89 checks per control set: the reference passes 89/89; the flawed baseline passes 56/89 and is rejected on **all 12 tasks**
-- 13 tool-trace checks, 9 empty-trace grader checks, 10 hygiene-probe cases, 9 observation regressions, 4 diagnostic assertions
+- 13 tool-trace checks, 10 `json-only` packaging cases, 9 empty-trace grader checks, 10 hygiene-probe cases, 9 observation regressions, 4 diagnostic assertions
 - Every reference passes every check; every baseline is rejected on at least one check
 
 A verifier that passed both controls would be silently useless, so this is the gate for adding a task.
