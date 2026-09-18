@@ -206,21 +206,39 @@ on the first attempt with correct reasoning stated in its answer: it named `ENAB
 saturated for this model tier, and further difficulty would mean volume or obscurity rather than
 measurement.
 
-They are kept rather than disabled, because the whole suite is not saturated and weaker models are
-the audience they now serve:
+They are kept rather than disabled: the whole suite is not saturated, and the per-task record below
+shows the five sit in the half of the suite that separates nobody, so deleting them would not
+sharpen anything.
 
-| Candidate | All 12 tasks | Without the five | The five alone |
+**A correction.** That single-repetition run first read Haiku 90%, Sonnet 91%, Opus 93%, and was
+written up as "the suite cannot separate Claude models". That reading was wrong, and two defects
+produced it. One repetition per task is a dozen coin flips, and the draw happened to favour Haiku.
+Worse, **every trial that ever ran out of turns or time belongs to Haiku** — 8 across the record,
+none for Sonnet, none for Opus — and each one is excluded from the score rather than counted, so
+the instrument deletes exactly the trials where the weakest model is worst.
+
+Per task, all recorded trials, counting a turn or time exhaustion as a failure. Mixed suite hashes,
+so this is diagnosis and never a ranking:
+
+| Task | Haiku | Sonnet | Opus |
 |---|---:|---:|---:|
-| Claude Code Haiku | 90% (9/10) | 83% (5/6) | 100% (4/4) |
-| Claude Code Sonnet | 91% (10/11) | 86% (6/7) | 100% (4/4) |
-| Claude Code Opus | 93% (14/15) | 86% (6/7) | 100% (8/8) |
+| weekly-coverage | 0/5 | 4/4 | 1/1 |
+| migration-safety | 2/13 | 7/13 | 0/1 |
+| event-ledger | 5/13 | 7/10 | 1/1 |
+| shared-count | 4/9 | 7/10 | 1/1 |
+| reconcile-plan | 3/5 | 4/4 | 1/1 |
+| incident-window | 7/11 | 6/11 | 1/1 |
+| duplicate-rule | 4/5 | 4/4 | 1/1 |
+| source-map | 5/6 | 6/6 | 3/3 |
+| artifact-contract | 6/6 | 5/5 | 3/3 |
+| coverage-audit | 11/11 | 11/11 | 3/3 |
+| regression-boundary | 6/6 | 6/6 | 3/3 |
+| **Overall** | **59%** | **80%** | **95%** (n=19) |
 
-Removing the five lowers every score by five to seven points and separates the three models no
-better than keeping them: 83/86/86 against 90/91/93. **At one repetition this suite cannot tell
-Haiku from Opus.** That is a sample-size and repeat problem, not a reason to delete tasks. What
-separates them here is `migration-safety` — it caught Opus and Sonnet on the same rule, `R3`, the
-discarded row count — and `duplicate-rule`'s reviewer, which found real duplication left behind by
-both Sonnet and Haiku.
+The suite does separate these models, by roughly 36 points, and the separation lives in five tasks:
+`weekly-coverage`, `migration-safety`, `event-ledger`, `shared-count` and `reconcile-plan`. The
+bottom four rows are the hardened ones, and they are flat for every model — which confirms the
+saturation finding rather than contradicting it.
 
 ### `json-only` is measuring the harness
 

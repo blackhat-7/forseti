@@ -8,7 +8,9 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 ## State
 
 - Twelve tasks, all hardened enough that their controls reject a near-miss baseline, not just the untouched fixture.
-- **The suite cannot separate Claude models at one repetition.** Full-suite, one repeat, suite hash `efc33deac272`: Haiku **90%**, Sonnet **91%**, Opus **93%**. What actually discriminates is `migration-safety` (caught Opus and Sonnet on the same rule, `R3`) and `duplicate-rule`'s design reviewer (caught Sonnet and Haiku).
+- **The suite does separate these models — by about 36 points.** Across all recorded trials, counting turn/time exhaustion as failure: Haiku **59%**, Sonnet **80%**, Opus **95%** (n=19). The separation lives in `weekly-coverage`, `migration-safety`, `event-ledger`, `shared-count` and `reconcile-plan`.
+- **Do not trust a one-repeat run.** A single full-suite repeat this session read 90/91/93 and was briefly written up as "the models are indistinguishable". It was a lucky draw for Haiku. Twelve tasks at one repetition is a dozen coin flips.
+- **Every trial that ever ran out of turns or time is Haiku's** — 8 of them, none for Sonnet or Opus — and each is excluded from the score as `not-run`. The instrument deletes the weakest model's worst trials. `AGENTS.md` and `DECISIONS.md` name `timeout` and turn-cap as not-run deliberately, so changing it is a decision to take, not a bug to fix quietly. Top of `PLAN.md`.
 - **`json-only` has failed 77/77 trials and never once passed**, across Haiku, Sonnet and Opus. Every Claude Code model fences its final answer. It is scored under `instructions`, so that whole column is contaminated by a constant. Top item in `PLAN.md`.
 - `claude-code/opus` is now an enabled model. Codex OAuth is still rejected server-side; Kimi quota is still exhausted.
 - Full battery after every change below: `npm run check` clean · `npm test` **48/48** · `npm run test:suite` **12 tasks / 24 controls, reference 89/89, baseline 56/89 rejected on all 12**. `npm run test:terminal` and `npm run test:judge` were **not** re-run.
