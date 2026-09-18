@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "suite": "suites/personal/suite.json",
+  "disabledTests": [],
+  "removedTests": [],
+  "models": [
+    {
+      "id": "control-reference",
+      "label": "Reference · synthetic",
+      "provider": "control",
+      "model": "reference",
+      "auth": "none",
+      "enabled": false,
+      "thinking": "off"
+    },
+    {
+      "id": "control-baseline",
+      "label": "Flawed baseline · synthetic",
+      "provider": "control",
+      "model": "baseline",
+      "auth": "none",
+      "enabled": false,
+      "thinking": "off"
+    },
+    {
+      "id": "openai-codex-gpt-5-4-mini",
+      "label": "GPT-5.4 mini",
+      "provider": "openai-codex",
+      "model": "gpt-5.4-mini",
+      "auth": "pi",
+      "enabled": false,
+      "thinking": "off"
+    },
+    {
+      "id": "openai-codex-gpt-5-4",
+      "label": "GPT-5.4",
+      "provider": "openai-codex",
+      "model": "gpt-5.4",
+      "auth": "pi",
+      "enabled": false,
+      "thinking": "off"
+    },
+    {
+      "id": "openai-codex-gpt-5-5",
+      "label": "GPT-5.5",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "auth": "pi",
+      "enabled": false,
+      "thinking": "off"
+    },
+    {
+      "id": "kimi-coding-kimi-for-coding",
+      "label": "Kimi K2.7 Code",
+      "provider": "kimi-coding",
+      "model": "kimi-for-coding",
+      "auth": "pi",
+      "enabled": false,
+      "thinking": "off"
+    },
+    {
+      "id": "claude-code-sonnet",
+      "label": "Claude sonnet · via Claude Code",
+      "provider": "claude-code",
+      "model": "sonnet",
+      "auth": "cli",
+      "enabled": true,
+      "thinking": "off"
+    },
+    {
+      "id": "claude-code-haiku",
+      "label": "Claude haiku · via Claude Code",
+      "provider": "claude-code",
+      "model": "haiku",
+      "auth": "cli",
+      "enabled": true,
+      "thinking": "off"
+    }
+  ],
+  "judge": {
+    "enabled": true,
+    "provider": "claude-code",
+    "model": "sonnet",
+    "auth": "cli",
+    "thinking": "medium",
+    "repeat": 1
+  }
+}

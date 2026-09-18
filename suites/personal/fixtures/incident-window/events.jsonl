@@ -1,0 +1,7 @@
+{"id": "q0", "time": "2031-04-08T09:55:00Z", "job": "job-a", "event": "requested"}
+{"id": "e1", "time": "2031-04-08T10:02:00Z", "job": "job-a", "event": "allocation_failed", "reason": "capacity"}
+{"id": "e2", "time": "2031-04-08T10:07:00Z", "job": "job-a", "event": "allocation_failed", "reason": "capacity"}
+{"id": "e2", "time": "2031-04-08T10:07:00Z", "job": "job-a", "event": "allocation_failed", "reason": "capacity"}
+{"id": "other", "time": "2031-04-08T10:09:00Z", "job": "job-b", "event": "database_error"}
+{"id": "e3", "time": "2031-04-08T10:12:00Z", "job": "job-a", "event": "allocation_failed", "reason": "capacity"}
+{"id": "late", "time": "2031-04-08T10:20:00Z", "job": "job-a", "event": "running"}

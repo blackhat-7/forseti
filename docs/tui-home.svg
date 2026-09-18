@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1145" height="670" viewBox="0 0 1145 670" role="img" aria-label="Forseti terminal UI, home view">
+<rect width="100%" height="100%" rx="10" fill="#070d18"/>
+<rect x="18" y="34" width="1108.8" height="600.0" fill="rgb(12,20,35)"/>
+<circle cx="24" cy="18" r="6" fill="#ff5f57"/><circle cx="44" cy="18" r="6" fill="#febc2e"/><circle cx="64" cy="18" r="6" fill="#28c840"/>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve">
+<rect x="18.0" y="52.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="52.0" width="58.8" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="66.0" fill="rgb(226,230,238)" font-weight="600">forseti</text>
+<rect x="93.6" y="52.0" width="764.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="858.0" y="52.0" width="252.0" height="20" fill="rgb(13,15,22)"/>
+<text x="858.0" y="66.0" fill="rgb(88,95,116)">6 models · 9 tests · 2 repeats</text>
+<rect x="1110.0" y="52.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="72.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="72.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="86.0" fill="rgb(226,230,238)" font-weight="600">Home</text>
+<rect x="68.4" y="72.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="93.6" y="72.0" width="50.4" height="20" fill="rgb(13,15,22)"/>
+<text x="93.6" y="86.0" fill="rgb(138,146,167)">Models</text>
+<rect x="144.0" y="72.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="169.2" y="72.0" width="42.0" height="20" fill="rgb(13,15,22)"/>
+<text x="169.2" y="86.0" fill="rgb(138,146,167)">Tests</text>
+<rect x="211.2" y="72.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="236.4" y="72.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<text x="236.4" y="86.0" fill="rgb(138,146,167)">Runs</text>
+<rect x="270.0" y="72.0" width="856.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="92.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="92.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="106.0" fill="rgb(129,161,255)">────</text>
+<rect x="68.4" y="92.0" width="1058.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="112.0" width="1108.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="132.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="132.0" width="285.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="146.0" fill="rgb(226,230,238)" font-weight="600">Sanitized personal workflow checks</text>
+<rect x="320.4" y="132.0" width="596.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="916.8" y="132.0" width="193.2" height="20" fill="rgb(13,15,22)"/>
+<text x="916.8" y="146.0" fill="rgb(138,146,167)">108 trials · tools lane</text>
+<rect x="1110.0" y="132.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="152.0" width="1108.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="172.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="172.0" width="100.8" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="186.0" fill="rgb(138,146,167)">Run settings</text>
+<rect x="135.6" y="172.0" width="268.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="404.4" y="172.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="404.4" y="186.0" fill="rgb(138,146,167)">Will run · 6 models × 9 tests</text>
+<rect x="648.0" y="172.0" width="478.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="192.0" width="1108.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="212.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="212.0" width="92.4" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="226.0" fill="rgb(138,146,167)">Repetitions</text>
+<rect x="127.2" y="212.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="152.4" y="212.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="152.4" y="226.0" fill="rgb(129,161,255)">2</text>
+<rect x="160.8" y="212.0" width="109.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="270.0" y="212.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<text x="270.0" y="226.0" fill="rgb(88,95,116)">− +</text>
+<rect x="295.2" y="212.0" width="109.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="404.4" y="212.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="404.4" y="226.0" fill="rgb(140,214,124)">●</text>
+<rect x="412.8" y="212.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="412.8" y="226.0" fill="rgb(220,230,241)"> Reference · synthetic       </text>
+<rect x="656.4" y="212.0" width="142.8" height="20" fill="rgb(13,15,22)"/>
+<text x="656.4" y="226.0" fill="rgb(88,95,116)">synthetic control</text>
+<rect x="799.2" y="212.0" width="327.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="232.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="232.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="246.0" fill="rgb(138,146,167)">Lane</text>
+<rect x="68.4" y="232.0" width="84.0" height="20" fill="rgb(13,15,22)"/>
+<rect x="152.4" y="232.0" width="42.0" height="20" fill="rgb(13,15,22)"/>
+<text x="152.4" y="246.0" fill="rgb(129,161,255)">tools</text>
+<rect x="194.4" y="232.0" width="75.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="270.0" y="232.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="270.0" y="246.0" fill="rgb(88,95,116)">l</text>
+<rect x="278.4" y="232.0" width="126.0" height="20" fill="rgb(13,15,22)"/>
+<rect x="404.4" y="232.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="404.4" y="246.0" fill="rgb(140,214,124)">●</text>
+<rect x="412.8" y="232.0" width="201.6" height="20" fill="rgb(13,15,22)"/>
+<text x="412.8" y="246.0" fill="rgb(220,230,241)"> Flawed baseline · synth</text>
+<text x="614.4" y="246.0" fill="rgb(220,230,241)">...</text>
+<text x="656.4" y="246.0" fill="rgb(88,95,116)">synthetic control</text>
+<rect x="18.0" y="252.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="252.0" width="42.0" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="266.0" fill="rgb(138,146,167)">Cache</text>
+<rect x="76.8" y="252.0" width="75.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="152.4" y="252.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<text x="152.4" y="266.0" fill="rgb(86,214,196)">on</text>
+<rect x="169.2" y="252.0" width="100.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="270.0" y="252.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="270.0" y="266.0" fill="rgb(88,95,116)">p</text>
+<rect x="278.4" y="252.0" width="126.0" height="20" fill="rgb(13,15,22)"/>
+<rect x="404.4" y="252.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="404.4" y="266.0" fill="rgb(140,214,124)">●</text>
+<rect x="412.8" y="252.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="412.8" y="266.0" fill="rgb(220,230,241)"> GPT-5.5                     </text>
+<rect x="656.4" y="252.0" width="100.8" height="20" fill="rgb(13,15,22)"/>
+<text x="656.4" y="266.0" fill="rgb(86,214,196)">subscription</text>
+<rect x="757.2" y="252.0" width="369.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="272.0" width="386.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="404.4" y="272.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="404.4" y="286.0" fill="rgb(140,214,124)">●</text>
+<rect x="412.8" y="272.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="412.8" y="286.0" fill="rgb(220,230,241)"> Kimi K2.7 Code              </text>
+<rect x="656.4" y="272.0" width="100.8" height="20" fill="rgb(13,15,22)"/>
+<text x="656.4" y="286.0" fill="rgb(86,214,196)">subscription</text>
+<rect x="757.2" y="272.0" width="369.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="292.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="292.0" width="193.2" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="306.0" fill="rgb(88,95,116)">seed 42 · 90s per trial</text>
+<rect x="228.0" y="292.0" width="176.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="404.4" y="292.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="404.4" y="306.0" fill="rgb(140,214,124)">●</text>
+<rect x="412.8" y="292.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="412.8" y="306.0" fill="rgb(220,230,241)"> Claude Opus 5               </text>
+<rect x="656.4" y="292.0" width="58.8" height="20" fill="rgb(13,15,22)"/>
+<text x="656.4" y="306.0" fill="rgb(230,180,105)">unknown</text>
+<rect x="715.2" y="292.0" width="411.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="312.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="312.0" width="184.8" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="326.0" fill="rgb(88,95,116)">12 turns · 4096 tokens</text>
+<rect x="219.6" y="312.0" width="184.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="404.4" y="312.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="404.4" y="326.0" fill="rgb(140,214,124)">●</text>
+<rect x="412.8" y="312.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="412.8" y="326.0" fill="rgb(220,230,241)"> Claude Sonnet 5             </text>
+<rect x="656.4" y="312.0" width="58.8" height="20" fill="rgb(13,15,22)"/>
+<text x="656.4" y="326.0" fill="rgb(230,180,105)">unknown</text>
+<rect x="715.2" y="312.0" width="411.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="332.0" width="1108.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="352.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="352.0" width="8.4" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="366.0" fill="rgb(129,161,255)">r</text>
+<rect x="43.2" y="352.0" width="1083.6" height="20" fill="rgb(13,15,22)"/>
+<text x="43.2" y="366.0" fill="rgb(220,230,241)">  review preflight, then confirm                                                                                                 </text>
+<rect x="18.0" y="372.0" width="1108.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="392.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="392.0" width="789.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="406.0" fill="rgb(88,95,116)">Controls are synthetic, not model evidence. Metered or unknown billing needs separate PAY     </text>
+<rect x="824.4" y="392.0" width="302.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="412.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="412.0" width="789.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="426.0" fill="rgb(88,95,116)">consent.                                                                                      </text>
+<rect x="824.4" y="412.0" width="302.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="432.0" width="1108.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="452.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="452.0" width="92.4" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="466.0" fill="rgb(138,146,167)">Recent runs</text>
+<rect x="127.2" y="452.0" width="999.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="472.0" width="1108.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="492.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="492.0" width="159.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="506.0" fill="rgb(88,95,116)">19-45-03 · 7321cd40</text>
+<rect x="194.4" y="492.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="219.6" y="492.0" width="75.6" height="20" fill="rgb(13,15,22)"/>
+<text x="219.6" y="506.0" fill="rgb(140,214,124)">completed</text>
+<rect x="295.2" y="492.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="328.8" y="492.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="328.8" y="506.0" fill="rgb(138,146,167)">18 passed · 36 of 36 recorded</text>
+<rect x="572.4" y="492.0" width="554.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="512.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="512.0" width="159.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="526.0" fill="rgb(88,95,116)">19-36-12 · a0f8bc4e</text>
+<rect x="194.4" y="512.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="219.6" y="512.0" width="75.6" height="20" fill="rgb(13,15,22)"/>
+<text x="219.6" y="526.0" fill="rgb(140,214,124)">completed</text>
+<rect x="295.2" y="512.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="328.8" y="512.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="328.8" y="526.0" fill="rgb(138,146,167)">18 passed · 36 of 36 recorded</text>
+<rect x="572.4" y="512.0" width="554.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="532.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="532.0" width="159.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="546.0" fill="rgb(88,95,116)">19-26-56 · af54f7a0</text>
+<rect x="194.4" y="532.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="219.6" y="532.0" width="75.6" height="20" fill="rgb(13,15,22)"/>
+<text x="219.6" y="546.0" fill="rgb(140,214,124)">completed</text>
+<rect x="295.2" y="532.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="328.8" y="532.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="328.8" y="546.0" fill="rgb(138,146,167)">18 passed · 36 of 36 recorded</text>
+<rect x="572.4" y="532.0" width="554.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="552.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="552.0" width="159.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="566.0" fill="rgb(88,95,116)">19-26-42 · 59036bba</text>
+<rect x="194.4" y="552.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="219.6" y="552.0" width="75.6" height="20" fill="rgb(13,15,22)"/>
+<text x="219.6" y="566.0" fill="rgb(140,214,124)">completed</text>
+<rect x="295.2" y="552.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="328.8" y="552.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="328.8" y="566.0" fill="rgb(138,146,167)">18 passed · 36 of 36 recorded</text>
+<rect x="572.4" y="552.0" width="554.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="572.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="572.0" width="159.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="586.0" fill="rgb(88,95,116)">19-20-13 · a0775f33</text>
+<rect x="194.4" y="572.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="219.6" y="572.0" width="75.6" height="20" fill="rgb(13,15,22)"/>
+<text x="219.6" y="586.0" fill="rgb(230,180,105)">cancelled</text>
+<rect x="295.2" y="572.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="328.8" y="572.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="328.8" y="586.0" fill="rgb(138,146,167)">16 passed · 36 of 36 recorded</text>
+<rect x="572.4" y="572.0" width="554.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="592.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="592.0" width="159.6" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="606.0" fill="rgb(88,95,116)">19-17-20 · 49d8ca5c</text>
+<rect x="194.4" y="592.0" width="25.2" height="20" fill="rgb(13,15,22)"/>
+<rect x="219.6" y="592.0" width="75.6" height="20" fill="rgb(13,15,22)"/>
+<text x="219.6" y="606.0" fill="rgb(140,214,124)">completed</text>
+<rect x="295.2" y="592.0" width="33.6" height="20" fill="rgb(13,15,22)"/>
+<rect x="328.8" y="592.0" width="243.6" height="20" fill="rgb(13,15,22)"/>
+<text x="328.8" y="606.0" fill="rgb(138,146,167)">18 passed · 36 of 36 recorded</text>
+<rect x="572.4" y="592.0" width="554.4" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="612.0" width="1108.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="18.0" y="632.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+<rect x="34.8" y="632.0" width="445.2" height="20" fill="rgb(13,15,22)"/>
+<text x="34.8" y="646.0" fill="rgb(138,146,167)">Local-first. No prompts sent until you confirm a run.</text>
+<rect x="480.0" y="632.0" width="504.0" height="20" fill="rgb(13,15,22)"/>
+<rect x="984.0" y="632.0" width="126.0" height="20" fill="rgb(13,15,22)"/>
+<text x="984.0" y="646.0" fill="rgb(88,95,116)">? keys   q quit</text>
+<rect x="1110.0" y="632.0" width="16.8" height="20" fill="rgb(13,15,22)"/>
+</g>
+</svg>
