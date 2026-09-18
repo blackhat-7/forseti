@@ -37,9 +37,13 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **Five rules make a judged verdict mean something.** (M16) Correctness gates the reviewer; design never touches correctness; binary questions, not a 1-10 score; every defect must cite a line that mechanically verifies against the submission; the reference solution ships in the prompt as the scale anchor.
 - **Self-preference is measured, not asserted.** (M16) `test:judge --run <id> --alt <provider>/<model>` splits the defect rate by the family that wrote the code. Reviewing Claude submissions with a Claude reviewer is the case this exists for.
 - **Read a perfect agreement score as "no disagreement found yet".** (M18) Eight cases is small by design; the set earns its value by growing from real disagreements.
+- **The reviewer gets 3 turns, not 1.** (2026-09-18) Denying a tool does not stop a model reaching for one, and a single rejected call consumed the only turn, so the CLI exited with no result and the reviewer silently scored nothing. Three turns lets a stray attempt bounce off the denial and still leave room to answer.
+- **Thinking level is part of the reviewer's identity.** (2026-09-18) A calibration at `thinking: off` says nothing about a reviewer running at `medium`. Re-validate after changing it; `judgeIdentity` already refuses to pool them.
 
 ## Hard-won lessons
 
 - **Look at the instrument's output before changing the thing it measures.** (M18) A citation-check bug was silently discarding *correct* defects. Two full calibration runs were wasted guessing; one raw reviewer reply found it in a minute.
 - **A rule that capable models consistently flag is an ambiguous rule, not a model error.** (M14) Two answer keys were wrong and the models caught both.
 - **Tests get updated deliberately, never weakened.** (M6) Assertions on text that appears on every screen pass without the view ever opening. Assert view-unique content.
+- **A dimension that cannot fail must not be reported as a score.** (2026-09-18) The three `quality` AST checks are 50 passes / 0 failures each over every Claude Code trial, so "Quality 100%" reads as praise for something never measured. Count discriminating power before trusting any headline.
+- **Check per-task discrimination, not just the average.** (2026-09-18) Six of twelve tasks have never once failed for a capable model, so most of a 91% is tasks everyone passes. A suite average hides which tasks have stopped earning their place.

@@ -83,7 +83,7 @@ test('strict settings, explicit billing, instruction-only rubrics and seeded sch
   assert.throws(() => judge({ provider: 'control', model: 'reference' }), /not a synthetic control/);
   assert.throws(() => judge({ repeat: 0 }), /1–5/);
   assert.equal(claudeCodeJudgeArgs('haiku').includes('--max-turns'), true);
-  assert.equal(claudeCodeJudgeArgs('haiku').at(-1), '1', 'a reviewer answers once and stops');
+  assert.equal(claudeCodeJudgeArgs('haiku').at(-1), '3', 'a rejected tool call must not consume the only turn');
   for (const tool of ['Read', 'Write', 'Bash', 'WebFetch']) assert.match(CLAUDE_CODE_JUDGE_DENIED, new RegExp(`\\b${tool}\\b`), `${tool} must be denied to a reviewer`);
 });
 

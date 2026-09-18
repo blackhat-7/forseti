@@ -50,13 +50,19 @@ export function claudeCodeArgs(model: string, maxTurns: number): string[] {
   ];
 }
 
+/**
+ * `--max-turns 1` looked right — a reviewer reads and answers — but denying a tool does not stop
+ * the model reaching for one. A single rejected tool call then consumed the only turn and the CLI
+ * exited with no result, so the reviewer scored nothing. Three turns lets a stray attempt bounce
+ * off the denial and still leave room to answer; it cannot loop, because there is no tool to use.
+ */
 export function claudeCodeJudgeArgs(model: string): string[] {
   return [
     '-p', '--model', model, '--output-format', 'json',
     '--safe-mode', '--disable-slash-commands',
     '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
     '--disallowedTools', CLAUDE_CODE_JUDGE_DENIED,
-    '--max-turns', '1',
+    '--max-turns', '3',
   ];
 }
 
