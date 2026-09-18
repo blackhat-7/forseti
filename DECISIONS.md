@@ -39,6 +39,7 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **Read a perfect agreement score as "no disagreement found yet".** (M18) Eight cases is small by design; the set earns its value by growing from real disagreements.
 - **The reviewer gets 3 turns, not 1.** (2026-09-18) Denying a tool does not stop a model reaching for one, and a single rejected call consumed the only turn, so the CLI exited with no result and the reviewer silently scored nothing. Three turns lets a stray attempt bounce off the denial and still leave room to answer.
 - **Thinking level is part of the reviewer's identity.** (2026-09-18) A calibration at `thinking: off` says nothing about a reviewer running at `medium`. Re-validate after changing it; `judgeIdentity` already refuses to pool them.
+- **Generated `reports/comparison-*.md` are not tracked.** (2026-09-18) `exportReport` writes one per export and the PTY smoke test exports every run, so the repo grew by a few hundred lines on each routine verification. The two curated reports the README links are named by hand and stay tracked. Run artifacts already live in the gitignored `runs/`; publish a report by giving it a name.
 
 ## Hard-won lessons
 

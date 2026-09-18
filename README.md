@@ -86,7 +86,7 @@ npm start -- compare RUN_A RUN_B
 npm start -- run --models MODEL_CONFIG_ID --lane prompt --repeat 2
 ```
 
-Each run saves its schedule, settings, suite, harness source/lockfile, environment, per-trial events, final artifacts, check evidence and timing under `runs/`. Reports go in `reports/`. Model tool directories contain public fixtures only; graders and reference solutions remain outside that boundary.
+Each run saves its schedule, settings, suite, harness source/lockfile, environment, per-trial events, final artifacts, check evidence and timing under `runs/`. Exported reports go in `reports/`. Each export writes its own `comparison-<timestamp>.md`; those stay on your machine, and only the two examples linked below are tracked in git. Model tool directories contain public fixtures only; graders and reference solutions remain outside that boundary.
 
 Comparisons show correctness, instruction adherence, limited objective quality checks, tool behavior, timing and available tokens/cost. They include matched-check evidence and missing outcomes. Different task sets, suite/harness versions, lanes, budgets or environments are separated rather than silently ranked together. Prompt-only versus tools is an **elicitation/harness ablation**, not a pure model difference. Provider model aliases may change; repeat scheduling is deterministic, model responses are not guaranteed to be.
 

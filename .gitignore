@@ -5,3 +5,8 @@ node_modules/
 runs/
 *.tsbuildinfo
 __pycache__/
+
+# Generated exports. `exportReport` writes one per export and the PTY smoke test
+# exports every run, so tracking these grows the repo on every verification.
+# The two curated reports the README links are named by hand and stay tracked.
+reports/comparison-*.md
