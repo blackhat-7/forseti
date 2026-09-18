@@ -268,6 +268,28 @@
         "exactness",
         "scope"
       ]
+    },
+    {
+      "id": "stuck-job",
+      "title": "Reconcile three sources that disagree about a job",
+      "tags": [
+        "sql",
+        "operations",
+        "reconciliation"
+      ],
+      "prompt": "Fix query.sql for SQLite. Three tables describe the same jobs and disagree. jobs(job, attempt, state, updated_at) is the database, one row per job and attempt. queue(job, attempt, event, at) is the delivery log; delivery is at-least-once, so the same event can appear more than once. store(job, attempt, artifact) lists artifacts actually written. Bind parameters :now and :lease are an instant and a whole number of seconds. Return exactly one row per job in jobs, as (job, state) ordered by job. Only a job's highest attempt decides its state; lower attempts are history in every table. For that attempt, in this order: state is 'done' only if store holds an artifact for that job and that attempt, whatever the database says; otherwise 'queued' if queue has no acked event for that attempt; otherwise 'lost' if updated_at for that attempt is more than :lease seconds before :now; otherwise 'running'. Timestamps are ISO-8601 and the offsets are not all the same; compare them as instants. Do not modify any data. Change only query.sql. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public check covers only some of the rows this is graded on. If tools are unavailable, return only JSON {\"files\":{\"query.sql\":\"complete replacement contents\"}}. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/stuck-job",
+      "grader": "private/stuck-job.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "tools"
+      ],
+      "capabilities": [
+        "evidence",
+        "exactness",
+        "restraint"
+      ]
     }
   ]
 }

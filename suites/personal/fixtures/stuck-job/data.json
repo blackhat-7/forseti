@@ -1,0 +1,18 @@
+{
+  "jobs": [
+    ["job-cedar", 1, "queued", "2031-06-11T11:10:00+00:00"],
+    ["job-hazel", 1, "queued", "2031-06-11T11:59:00+00:00"],
+    ["job-ivory", 1, "running", "2031-06-11T11:58:00+00:00"]
+  ],
+  "queue": [
+    ["job-cedar", 1, "dispatched", "2031-06-11T11:05:00+00:00"],
+    ["job-cedar", 1, "acked", "2031-06-11T11:06:00+00:00"],
+    ["job-hazel", 1, "dispatched", "2031-06-11T11:58:00+00:00"],
+    ["job-hazel", 1, "nacked", "2031-06-11T11:59:00+00:00"],
+    ["job-ivory", 1, "dispatched", "2031-06-11T11:56:00+00:00"],
+    ["job-ivory", 1, "acked", "2031-06-11T11:57:00+00:00"]
+  ],
+  "store": [
+    ["job-cedar", 1, "job-cedar/1/model.bin"]
+  ]
+}
