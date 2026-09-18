@@ -5,7 +5,7 @@ Each line carries its own done-check. A task too big for one session gets split 
 
 ## Now
 
-- [ ] Put the workspace under git: `git init`, confirm `.gitignore` covers `node_modules/ .cache/ .tmp/ .state/ runs/`, commit everything else. Done when `git log` shows one commit and `git status` is clean.
+- [x] Put the workspace under git: `git init`, confirm `.gitignore` covers `node_modules/ .cache/ .tmp/ .state/ runs/`, commit everything else. Done when `git log` shows one commit and `git status` is clean.
 - [ ] After a fresh Pi Codex login, run `npm run test:judge`. Done when an agreement number exists. Until then the reviewer is unvalidated and its design scores must not be read.
 - [ ] Rerun `npm start -- run --models openai-codex-gpt-5-5 --tests shared-count,incident-window --repeat 2` and regenerate `reports/live-smoke.md`. Done when both report groups share the current suite and harness hash.
 - [ ] Run Sonnet vs Haiku on `duplicate-rule` with the reviewer on, then `npm run test:judge -- --run <id> --alt <provider>/<model>`. Done when a self-preference number exists for real submissions.
