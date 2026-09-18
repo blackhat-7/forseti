@@ -26,7 +26,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## Next
 
-The scoring fixes are done. Next is the expensive one: re-measure with repeats at one suite hash, three models, enough repetitions that the gap between two of them beats their own repeat-to-repeat variation. Publish nothing before that — measuring with a known-broken instrument is what produced the 90/91/93 mistake.
+Add tasks that separate the strongest candidates. **Do not start another full-suite run**: one was begun at 3 repeats and stopped at 15 of 108 trials, because ~70 minutes of plan quota only tightens a gap the record already shows at ~30 points and cannot touch the 5-point gap at any price.
 
 ## Gotchas
 
