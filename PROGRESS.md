@@ -26,7 +26,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## Next
 
-Add tasks that separate the strongest candidates. **Do not start another full-suite run**: one was begun at 3 repeats and stopped at 15 of 108 trials, because ~70 minutes of plan quota only tightens a gap the record already shows at ~30 points and cannot touch the 5-point gap at any price.
+More tasks built like `retry-rollup`: an idiom whose obvious spelling is wrong, plus public rows on which that spelling is right. That recipe is the only thing that has ever caught the middle candidate (1/3 · 2/3 · 3/3 over three repetitions). Stating the rules precisely does not work — this tier translates a specification well; `stuck-job` was built twice to that brief and everyone passed. **Do not start another full-suite run**: one was begun at 3 repeats and stopped at 15 of 108 trials, because ~70 minutes of plan quota only tightens a gap the record already shows at ~30 points and cannot touch the 5-point gap at any price.
 
 ## Gotchas
 

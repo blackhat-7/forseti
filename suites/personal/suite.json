@@ -290,6 +290,27 @@
         "exactness",
         "restraint"
       ]
+    },
+    {
+      "id": "retry-rollup",
+      "title": "Count the failures the retries did not fix",
+      "tags": [
+        "sql",
+        "metrics",
+        "retries"
+      ],
+      "prompt": "Fix query.sql for SQLite. runs(id, profile, finished_at, status) holds one row per run; status is failed, succeeded or cancelled. supersedes(failed_id, retry_id) records that a run was retried by another run. ignored(profile) lists profiles to leave out of the report, and a NULL row there names no profile and excludes nothing. Bind parameters :start and :end are instants. Return one row per UTC day that has at least one counted failure, as (day, failures) ordered by day, where day is YYYY-MM-DD. Count a run when its status is failed, its finished_at falls in the half-open interval [:start, :end), its profile is not listed in ignored, and it was not superseded by a retry whose status is succeeded. A run that was never retried still counts. A run retried by another failed run still counts, and so does that retry. finished_at values are ISO-8601 and the offsets are not all the same; the day is the UTC day. Do not modify any data. Change only query.sql. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public rows are a subset: passing that check does not mean the query is right. If tools are unavailable, return only JSON {\"files\":{\"query.sql\":\"complete replacement contents\"}}. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/retry-rollup",
+      "grader": "private/retry-rollup.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "evidence"
+      ]
     }
   ]
 }
