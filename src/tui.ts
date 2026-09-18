@@ -710,6 +710,16 @@ export class Dashboard implements Component, Focusable {
         }
         row();
       }
+      // A stall is excluded from correctness but never from view: the trials a model loses to the
+      // turn or time budget are rarely spread evenly between models, so the score alone misleads.
+      if (cards.some(s => s.stalled)) {
+        row(muted('Stalled') + faint('        ran out of turns or time · excluded from correctness, shown so it cannot hide'));
+        for (const [i, s] of cards.entries()) {
+          if (!s.stalled) continue;
+          row(cell(names[i]!, NAME) + rose(`${s.stalled} stalled`) + faint(`   ${pct(s.score)} scored · ${pct(s.scoreCountingStalls)} if counted`));
+        }
+        row();
+      }
       // Hygiene gets a line, not a bar. Its three checks have never failed in any recorded run,
       // so a full-width 100% beside correctness would read as praise for an unmeasured thing.
       const hygiene = this.reportRuns.flatMap(r => r.trials).flatMap(t => t.checks.filter(c => c.dimension === 'hygiene'));

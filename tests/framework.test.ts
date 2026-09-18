@@ -8,11 +8,11 @@ import { authInfo, catalogModels, validateCredential } from '../src/auth.ts';
 import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
-import { comparisonKey, comparisonReport, correctness, dimensionScore, median } from '../src/report.ts';
+import { comparisonKey, comparisonReport, correctness, dimensionScore, median, scorecard, stalled } from '../src/report.ts';
 import { agentOf, applicableDimensions, blankTrial, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
-import type { Config, Dimension, ModelConfig, ToolEvent } from '../src/types.ts';
+import type { Config, Dimension, ModelConfig, ToolEvent, Trial } from '../src/types.ts';
 import type { JudgeCall } from '../src/judge.ts';
 
 const root = process.cwd();
@@ -161,6 +161,32 @@ test('a reviewer adds a design score without ever turning its own failures into 
   assert.equal(off.judge, null);
   assert.equal(off.trials[0]!.checks.some(c => c.dimension === 'design'), false);
   assert.equal(off.trials[0]!.judgeNote, undefined);
+});
+
+test('a stall stays out of correctness but never out of sight', () => {
+  const tasks = [{ id: 'a', title: 'Task A' }, { id: 'b', title: 'Task B' }];
+  const candidate = DEFAULT_CONFIG.models[0]!;
+  const trial = (id: string, status: Trial['status'], passed: boolean): Trial => ({
+    ...blankTrial(`${id}-${status}`, candidate, { ...task, id }, 1),
+    status, checks: ['passed', 'failed'].includes(status) ? [{ id: 'c', dimension: 'correctness' as Dimension, passed, evidence: '' }] : [],
+  });
+  // Two models with the same visible score. One of them lost a task to the turn budget and the
+  // other lost nothing, which is the case that made a weak model look equal to a strong one.
+  const even = scorecard('even', [trial('a', 'passed', true), trial('b', 'passed', true)], tasks, 2);
+  const stalling = scorecard('stalling', [trial('a', 'passed', true), trial('b', 'budget', false)], tasks, 2);
+  assert.equal(even.score, 1);
+  assert.equal(stalling.score, 1, 'a stall is still excluded from correctness; that rule is not what changed');
+  assert.equal(even.stalled, 0);
+  assert.equal(stalling.stalled, 1, 'and it is counted');
+  assert.equal(stalling.scoreCountingStalls, 0.5, 'with the size of what the score leaves out');
+  assert.equal(even.scoreCountingStalls, 1);
+  // Auth and quota are the provider refusing, not the model failing to converge. They must not
+  // be swept into the same number, or the rule this benchmark exists to enforce is lost.
+  const refused = scorecard('refused', [trial('a', 'passed', true), trial('b', 'auth_error', false)], tasks, 2);
+  assert.equal(refused.stalled, 0);
+  assert.equal(refused.scoreCountingStalls, 1, 'a provider failure never counts against a model');
+  assert.equal(refused.notRun, 1, 'but it is still visible as not run');
+  assert.equal(stalled([trial('b', 'timeout', false)]), 1, 'running out of time is a stall too');
 });
 
 test('cancelled plans, stale/incomplete manifests and verifier crashes remain distinguishable', async () => {

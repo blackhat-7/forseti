@@ -324,6 +324,26 @@ test('hygiene reads as a gate, never as a score beside correctness', () => {
   assert.match(f.text(120), /Hygiene gate\s+1 of 1 checks failed/, 'a real failure is still stated plainly');
 });
 
+test('a model that ran out of turns says so beside its score', () => {
+  const f = fixture();
+  const good = f.run.trials[0]!;
+  // The exact shape that misled: every graded trial correct, and a second trial that never
+  // finished. Correctness alone reads 100% for a model that only completed half its work.
+  f.app.runs = [{ ...f.run, trials: [good, { ...good, id: 'stalled', task: 'second', status: 'budget', checks: [] }] }];
+  f.key('4', ' ', 'c');
+  const text = f.text(120);
+  assert.match(text, /Stalled/);
+  assert.match(text, /1 stalled/);
+  assert.match(text, /ran out of turns or time/);
+  assert.match(text, /excluded from correctness/);
+
+  // No stall, no line: this must not become standing noise that stops being read.
+  f.key(esc);
+  f.app.runs = [{ ...f.run, trials: [good] }];
+  f.key('c');
+  assert.doesNotMatch(f.text(120), /Stalled/);
+});
+
 test('every run states which credential it will use, reviewer included', () => {
   const f = fixture();
   // Subscription-only is the quiet case, and it must still be stated rather than assumed.

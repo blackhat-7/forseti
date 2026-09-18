@@ -14,6 +14,18 @@ export function correctness(trials: Trial[]) {
   const passed = observed.filter(t => t.checks.filter(c => c.dimension === 'correctness').every(c => c.passed)).length;
   return { passed, total: observed.length, rate: observed.length ? passed / observed.length : null };
 }
+/**
+ * A stall is the model failing to converge inside a declared budget, which is not the same thing
+ * as the provider refusing to answer. Both stay out of correctness — a censored trial is not a
+ * wrong answer, and that rule is why this benchmark exists. But lumping them together under
+ * "not run" hides a real difference between models: across every trial recorded here, all eight
+ * stalls belong to the weakest model and the other two have none, so silently dropping them
+ * flatters exactly the model that earned them. Counted and shown, never scored.
+ */
+export const STALL: Trial['status'][] = ['budget', 'timeout'];
+export function stalled(trials: Trial[]): number {
+  return trials.filter(t => STALL.includes(t.status)).length;
+}
 export function median(values: number[]): number | null {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b), mid = Math.floor(sorted.length / 2);
@@ -41,10 +53,10 @@ export function bar(rate: number | null, width = 10): string {
   const filled = Math.max(0, Math.min(width, Math.round(rate * width)));
   return '█'.repeat(filled) + '░'.repeat(width - filled);
 }
-export type TaskScore = { id: string; title: string; rate: number | null; passed: number; evaluated: number; planned: number };
+export type TaskScore = { id: string; title: string; rate: number | null; passed: number; evaluated: number; planned: number; stalled: number };
 export type Scorecard = {
-  label: string; score: number | null; dimensions: Record<Dimension, number | null>;
-  evaluated: number; planned: number; notRun: number; tasks: TaskScore[];
+  label: string; score: number | null; scoreCountingStalls: number | null; dimensions: Record<Dimension, number | null>;
+  evaluated: number; planned: number; notRun: number; stalled: number; tasks: TaskScore[];
 };
 /**
  * Rolls per-task correctness up by capability, weighting each task equally. `tasks` is the
@@ -67,14 +79,21 @@ export function scorecard(label: string, trials: Trial[], tasks: { id: string; t
   const perTask = tasks.map(t => {
     const subset = trials.filter(x => x.task === t.id);
     const score = correctness(subset);
-    return { id: t.id, title: t.title, rate: score.rate, passed: score.passed, evaluated: score.total, planned: subset.length };
+    return { id: t.id, title: t.title, rate: score.rate, passed: score.passed, evaluated: score.total, planned: subset.length, stalled: stalled(subset) };
   });
   const scored = perTask.filter(t => t.rate !== null);
+  // The same headline, computed as if every stall were a failed trial on its own task. Not the
+  // score; the size of what the score leaves out.
+  const counted = perTask.filter(t => t.rate !== null || t.stalled);
   return {
     label,
     score: scored.length ? scored.reduce((sum, t) => sum + t.rate!, 0) / scored.length : null,
+    scoreCountingStalls: counted.length
+      ? counted.reduce((sum, t) => sum + t.passed / (t.evaluated + t.stalled), 0) / counted.length
+      : null,
     dimensions: Object.fromEntries(DIMENSIONS.map(d => [d, dimensionScore(trials, d).rate])) as Record<Dimension, number | null>,
-    evaluated: trials.filter(usable).length, planned, notRun: trials.filter(t => !usable(t)).length, tasks: perTask,
+    evaluated: trials.filter(usable).length, planned, notRun: trials.filter(t => !usable(t)).length,
+    stalled: stalled(trials), tasks: perTask,
   };
 }
 function seconds(v: number | null) { return v === null ? 'n/a' : `${(v / 1000).toFixed(2)}s`; }
@@ -108,9 +127,10 @@ export function comparisonReport(runs: Run[]): string {
       lines.push(`> **Design is judged, not computed.** A reviewer model (\`${escape(first.judge.provider)}/${escape(first.judge.model)}\`, thinking ${escape(first.judge.thinking)}, ${first.judge.repeat} round(s), majority) answers a fixed set of yes/no questions against an anchored reference, with every defect required to cite a line that exists in the submission. Uncitable defects are discarded. Design is therefore the only dimension that is not reproducible from the artifacts alone, is excluded from correctness, and is only produced for submissions that already passed every correctness check. Changing the reviewer or the rubric starts a new experiment.`, '');
     }
     lines.push('### Scorecard', '', 'Headline is correctness, weighting every task equally. Other dimensions stay separate: a formatting miss is not a wrong answer. Hygiene is a gate, not a rate — valid AST, stdlib-only imports, no eval/exec — so it reads `ok` or names the failures instead of scoring a percentage nobody can lose.', '',
-      '| Candidate | Correct | | Instructions | Tools | Design | Hygiene | Graded |', '|---|---:|---|---:|---:|---:|---:|---:|');
+      `**Stalled** counts trials that ran out of the ${first.options.maxTurns}-turn or ${first.options.timeout}s budget while still working. They are excluded from correctness, because a censored trial is not a wrong answer — but a model that cannot finish inside the budget is not equal to one that finishes every time, and the excluded trials are rarely spread evenly. Read the score and this column together.`, '',
+      '| Candidate | Correct | | Stalled | Instructions | Tools | Design | Hygiene | Graded |', '|---|---:|---|---:|---:|---:|---:|---:|---:|');
     for (const s of cards) {
-      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${gate(dimensionScore(candidates.find(c => c.label === s.label)!.trials, 'hygiene'))} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
+      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${s.stalled ? `**${s.stalled}** · ${pct(s.scoreCountingStalls)} if counted` : '0'} | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${gate(dimensionScore(candidates.find(c => c.label === s.label)!.trials, 'hygiene'))} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
     }
     const suiteTasks = first.tasks;
     const caps = cards.map(s => byCapability(s, suiteTasks));
