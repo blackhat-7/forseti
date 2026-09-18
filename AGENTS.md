@@ -34,7 +34,7 @@ npm run demo                       # 36 synthetic trials, no provider needed
 2. **Pick one task** — the top unchecked line in `PLAN.md`. Mark it `[~]`.
 3. **Do only that task.** Read the code before changing it.
 4. **Verify** with the task's own done-check plus `npm run check && npm test`.
-5. **Leave the trail.** Tick `[x]` in `PLAN.md`. Rewrite `PROGRESS.md`. Append to `DECISIONS.md` if you chose something a later reader might undo. Commit, saying what and why.
+5. **Leave the trail.** Tick `[x]` in `PLAN.md`. Rewrite `PROGRESS.md`. Append to `DECISIONS.md` if you chose something a later reader might undo. Commit saying what and why, then `git push`.
 6. **Stop.** Tests green, nothing half-done.
 
 **A task is not finished until step 5 is finished.** Report honestly at step 4: a failing check gets written down, never worked around.
@@ -44,6 +44,7 @@ npm run demo                       # 36 synthetic trials, no provider needed
 - **Never make a model look wrong for a harness failure.** Auth, quota, timeout and crash are `not-run`, excluded from scores.
 - **Never present controls, single tasks or small samples as model rankings.**
 - **Never expose hidden answers, verifiers, credentials or transcripts to a benchmark agent.**
+- **This repository is public.** Nothing you commit may contain a credential, a real transcript excerpt, an employer or product name, or a production path. Suite fixtures are invented data. A `gitleaks` pre-commit hook is the backstop, not the check.
 - **Never read, copy, refresh or rotate a credential.** No metered API key without an explicit `--auth env`.
 - **Do not broaden the sandbox.** Its denials are the security boundary and are covered by tests.
 - Anything that changes comparability goes in `comparisonKey`, so unlike runs never pool.
