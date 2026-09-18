@@ -11,9 +11,8 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **Do not trust a one-repeat run.** A single full-suite repeat read 90/91/93 and was briefly written up as "the models are indistinguishable". It was a lucky draw for Haiku; twelve tasks at one repetition is a dozen coin flips.
 - **Every trial that ever ran out of turns or time is Haiku's** — 8 of them, none for Sonnet or Opus. They stay out of correctness, but the report and TUI now show a `Stalled` count and the score recomputed with stalls as failures. On the run that exposed it, Haiku reads `83%` with `1 · 71% if counted`.
 - **`json-only` used to fail 81/81 and now separates models.** It demanded bare text, which every Claude Code model fails because it fences its final answer. One fence now passes; a preamble or trailing note still fails. Re-graded on every recorded answer: Haiku **24%**, Sonnet **81%**, Opus **75%**.
-- `claude-code/opus` is now an enabled model. Codex OAuth is still rejected server-side; Kimi quota is still exhausted.
+- `claude-code/opus` is now an enabled model. Codex OAuth is still rejected server-side; Kimi quota is still exhausted. Public at **https://github.com/blackhat-7/forseti**, tracking `origin/main`.
 - Full battery after every change below: `npm run check` clean · `npm test` **52/52** · `npm run test:suite` **12 tasks / 24 controls, reference 89/89, baseline 56/89 rejected on all 12** · `TMPDIR="$PWD/.tmp" npm run test:terminal` **PASS**. `npm run test:judge` was **not** re-run.
-- Public at **https://github.com/blackhat-7/forseti**, tracking `origin/main`.
 
 ## Done this session
 
