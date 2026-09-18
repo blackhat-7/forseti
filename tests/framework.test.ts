@@ -8,7 +8,7 @@ import { authInfo, catalogModels, validateCredential } from '../src/auth.ts';
 import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
-import { comparisonKey, comparisonReport, correctness, dimensionScore, median, scorecard, stalled, checkShare } from '../src/report.ts';
+import { comparisonKey, comparisonReport, correctness, dimensionScore, median, scorecard, scoreError, separated, stalled, checkShare } from '../src/report.ts';
 import { agentOf, applicableDimensions, blankTrial, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -102,6 +102,9 @@ test('all independent controls run through real sandbox, persist and compare wit
   assert.equal(listRuns(dir)[0].status, 'completed');
   const report = comparisonReport([run]);
   assert.match(report, /Synthetic controls/); assert.match(report, /actual=/); assert.match(report, /expected=/); assert.match(report, /No claim about hidden model reasoning/);
+  // A table of percentages invites a ranking, so the report states whether it can support one.
+  assert.match(report, /Can this run tell them apart\?/);
+  assert.match(report, /This run separates them\.|are tied here/);
   const ablation = structuredClone(run); ablation.options.lane = 'prompt';
   assert.match(comparisonReport([run, ablation]), /Not a controlled model comparison/);
   assert.equal(correctness([]).rate, null); assert.equal(dimensionScore([], 'tools').rate, null); assert.equal(median([]), null);
@@ -161,6 +164,35 @@ test('a reviewer adds a design score without ever turning its own failures into 
   assert.equal(off.judge, null);
   assert.equal(off.trials[0]!.checks.some(c => c.dimension === 'design'), false);
   assert.equal(off.trials[0]!.judgeNote, undefined);
+});
+
+test('a gap inside the noise is reported as a tie, not a ranking', () => {
+  const tasks = Array.from({ length: 12 }, (_, i) => ({ id: `t${i}`, title: `Task ${i}` }));
+  const candidate = DEFAULT_CONFIG.models[0]!;
+  const trial = (id: string, rep: number, passed: boolean): Trial => ({
+    ...blankTrial(`${id}-${rep}`, candidate, { ...task, id }, rep),
+    status: passed ? 'passed' : 'failed',
+    checks: [{ id: 'c', dimension: 'correctness' as Dimension, passed, evidence: '' }],
+  });
+  const card = (label: string, wins: number, repeats: number) => scorecard(
+    label,
+    tasks.flatMap((t, i) => Array.from({ length: repeats }, (_, r) => trial(t.id, r + 1, i < wins))),
+    tasks, tasks.length * repeats,
+  );
+
+  // One task apart over twelve tasks is well inside the slack a handful of repetitions carries.
+  const near = separated(card('a', 9, 3), card('b', 8, 3))!;
+  assert.equal(near.clear, false, 'a one-task gap is not a result');
+  // Five tasks apart is not.
+  const far = separated(card('a', 11, 3), card('b', 6, 3))!;
+  assert.equal(far.clear, true);
+
+  // More repetitions shrink the bar, so the same gap can go from a draw to a result.
+  assert.ok(scoreError(card('a', 9, 9))! < scoreError(card('a', 9, 3))!);
+  // A task that passed every time still admits it might not have. Otherwise the report claims a
+  // precision it has not earned and calls every gap a ranking.
+  assert.ok(scoreError(card('a', 12, 3))! > 0, 'a clean sweep is not zero uncertainty');
+  assert.equal(scoreError(scorecard('empty', [], tasks, 0)), null);
 });
 
 test('partial credit says how much of a task was right, without becoming the headline', () => {

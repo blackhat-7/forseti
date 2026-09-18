@@ -31,6 +31,37 @@ export function checkShare(trials: Trial[]): number | null {
   }, 0) / observed.length;
 }
 /**
+ * How far the headline would move if the same run happened again. Each task is a handful of
+ * coin flips, and the suite score averages them, so a small number of repetitions carries a lot
+ * of slack: at one repetition this suite is worth about ±13 points, which is wider than most of
+ * the gaps anyone wants to read out of it.
+ *
+ * The rate is smoothed before the variance is taken. Three passes out of three is not proof that
+ * a task cannot fail, and letting it claim zero uncertainty is how a report states a ranking it
+ * has not earned.
+ */
+export function scoreError(card: Scorecard): number | null {
+  const scored = card.tasks.filter(t => t.rate !== null && t.evaluated > 0);
+  if (!scored.length) return null;
+  const variance = scored.reduce((sum, t) => {
+    const smoothed = (t.passed + 1) / (t.evaluated + 2);
+    return sum + (smoothed * (1 - smoothed)) / t.evaluated;
+  }, 0);
+  return Math.sqrt(variance) / scored.length;
+}
+/**
+ * Whether two candidates are far enough apart to be called apart. Two standard errors of the
+ * difference is the bar; below it the honest answer is that this run cannot tell them apart,
+ * which is a result about the suite rather than about either candidate.
+ */
+export function separated(a: Scorecard, b: Scorecard): { gap: number; bar: number; clear: boolean } | null {
+  const ea = scoreError(a), eb = scoreError(b);
+  if (a.score === null || b.score === null || ea === null || eb === null) return null;
+  const bar = 2 * Math.sqrt(ea ** 2 + eb ** 2);
+  const gap = Math.abs(a.score - b.score);
+  return { gap, bar, clear: gap > bar };
+}
+/**
  * A stall is the model failing to converge inside a declared budget, which is not the same thing
  * as the provider refusing to answer. Both stay out of correctness — a censored trial is not a
  * wrong answer, and that rule is why this benchmark exists. But lumping them together under
@@ -146,9 +177,25 @@ export function comparisonReport(runs: Run[]): string {
     lines.push('### Scorecard', '', 'Headline is correctness, weighting every task equally. Other dimensions stay separate: a formatting miss is not a wrong answer. Hygiene is a gate, not a rate — valid AST, stdlib-only imports, no eval/exec — so it reads `ok` or names the failures instead of scoring a percentage nobody can lose.', '',
       `**Correct** is the headline: the share of tasks a candidate got entirely right, weighting every task equally. **Checks** is the share of individual correctness checks it passed, averaged the same way — partial credit, for reading beside the headline and never instead of it. A task is done or it is not, so a high Checks beside a low Correct means close but never complete, which is a different thing from cannot do it.`, '',
       `**Stalled** counts trials that ran out of the ${first.options.maxTurns}-turn or ${first.options.timeout}s budget while still working. They are excluded from correctness, because a censored trial is not a wrong answer — but a model that cannot finish inside the budget is not equal to one that finishes every time, and the excluded trials are rarely spread evenly. Read the score and this column together.`, '',
-      '| Candidate | Correct | | Checks | Stalled | Instructions | Tools | Design | Hygiene | Graded |', '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|');
+      '**±** is how far the headline would move if the same run happened again. A gap between two candidates smaller than the two errors combined is not a difference this run can see; the ranking check below says which pairs clear it.', '',
+      '| Candidate | Correct | | ± | Checks | Stalled | Instructions | Tools | Design | Hygiene | Graded |', '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|');
     for (const s of cards) {
-      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${pct(s.checkScore)} | ${s.stalled ? `**${s.stalled}** · ${pct(s.scoreCountingStalls)} if counted` : '0'} | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${gate(dimensionScore(candidates.find(c => c.label === s.label)!.trials, 'hygiene'))} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
+      const error = scoreError(s);
+      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${error === null ? 'n/a' : `±${(error * 100).toFixed(1)}`} | ${pct(s.checkScore)} | ${s.stalled ? `**${s.stalled}** · ${pct(s.scoreCountingStalls)} if counted` : '0'} | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${gate(dimensionScore(candidates.find(c => c.label === s.label)!.trials, 'hygiene'))} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
+    }
+    // Stated next to the scorecard, because a table of percentages invites a ranking whether or
+    // not the run can support one, and the reader has no way to tell from the numbers alone.
+    if (cards.length > 1) {
+      const verdicts = [];
+      for (let a = 0; a < cards.length; a++) for (let b = a + 1; b < cards.length; b++) {
+        const call = separated(cards[a]!, cards[b]!);
+        if (!call) continue;
+        const [ahead, behind] = cards[a]!.score! >= cards[b]!.score! ? [cards[a]!, cards[b]!] : [cards[b]!, cards[a]!];
+        verdicts.push(call.clear
+          ? `- **${escape(ahead.label)} over ${escape(behind.label)}**: ${(call.gap * 100).toFixed(0)} points apart, clear of the ${(call.bar * 100).toFixed(0)}-point bar. This run separates them.`
+          : `- **${escape(ahead.label)} and ${escape(behind.label)} are tied here**: ${(call.gap * 100).toFixed(0)} points apart, inside the ${(call.bar * 100).toFixed(0)}-point bar. This run cannot tell them apart; do not read the order above as a ranking. More repetitions shrink the bar slowly — closing a gap this size takes roughly ${Math.ceil(2 * (call.bar / 2) ** 2 / Math.max(call.gap / 2, 0.001) ** 2)}x the repetitions — so the faster fix is tasks on which they actually differ.`);
+      }
+      if (verdicts.length) lines.push('', '**Can this run tell them apart?** A gap must beat two standard errors of the difference before it is a result rather than a draw.', '', ...verdicts);
     }
     const suiteTasks = first.tasks;
     const caps = cards.map(s => byCapability(s, suiteTasks));
