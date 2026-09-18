@@ -9,7 +9,7 @@ Last full pass: 2026-09-16, Darwin 25.0.0 arm64, Node 26.0.0 (`engines` requires
 | Command | Result | What it covers |
 |---|---|---|
 | `npm run check` | clean | TypeScript strict, no emit, over `src/`, `tests/`, `tools/`. |
-| `npm test` | **50/50 pass** | Framework checks + TUI checks. See below. |
+| `npm test` | **52/52 pass** | Framework checks + TUI checks. See below. |
 | `npm run test:suite` | **12/12 references pass, 12/12 flawed baselines rejected** | Suite-only validation with no framework import. |
 | `TMPDIR="$PWD/.tmp" npm run test:terminal` | PASS | The real TUI in a real PTY, end to end. |
 
@@ -33,6 +33,7 @@ Accounting honesty
 - read-only OAuth preflight agrees with Pi five-minute validity window
 - invalid submissions cannot inflate correctness or overwrite censored outcomes
 - a stall stays out of correctness but never out of sight, and a provider refusal is not a stall
+- partial credit says how much of a task was right, without becoming the headline
 - cancelled plans, stale/incomplete manifests and verifier crashes remain distinguishable
 
 Runner and reporting
@@ -44,7 +45,7 @@ Runner and reporting
 
 ### TUI checks (`tests/ui.test.ts`)
 
-Layout at 40/80/120 columns; terminal-escape sanitising (OSC/DCS/ANSI/C1/bidi); navigation, toggles, confirmed removal and empty states; the filtered native catalogue picker; the test wizard; **payment consent for metered and unknown billing**; preflight using the effective selected auth; cancel-from-every-form; persistence rollback on save failure; run rejection clearing busy state; settings bounds; **a model that ran out of turns says so beside its score**.
+Layout at 40/80/120 columns; terminal-escape sanitising (OSC/DCS/ANSI/C1/bidi); navigation, toggles, confirmed removal and empty states; the filtered native catalogue picker; the test wizard; **payment consent for metered and unknown billing**; preflight using the effective selected auth; cancel-from-every-form; persistence rollback on save failure; run rejection clearing busy state; settings bounds; **a model that ran out of turns says so beside its score**; **a half-solved task shows how much was right**.
 
 ### Suite checks (`npm run test:suite`)
 

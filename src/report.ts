@@ -15,6 +15,22 @@ export function correctness(trials: Trial[]) {
   return { passed, total: observed.length, rate: observed.length ? passed / observed.length : null };
 }
 /**
+ * How much of a task was right, for tasks that were not entirely right. `correctness` is all or
+ * nothing per trial, so one wrong check out of nine scores the same as nine out of nine — and the
+ * difference is real: one recorded model solves 0% of `weekly-coverage` while passing 80% of its
+ * checks, which is "close but never complete", not "cannot do it". Averaged per trial and then per
+ * task, like the headline, so a task with many checks cannot outweigh a task with one. A flat
+ * check rate does not do that, and on this record it reverses the model order.
+ */
+export function checkShare(trials: Trial[]): number | null {
+  const observed = trials.filter(t => usable(t) && t.checks.some(c => c.dimension === 'correctness'));
+  if (!observed.length) return null;
+  return observed.reduce((sum, t) => {
+    const checks = t.checks.filter(c => c.dimension === 'correctness');
+    return sum + checks.filter(c => c.passed).length / checks.length;
+  }, 0) / observed.length;
+}
+/**
  * A stall is the model failing to converge inside a declared budget, which is not the same thing
  * as the provider refusing to answer. Both stay out of correctness — a censored trial is not a
  * wrong answer, and that rule is why this benchmark exists. But lumping them together under
@@ -53,9 +69,9 @@ export function bar(rate: number | null, width = 10): string {
   const filled = Math.max(0, Math.min(width, Math.round(rate * width)));
   return '█'.repeat(filled) + '░'.repeat(width - filled);
 }
-export type TaskScore = { id: string; title: string; rate: number | null; passed: number; evaluated: number; planned: number; stalled: number };
+export type TaskScore = { id: string; title: string; rate: number | null; checkRate: number | null; passed: number; evaluated: number; planned: number; stalled: number };
 export type Scorecard = {
-  label: string; score: number | null; scoreCountingStalls: number | null; dimensions: Record<Dimension, number | null>;
+  label: string; score: number | null; checkScore: number | null; scoreCountingStalls: number | null; dimensions: Record<Dimension, number | null>;
   evaluated: number; planned: number; notRun: number; stalled: number; tasks: TaskScore[];
 };
 /**
@@ -79,7 +95,7 @@ export function scorecard(label: string, trials: Trial[], tasks: { id: string; t
   const perTask = tasks.map(t => {
     const subset = trials.filter(x => x.task === t.id);
     const score = correctness(subset);
-    return { id: t.id, title: t.title, rate: score.rate, passed: score.passed, evaluated: score.total, planned: subset.length, stalled: stalled(subset) };
+    return { id: t.id, title: t.title, rate: score.rate, checkRate: checkShare(subset), passed: score.passed, evaluated: score.total, planned: subset.length, stalled: stalled(subset) };
   });
   const scored = perTask.filter(t => t.rate !== null);
   // The same headline, computed as if every stall were a failed trial on its own task. Not the
@@ -88,6 +104,7 @@ export function scorecard(label: string, trials: Trial[], tasks: { id: string; t
   return {
     label,
     score: scored.length ? scored.reduce((sum, t) => sum + t.rate!, 0) / scored.length : null,
+    checkScore: scored.length ? scored.reduce((sum, t) => sum + t.checkRate!, 0) / scored.length : null,
     scoreCountingStalls: counted.length
       ? counted.reduce((sum, t) => sum + t.passed / (t.evaluated + t.stalled), 0) / counted.length
       : null,
@@ -110,7 +127,7 @@ export function scorecards(runs: Run[]): { cards: Scorecard[]; tasks: Run['tasks
 }
 export function comparisonReport(runs: Run[]): string {
   if (!runs.length) throw new Error('Select at least one saved run');
-  const lines = ['# Forseti · evidence, not just rankings', '', 'Correctness is the fraction of evaluated trials passing every correctness check. Other dimensions are explicit check pass rates, not subjective model grades. Tasks without a dimension are N/A, not failures. Infrastructure/auth/limits/cancellation are excluded, counted, and shown separately. If outcomes are missing, overall rates are not a paired estimate; use the matched-case observations.', ''];
+  const lines = ['# Forseti · evidence, not just rankings', '', 'Correctness is the fraction of evaluated trials passing every correctness check; the Checks column beside it gives partial credit for the ones that did not. Other dimensions are explicit check pass rates, not subjective model grades. Tasks without a dimension are N/A, not failures. Infrastructure/auth/limits/cancellation are excluded, counted, and shown separately. If outcomes are missing, overall rates are not a paired estimate; use the matched-case observations.', ''];
   const groups = Map.groupBy(runs, comparisonKey);
   if (groups.size > 1) lines.push('> **Not a controlled model comparison:** suite, selected tasks, harness, lane, settings or environment differ. Results are split into separate groups. Do not attribute cross-group differences to models. A prompt/tool lane change is an elicitation + harness ablation, not a pure model change.', '');
   for (const [key, group] of groups) {
@@ -127,10 +144,11 @@ export function comparisonReport(runs: Run[]): string {
       lines.push(`> **Design is judged, not computed.** A reviewer model (\`${escape(first.judge.provider)}/${escape(first.judge.model)}\`, thinking ${escape(first.judge.thinking)}, ${first.judge.repeat} round(s), majority) answers a fixed set of yes/no questions against an anchored reference, with every defect required to cite a line that exists in the submission. Uncitable defects are discarded. Design is therefore the only dimension that is not reproducible from the artifacts alone, is excluded from correctness, and is only produced for submissions that already passed every correctness check. Changing the reviewer or the rubric starts a new experiment.`, '');
     }
     lines.push('### Scorecard', '', 'Headline is correctness, weighting every task equally. Other dimensions stay separate: a formatting miss is not a wrong answer. Hygiene is a gate, not a rate — valid AST, stdlib-only imports, no eval/exec — so it reads `ok` or names the failures instead of scoring a percentage nobody can lose.', '',
+      `**Correct** is the headline: the share of tasks a candidate got entirely right, weighting every task equally. **Checks** is the share of individual correctness checks it passed, averaged the same way — partial credit, for reading beside the headline and never instead of it. A task is done or it is not, so a high Checks beside a low Correct means close but never complete, which is a different thing from cannot do it.`, '',
       `**Stalled** counts trials that ran out of the ${first.options.maxTurns}-turn or ${first.options.timeout}s budget while still working. They are excluded from correctness, because a censored trial is not a wrong answer — but a model that cannot finish inside the budget is not equal to one that finishes every time, and the excluded trials are rarely spread evenly. Read the score and this column together.`, '',
-      '| Candidate | Correct | | Stalled | Instructions | Tools | Design | Hygiene | Graded |', '|---|---:|---|---:|---:|---:|---:|---:|---:|');
+      '| Candidate | Correct | | Checks | Stalled | Instructions | Tools | Design | Hygiene | Graded |', '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|');
     for (const s of cards) {
-      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${s.stalled ? `**${s.stalled}** · ${pct(s.scoreCountingStalls)} if counted` : '0'} | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${gate(dimensionScore(candidates.find(c => c.label === s.label)!.trials, 'hygiene'))} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
+      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${pct(s.checkScore)} | ${s.stalled ? `**${s.stalled}** · ${pct(s.scoreCountingStalls)} if counted` : '0'} | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${gate(dimensionScore(candidates.find(c => c.label === s.label)!.trials, 'hygiene'))} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
     }
     const suiteTasks = first.tasks;
     const caps = cards.map(s => byCapability(s, suiteTasks));
@@ -141,12 +159,14 @@ export function comparisonReport(runs: Run[]): string {
         lines.push(`| ${row.capability} | ${caps.map(rows => `${pct(rows[i]!.rate)} (${rows[i]!.tasks}t)`).join(' | ')} |`);
       }
     }
-    lines.push('', '**Per task** — ● every repetition correct · ◐ some · ○ none · · not graded', '',
+    lines.push('', '**Per task** — ● every repetition correct · ◐ some · ○ none · · not graded. A task that was not fully solved also shows the share of its checks that passed, which is where "close" and "nowhere near" stop looking alike.', '',
       `| Task | ${cards.map(s => escape(s.label)).join(' | ')} |`, `|---|${cards.map(() => '---:').join('|')}|`);
     for (const [i, task] of first.tasks.entries()) {
       const cells = cards.map(s => {
         const t = s.tasks[i]!;
-        return t.rate === null ? '·' : `${t.rate === 1 ? '●' : t.rate === 0 ? '○' : '◐'} ${t.passed}/${t.evaluated}`;
+        if (t.rate === null) return '·';
+        const mark = `${t.rate === 1 ? '●' : t.rate === 0 ? '○' : '◐'} ${t.passed}/${t.evaluated}`;
+        return t.rate === 1 ? mark : `${mark} · ${pct(t.checkRate)} of checks`;
       });
       lines.push(`| ${escape(task.title)} | ${cells.join(' | ')} |`);
     }

@@ -324,16 +324,40 @@ test('hygiene reads as a gate, never as a score beside correctness', () => {
   assert.match(f.text(120), /Hygiene gate\s+1 of 1 checks failed/, 'a real failure is still stated plainly');
 });
 
+test('a half-solved task shows how much was right, without a second headline', () => {
+  const f = fixture();
+  const good = f.run.trials[0]!;
+  const half = {
+    ...good, id: 'half', status: 'failed' as const,
+    checks: [
+      { id: 'one', dimension: 'correctness' as const, passed: true, evidence: 'ok' },
+      { id: 'two', dimension: 'correctness' as const, passed: false, evidence: 'no' },
+    ],
+  };
+  f.app.runs = [{ ...f.run, trials: [half] }];
+  f.key('4', ' ', 'c');
+  assert.match(f.text(120), /50% of checks/, 'half the checks passed, and it says so');
+  assert.doesNotMatch(f.text(120), /\b50%\s+\d+\/\d+ graded/, 'the headline is still the task, not the checks');
+
+  // Nothing half-right means no second number, so the headline is never ambiguous.
+  f.key(esc);
+  f.app.runs = [{ ...f.run, trials: [good] }];
+  f.key('c');
+  assert.doesNotMatch(f.text(120), /of checks/);
+});
+
 test('a model that ran out of turns says so beside its score', () => {
   const f = fixture();
   const good = f.run.trials[0]!;
   // The exact shape that misled: every graded trial correct, and a second trial that never
   // finished. Correctness alone reads 100% for a model that only completed half its work.
-  f.app.runs = [{ ...f.run, trials: [good, { ...good, id: 'stalled', task: 'second', status: 'budget', checks: [] }] }];
+  const solved = { ...good, status: 'passed' as const, checks: [{ id: 'exact', dimension: 'correctness' as const, passed: true, evidence: 'ok' }] };
+  f.app.runs = [{ ...f.run, trials: [solved, { ...good, id: 'stalled', status: 'budget', checks: [] }] }];
   f.key('4', ' ', 'c');
   const text = f.text(120);
   assert.match(text, /Stalled/);
   assert.match(text, /1 stalled/);
+  assert.match(text, /100% scored · 50% if counted/, 'the size of what the score omits, not just the count');
   assert.match(text, /ran out of turns or time/);
   assert.match(text, /excluded from correctness/);
 

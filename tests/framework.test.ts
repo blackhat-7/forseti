@@ -8,7 +8,7 @@ import { authInfo, catalogModels, validateCredential } from '../src/auth.ts';
 import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
-import { comparisonKey, comparisonReport, correctness, dimensionScore, median, scorecard, stalled } from '../src/report.ts';
+import { comparisonKey, comparisonReport, correctness, dimensionScore, median, scorecard, stalled, checkShare } from '../src/report.ts';
 import { agentOf, applicableDimensions, blankTrial, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -161,6 +161,32 @@ test('a reviewer adds a design score without ever turning its own failures into 
   assert.equal(off.judge, null);
   assert.equal(off.trials[0]!.checks.some(c => c.dimension === 'design'), false);
   assert.equal(off.trials[0]!.judgeNote, undefined);
+});
+
+test('partial credit says how much of a task was right, without becoming the headline', () => {
+  const tasks = [{ id: 'wide', title: 'Nine checks' }, { id: 'narrow', title: 'One check' }];
+  const candidate = DEFAULT_CONFIG.models[0]!;
+  const trial = (id: string, passed: number, total: number): Trial => ({
+    ...blankTrial(`${id}-${passed}`, candidate, { ...task, id }, 1),
+    status: 'failed',
+    checks: Array.from({ length: total }, (_, i) => ({ id: `c${i}`, dimension: 'correctness' as Dimension, passed: i < passed, evidence: '' })),
+  });
+  // Close but never complete, on the task with room to be close.
+  const near = scorecard('near', [trial('wide', 8, 9), trial('narrow', 0, 1)], tasks, 2);
+  assert.equal(near.score, 0, 'a task is done or it is not; the headline does not move');
+  assert.equal(near.checkScore, 8 / 9 / 2, 'but how much was right is recorded');
+  assert.equal(near.tasks[0]!.checkRate, 8 / 9);
+
+  // The reason this is averaged per task and not across all checks: the nine-check task would
+  // otherwise drown the one-check task, and on the recorded data that reverses the model order.
+  const lopsided = scorecard('lopsided', [trial('wide', 9, 9), trial('narrow', 0, 1)], tasks, 2);
+  assert.equal(lopsided.checkScore, 0.5, 'one task solved, one not — not 9/10');
+  assert.equal(lopsided.score, 0.5);
+
+  // Everything right means the two numbers agree, so a reader never sees a spurious second score.
+  const perfect = scorecard('perfect', [trial('wide', 9, 9), trial('narrow', 1, 1)], tasks, 2);
+  assert.equal(perfect.score, 1); assert.equal(perfect.checkScore, 1);
+  assert.equal(checkShare([]), null);
 });
 
 test('a stall stays out of correctness but never out of sight', () => {

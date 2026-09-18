@@ -7,16 +7,17 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## State
 
-- Twelve tasks, all hardened enough that their controls reject a near-miss baseline, not the untouched fixture. **The suite does separate these models — by about 36 points.** Across all recorded trials, counting turn/time exhaustion as failure: Haiku **59%**, Sonnet **80%**, Opus **95%** (n=19). The separation lives in `weekly-coverage`, `migration-safety`, `event-ledger`, `shared-count` and `reconcile-plan`.
-- **Do not trust a one-repeat run.** A single full-suite repeat this session read 90/91/93 and was briefly written up as "the models are indistinguishable". It was a lucky draw for Haiku. Twelve tasks at one repetition is a dozen coin flips.
+- Twelve tasks, all hardened enough that their controls reject a near-miss baseline, not the untouched fixture. **The suite does separate these models — by about 36 points.** Across all recorded trials, counting turn/time exhaustion as failure: Haiku **59%**, Sonnet **80%**, Opus **95%** (n=19). Equal weight per task: solved **66/86/91**, checks passed **81/89/96**. The separation lives in `weekly-coverage`, `migration-safety`, `event-ledger`, `shared-count` and `reconcile-plan`.
+- **Do not trust a one-repeat run.** A single full-suite repeat read 90/91/93 and was briefly written up as "the models are indistinguishable". It was a lucky draw for Haiku; twelve tasks at one repetition is a dozen coin flips.
 - **Every trial that ever ran out of turns or time is Haiku's** — 8 of them, none for Sonnet or Opus. They stay out of correctness, but the report and TUI now show a `Stalled` count and the score recomputed with stalls as failures. On the run that exposed it, Haiku reads `83%` with `1 · 71% if counted`.
 - **`json-only` used to fail 81/81 and now separates models.** It demanded bare text, which every Claude Code model fails because it fences its final answer. One fence now passes; a preamble or trailing note still fails. Re-graded on every recorded answer: Haiku **24%**, Sonnet **81%**, Opus **75%**.
 - `claude-code/opus` is now an enabled model. Codex OAuth is still rejected server-side; Kimi quota is still exhausted.
-- Full battery after every change below: `npm run check` clean · `npm test` **50/50** · `npm run test:suite` **12 tasks / 24 controls, reference 89/89, baseline 56/89 rejected on all 12** · `TMPDIR="$PWD/.tmp" npm run test:terminal` **PASS**. `npm run test:judge` was **not** re-run.
+- Full battery after every change below: `npm run check` clean · `npm test` **52/52** · `npm run test:suite` **12 tasks / 24 controls, reference 89/89, baseline 56/89 rejected on all 12** · `TMPDIR="$PWD/.tmp" npm run test:terminal` **PASS**. `npm run test:judge` was **not** re-run.
 - Public at **https://github.com/blackhat-7/forseti**, tracking `origin/main`.
 
 ## Done this session
 
+- **Added partial credit.** A `Checks` column beside `Correct`, averaged per trial then per task so a nine-check task cannot outweigh a one-check task; a flat rate reverses the model order and a test pins that. The per-task table shows the share for anything not fully solved.
 - **Fixed `json-only` and `concise-json`, which graded the chat client.** `unfenced()` in `helpers.mjs` strips one fence wrapping the whole answer before either check runs. The four JSON prompts plus `pause-correction` now state the rule instead of leaving it inferred. 10 packaging cases in `verify-controls.mjs`.
 - **Made stalls visible without scoring them.** `stalled()` and `scoreCountingStalls` in `src/report.ts`; a `Stalled` column in the markdown scorecard and a `Stalled` line in the TUI, both hidden when there are none. A provider refusal is deliberately not a stall. Two tests, one framework and one UI.
 - **Hardened the five tasks that had never failed a correctness check.** `coverage-audit` grew to nine branches with a second impossible state that only a cross-column `CHECK` rules out; `source-map` became a route table declaring five routes and serving three; `artifact-contract` went from five manifests to ten; `regression-boundary` from fifteen cases to twenty; `pause-correction` gained a staged `apply_migration.py` and an operator note that argues against the pause.
@@ -26,7 +27,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## Next
 
-One scoring fix left before the expensive re-measure: report how much of a task was right, not just whether all of it was. Then re-measure with repeats. Measuring with a known-broken instrument is what produced the 90/91/93 mistake.
+The scoring fixes are done. Next is the expensive one: re-measure with repeats at one suite hash, three models, enough repetitions that the gap between two of them beats their own repeat-to-repeat variation. Publish nothing before that — measuring with a known-broken instrument is what produced the 90/91/93 mistake.
 
 ## Gotchas
 

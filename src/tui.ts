@@ -693,7 +693,10 @@ export class Dashboard implements Component, Focusable {
       // each other rather than each getting its own little strip.
       // Drop the run suffix when model names alone are unambiguous, so the bar gets the room.
       const names = cards.map(s => (new Set(cards.map(c => modelOnly(c.label))).size === cards.length ? modelOnly(s.label) : short(s.label)));
-      const barW = Math.max(12, Math.min(84, width - NAME - 20));
+      // The correctness row carries the longest suffix, so the bar yields width to it rather than
+      // pushing partial credit off the end of the line.
+      const partialShown = cards.some(s => s.checkScore !== null && s.checkScore !== s.score);
+      const barW = Math.max(12, Math.min(84, width - NAME - (partialShown ? 36 : 20)));
       const series: [string, (s: Scorecard) => number | null][] = [
         ['Correctness', s => s.score],
         ['Instructions', s => s.dimensions.instructions],
@@ -705,8 +708,12 @@ export class Dashboard implements Component, Focusable {
         row(muted(title));
         for (const [i, s] of cards.entries()) {
           const rate = pick(s);
+          // Partial credit rides on the headline's own line: close but never complete is a real
+          // result, and it must not read as a second, competing score.
+          const partial = title === 'Correctness' && s.checkScore !== null && s.checkScore !== rate
+            ? faint(`  ${pct(s.checkScore)} of checks`) : '';
           row(cell(names[i]!, NAME) + rateInk(rate)(bar(rate, barW)) + ' ' + bold(pct(rate).padStart(4))
-            + (title === 'Correctness' ? faint(`  ${s.evaluated}/${s.planned} graded`) + (s.notRun ? rose(`  ${s.notRun} not run`) : '') : ''));
+            + (title === 'Correctness' ? partial + faint(`  ${s.evaluated}/${s.planned} graded`) + (s.notRun ? rose(`  ${s.notRun} not run`) : '') : ''));
         }
         row();
       }
