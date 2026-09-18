@@ -75,6 +75,15 @@
       "auth": "cli",
       "enabled": true,
       "thinking": "off"
+    },
+    {
+      "id": "claude-code-opus",
+      "label": "Claude opus · via Claude Code",
+      "provider": "claude-code",
+      "model": "opus",
+      "auth": "cli",
+      "enabled": true,
+      "thinking": "off"
     }
   ],
   "judge": {

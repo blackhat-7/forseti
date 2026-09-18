@@ -1,9 +1,13 @@
 [
   {"name": "domestic_light",           "row": {"weight_kg": 10.0, "destination": "domestic",      "insured_value": 0,    "express": false}},
   {"name": "domestic_light_again",     "row": {"weight_kg": 12.5, "destination": "domestic",      "insured_value": 0,    "express": false}},
-  {"name": "domestic_at_limit",        "row": {"weight_kg": 30.0, "destination": "domestic",      "insured_value": 0,    "express": false}},
+  {"name": "domestic_declared_limit",  "row": {"weight_kg": 30.0, "destination": "domestic",      "insured_value": 500,  "express": false}},
   {"name": "domestic_over_limit",      "row": {"weight_kg": 31.0, "destination": "domestic",      "insured_value": 0,    "express": false}},
+  {"name": "domestic_express_over",    "row": {"weight_kg": 31.0, "destination": "domestic",      "insured_value": 500,  "express": true}},
   {"name": "intl_insured_at_limit",    "row": {"weight_kg": 30.0, "destination": "international", "insured_value": 1000, "express": false}},
+  {"name": "intl_insured_express",     "row": {"weight_kg": 5.0,  "destination": "international", "insured_value": 1000, "express": true}},
+  {"name": "intl_express_heavy",       "row": {"weight_kg": 31.0, "destination": "international", "insured_value": 1000, "express": true}},
   {"name": "intl_express",             "row": {"weight_kg": 5.0,  "destination": "international", "insured_value": 999,  "express": true}},
+  {"name": "intl_express_over",        "row": {"weight_kg": 31.0, "destination": "international", "insured_value": 999,  "express": true}},
   {"name": "intl_insured_just_under",  "row": {"weight_kg": 5.0,  "destination": "international", "insured_value": 999,  "express": false}}
 ]

@@ -9,8 +9,8 @@ Last full pass: 2026-09-16, Darwin 25.0.0 arm64, Node 26.0.0 (`engines` requires
 | Command | Result | What it covers |
 |---|---|---|
 | `npm run check` | clean | TypeScript strict, no emit, over `src/`, `tests/`, `tools/`. |
-| `npm test` | **29/29 pass** | 14 framework checks + 15 TUI checks. See below. |
-| `npm run test:suite` | **9/9 references pass, 9/9 flawed baselines rejected** | Suite-only validation with no framework import. |
+| `npm test` | **48/48 pass** | Framework checks + TUI checks. See below. |
+| `npm run test:suite` | **12/12 references pass, 12/12 flawed baselines rejected** | Suite-only validation with no framework import. |
 | `TMPDIR="$PWD/.tmp" npm run test:terminal` | PASS | The real TUI in a real PTY, end to end. |
 
 Reproduce all four:
@@ -49,9 +49,9 @@ Layout at 40/80/120 columns; terminal-escape sanitising (OSC/DCS/ANSI/C1/bidi); 
 
 Runs each task's hidden verifier against a correct reference and a deliberately flawed baseline, without loading any framework code.
 
-- 9 tasks × 2 controls = 18 control gradings
-- 56 checks per control set: the reference passes 56/56; the flawed baseline passes 43/56 and is rejected on **all 9 tasks**
-- 11 tool-trace checks, 9 empty-trace grader checks, 10 hygiene-probe cases, 9 observation regressions, 4 diagnostic assertions
+- 12 tasks × 2 controls = 24 control gradings
+- 89 checks per control set: the reference passes 89/89; the flawed baseline passes 56/89 and is rejected on **all 12 tasks**
+- 13 tool-trace checks, 9 empty-trace grader checks, 10 hygiene-probe cases, 9 observation regressions, 4 diagnostic assertions
 - Every reference passes every check; every baseline is rejected on at least one check
 
 A verifier that passed both controls would be silently useless, so this is the gate for adding a task.

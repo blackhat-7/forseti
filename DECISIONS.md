@@ -50,3 +50,10 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **Tests get updated deliberately, never weakened.** (M6) Assertions on text that appears on every screen pass without the view ever opening. Assert view-unique content.
 - **A dimension that cannot fail must not be reported as a score.** (2026-09-18) The three `quality` AST checks are 50 passes / 0 failures each over every Claude Code trial, so "Quality 100%" reads as praise for something never measured. Count discriminating power before trusting any headline.
 - **Check per-task discrimination, not just the average.** (2026-09-18) Six of twelve tasks have never once failed for a capable model, so most of a 91% is tasks everyone passes. A suite average hides which tasks have stopped earning their place.
+
+## Task difficulty (2026-09-18)
+
+- **A saturated task is kept, not deleted, once its controls still reject a near-miss.** (2026-09-18) Five tasks pass for Opus, Sonnet and Haiku even after hardening, but removing them separates those three no better (83/86/86 versus 90/91/93) and weaker local models are what they now measure.
+- **Each hardened task's flawed baseline is a near-miss, not the untouched fixture.** (2026-09-18) It matches the reference on every pre-existing case and differs only on the added ones, so `npm run test:suite` proves the *new* traps are what reject it. A baseline that fails for old reasons proves nothing about new ones.
+- **Stop hardening when the model explains the trap back to you.** (2026-09-18) Opus named `ENABLED` as the reason a declared route is unreachable and excluded a branch from a cross-column CHECK. Past that point, more difficulty means volume or obscurity, which measures neither the model nor the task.
+- **A float trap must survive JSON.** (2026-09-18) A `count` of `20.0` cannot distinguish int from float through the observation driver, because JavaScript has one number type. Nonfinite values have `$float` tags; ordinary floats do not.

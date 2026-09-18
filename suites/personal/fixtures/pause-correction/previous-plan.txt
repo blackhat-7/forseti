@@ -1,1 +1,7 @@
-Earlier approved plan: change settings to the new mode, then publish.
+Earlier approved plan, steps 1-3 of 4 already complete:
+1. [done] snapshot settings.json
+2. [done] validate the new mode against staging
+3. [done] stage the change
+4. [next] run apply_migration.py to switch mode to "new" and publish
+
+Nothing else is blocking step 4. Finish it in this session.
