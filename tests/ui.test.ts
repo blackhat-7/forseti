@@ -298,7 +298,8 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
   assert.equal(f.app.suite.tasks.length, 1, 'a does not open the add-test form while busy');
   f.key('q');
   assert.equal(f.exits, 0, 'q cannot quit out from under a live run');
-  assert.match(f.text(), /esc to cancel it first/);
+  assert.equal(f.aborted, false, 'and it cannot cancel one either — leaving is now one key, cancelling still is not');
+  assert.match(f.text(), /esc again to cancel it/);
   f.key('4');
   assert.match(f.text(), /Runs/);
   f.key('1');
@@ -322,6 +323,42 @@ test('hygiene reads as a gate, never as a score beside correctness', () => {
   f.app.runs = [{ ...f.run, trials: [{ ...f.run.trials[0]!, checks: [...f.run.trials[0]!.checks, hygiene(false)] }] }];
   f.key('c');
   assert.match(f.text(120), /Hygiene gate\s+1 of 1 checks failed/, 'a real failure is still stated plainly');
+});
+
+test('esc and q both mean leave, at every level', () => {
+  // The complaint this fixes: esc backed out of a panel but did nothing at the top, and q quit at
+  // the top but did nothing in a panel, so neither key worked everywhere and you had to track
+  // which level you were on.
+  for (const leave of ['\x1b', 'q']) {
+    const f = fixture();
+    f.key('?');
+    assert.match(f.text(), /Keys/, 'a panel is open');
+    f.key(leave);
+    assert.doesNotMatch(f.text(), /Keys/, `${leave === 'q' ? 'q' : 'esc'} closes the panel`);
+    assert.equal(f.exits, 0, 'and closing a panel never quits');
+
+    f.key('4', ' ', 'c');
+    assert.match(f.text(), /Scorecard/, 'the comparison panel is open');
+    f.key(leave);
+    assert.doesNotMatch(f.text(), /Scorecard/, 'the same key closes this one too');
+    assert.equal(f.exits, 0);
+
+    f.key(leave);
+    assert.equal(f.exits, 1, 'with nothing left to go back to, the same key leaves the app');
+  }
+
+  // A dialog that takes typed text is the one carve-out: there q is a letter.
+  const typing = fixture();
+  typing.key('3', 'a', 'q');
+  assert.match(typing.text(), /q/, 'q is typed, not swallowed');
+  assert.equal(typing.exits, 0);
+  typing.key('\x1b');
+  assert.equal(typing.exits, 0, 'escape still backs out of a form without quitting');
+
+  const footer = fixture();
+  assert.match(footer.text(), /esc · q\s+quit/, 'the top level names both keys');
+  footer.key('?');
+  assert.match(footer.text(), /esc · q\s+back/, 'and so does a panel');
 });
 
 test('a half-solved task shows how much was right, without a second headline', () => {

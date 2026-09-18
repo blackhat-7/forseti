@@ -154,6 +154,8 @@ export class Dashboard implements Component, Focusable {
   private tasks() { return this.app.suite.tasks.filter(t => !this.app.config.removedTests.includes(t.id)); }
   private enabledTasks() { return this.tasks().filter(t => !this.app.config.disabledTests.includes(t.id)); }
   private models() { return this.app.config.models.filter(m => m.enabled); }
+  /** Dialogs that take typed text, where `q` is a letter and only escape can mean "leave". */
+  private typing(): boolean { return this.dialog === 'test' || this.dialog === 'billing' || this.dialog === 'picker'; }
   private close(): void { this.pendingG = false; this.dialog = undefined; this.list = undefined; this.input.setValue(''); this.pendingDelete = undefined; this.pendingOptions = undefined; }
   private attempt(action: () => void): void {
     try { action(); } catch (error) { this.message = `Error: ${plain(error instanceof Error ? error.message : error)}`; }
@@ -169,12 +171,18 @@ export class Dashboard implements Component, Focusable {
   }
   private key(data: string): void {
     const key = (name: Parameters<typeof matchesKey>[1]) => matchesKey(data, name);
-    if (key('ctrl+c') || key('escape')) {
-      // A dialog is the innermost thing open, so it closes first. Only then does escape reach
-      // the run, which keeps "close this panel" from ever meaning "throw away the run".
+    // One rule, every level: leave whatever you are looking at. A dialog is the innermost thing
+    // open, so it closes first; only then does the key reach the run, which keeps "close this
+    // panel" from ever meaning "throw away the run"; and with nothing open there is nowhere left
+    // to go back to, so it leaves. `q` means the same thing wherever it is not typed text, because
+    // having to remember which of two keys this level wants is the whole complaint.
+    if (key('ctrl+c') || key('escape') || (data === 'q' && !this.typing())) {
       if (this.dialog) this.close();
-      else if (this.controller) { this.controller.abort(); this.message = 'Cancelling… keeping completed evidence.'; }
-      else if (key('ctrl+c')) this.exit();
+      else if (this.controller) {
+        if (data === 'q') this.message = 'A run is in progress. Press esc again to cancel it.';
+        else { this.controller.abort(); this.message = 'Cancelling… keeping completed evidence.'; }
+      } else if (this.refreshing && data === 'q') this.message = 'Refreshing metadata. Press esc to stop waiting.';
+      else this.exit();
       return;
     }
     if (this.dialog) { if (!this.controller) this.dialogKey(data); return; }
@@ -191,8 +199,7 @@ export class Dashboard implements Component, Focusable {
       return;
     }
     // Everything past here changes configuration or starts work, and waits for the run to end.
-    if (this.controller || this.refreshing) { if (data === 'q') this.message = 'A run is in progress. Press esc to cancel it first.'; return; }
-    if (data === 'q') { this.exit(); return; }
+    if (this.controller || this.refreshing) return;
     if (data === 'r') { this.preflight(); return; }
     if (data === 'R') { void this.refresh(); return; }
     if (data === '+' || data === '=' || data === '-') {
@@ -591,7 +598,9 @@ export class Dashboard implements Component, Focusable {
     const footerStart = lines.length;
     row();
     // Keep status compact; long provider errors remain terminal-safe.
-    const hint = this.dialog ? 'esc back' : this.controller ? 'esc cancel' : '? keys   q quit';
+    // The same two keys do the same thing at every level, so the hint names both every time.
+    const hint = this.dialog ? (this.typing() ? 'esc back' : 'esc · q  back')
+      : this.controller ? 'esc cancel' : '? keys   esc · q  quit';
     const message = truncateToWidth(plain(this.message), Math.max(1, inner - visibleWidth(hint) - 3));
     row(spread(muted(message), faint(hint)));
     const regionLines = region === 'header' ? lines.slice(0, 3) : region === 'body' ? lines.slice(3, footerStart) : region === 'footer' ? lines.slice(footerStart) : lines;
@@ -677,7 +686,7 @@ export class Dashboard implements Component, Focusable {
         ['r', 'review preflight'], ['− +', 'repetitions, or reviewer rounds on Settings'], ['l', 'tools / prompt lane'],
         ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer'], ['R', 'refresh metadata, sends nothing'],
         ['c · ⏎ · e', 'runs: compare, evidence, export'], ['m', 'comparison: scorecard / full report'], ['←→', 'evidence: previous / next trial'],
-        ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc', 'close panel, or cancel a run safely'], ['during a run', 'tabs and ↑↓ work; edits and q wait'], ['q · ctrl+c', 'quit'],
+        ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc · q', 'leave what you are looking at: close a panel, else quit'], ['esc during a run', 'cancel it safely, keeping completed evidence'], ['during a run', 'tabs and ↑↓ work; edits wait'], ['ctrl+c', 'quit'],
       ] as const) row(`${accent(keys)}${' '.repeat(Math.max(2, 14 - keys.length))}${muted(what)}`);
     } else if (this.dialog === 'report' && this.reportMode === 'summary') {
       const { cards, tasks, mixed } = scorecards(this.reportRuns);
@@ -763,7 +772,7 @@ export class Dashboard implements Component, Focusable {
         row(`${cell(plain(task.title), taskW)}${cells.join('')}`);
       }
       row();
-      row(faint('m full report   e export   esc back'));
+      row(faint('m full report   e export'));
     } else {
       head(this.dialog === 'report' ? 'Comparison' : 'Evidence', this.dialog === 'report' ? 'selected runs' : 'observable checks');
       row();
