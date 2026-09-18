@@ -109,19 +109,19 @@ Repair a small decision function. Both metric sets need sufficient samples and f
 - In the live tools lane, read-only structured tasks check there was no `write_file` attempt. Incident and source-map tasks also require reading their public evidence file. A pause legitimately requires no tool calls. Final file preservation is checked independently in both lanes.
 - **Tool checks are omitted only for `lane: "prompt"` or `control: true`, regardless of trace contents.** Optional missing context defaults to live tools (`lane: "tools", control: false`), so an empty trace cannot evade required tool checks. The suite verifier explicitly marks synthetic controls; it does not fabricate traces.
 - The tool execution check deliberately uses an exact, disclosed command. It measures following this small contract, not general shell proficiency. The trace must expose `args.path`, `args.source` and a JSON-encoded Python result.
-- Five Python tasks have three objective AST quality checks each, described below. SQL and structured-answer tasks omit quality checks rather than invent a subjective score. Source/edit restrictions remain independent instruction checks.
+- Five Python tasks have three objective AST hygiene checks each, described below. SQL and structured-answer tasks omit hygiene checks rather than invent a subjective score. Source/edit restrictions remain independent instruction checks.
 
-## Limited code-quality rubric and report evidence
+## Limited code-hygiene rubric and report evidence
 
-The five edited Python modules are assessed on exactly three disclosed quality signals:
+The five edited Python modules are assessed on exactly three disclosed hygiene signals:
 
 1. **AST parses:** the submitted module is syntactically valid Python.
 2. **Static import statements are stdlib-only:** each import is absolute and its root module belongs to the sandbox interpreter's standard-library module set. Relative imports are rejected for these standalone modules.
 3. **No statically named `eval`/`exec` references:** direct names, attribute names and imports from `builtins` are inspected, including aliased imports and wildcard imports from `builtins`.
 
-The grader sends source text to a separate sandboxed AST probe, never imports or executes the candidate module in that probe, and removes the runner's workspace import path before loading analysis libraries. The probe returns AST/import/reference observations; the private host grader decides pass/fail. Invalid syntax fails all three checks. A rejected Python callback propagates as a harness error, not a candidate quality failure. The behavioral checks still execute separately in the sandbox.
+The grader sends source text to a separate sandboxed AST probe, never imports or executes the candidate module in that probe, and removes the runner's workspace import path before loading analysis libraries. The probe returns AST/import/reference observations; the private host grader decides pass/fail. Invalid syntax fails all three checks. A rejected Python callback propagates as a harness error, not a candidate hygiene failure. The behavioral checks still execute separately in the sandbox.
 
-This is a transparent, limited static rubric, not a complete dependency audit, security guarantee or maintainability score. Reflection and arbitrary runtime name construction are not analyzed. Exception handling is not penalized: rollback and rethrow, including `except Exception`, remain allowed. There is no scoring of line count, nesting depth, cleverness or cosmetic shortening. The flawed baselines deliberately pass these quality checks while failing behavior: quality cannot substitute for correctness.
+This is a transparent, limited static rubric, not a complete dependency audit, security guarantee or maintainability score. Reflection and arbitrary runtime name construction are not analyzed. Exception handling is not penalized: rollback and rethrow, including `except Exception`, remain allowed. There is no scoring of line count, nesting depth, cleverness or cosmetic shortening. The flawed baselines deliberately pass these hygiene checks while failing behavior: hygiene cannot substitute for correctness.
 
 Comparison evidence now records **actual versus expected values**, bounded to 600 characters per rendered value with a truncation marker. Execution checks record exit code, timeout, bounded stdout/stderr and invalid-JSON diagnostics. Callback rejection propagates to framework harness-error reporting. File-scope checks identify added, missing and unexpectedly changed paths. Tool evidence identifies missing reads and exact-command attempt results. These are saved grading evidence, not content supplied to models; expected values remain private until grading after completion.
 
@@ -137,7 +137,7 @@ node suites/personal/private/verify-controls.mjs
 - **56/56 reference checks pass.** Baselines pass 43/56 checks, demonstrating that failure is not manufactured by rejecting all their output.
 - **6/6 public Python checks pass on reference code.**
 - **11 synthetic tool-trace assertions pass**, covering prompt/control exemptions, conservative defaults, live empty traces, ordering, execution failure, forbidden writes and filename-only false positives. All **9 actual graders** are also exercised with live empty traces; required tool use fails, while a no-action pause is valid.
-- **10 AST quality probe cases pass**, including invalid syntax, third-party/relative imports, direct/imported/attribute dynamic-evaluation references and an allowed transaction rethrow. Candidate `ast.py` and `json.py` sentinels prove the analysis probe does not import workspace modules.
+- **10 AST hygiene probe cases pass**, including invalid syntax, third-party/relative imports, direct/imported/attribute dynamic-evaluation references and an allowed transaction rethrow. Candidate `ast.py` and `json.py` sentinels prove the analysis probe does not import workspace modules.
 - **4 diagnostic assertions pass:** execution failure, malformed output, propagated unavailable analysis callback and bounded actual/expected evidence.
 - **9 observation regressions pass:** captured serialization/output despite ordinary monkeypatching, pre-import input parsing, immediate raw snapshots and independent host originals, host mutation/file comparisons, immutable driver scope, ledger rows/errors despite forged flags, and SQL metrics-table mutation detection. Temporary control files stay under `suites/personal/private/.tmp`.
 - Controls execute only newly authored, trusted synthetic code through a local Python subprocess. This suite-only verifier is **not a sandbox for arbitrary model output**; model trials must use the framework sandbox.

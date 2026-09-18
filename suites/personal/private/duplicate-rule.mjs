@@ -1,4 +1,4 @@
-import {fixture, preserved, observeCases, equal, check, toolChecks, pythonQuality} from './helpers.mjs';
+import {fixture, preserved, observeCases, equal, check, toolChecks, pythonHygiene} from './helpers.mjs';
 const original = fixture('duplicate-rule');
 
 const SHARED = `RETRYABLE = ("timeout", "throttled", "upstream_5xx")
@@ -66,8 +66,8 @@ export const review = {
 };
 
 export async function grade({files, python, trace, lane, control, agent}) {
-  const quality = await pythonQuality(python, files, 'retries.py');
-  const checks = [...quality];
+  const hygiene = await pythonHygiene(python, files, 'retries.py');
+  const checks = [...hygiene];
   const runs = [];
   for (const fn of ['should_retry_upload','should_retry_convert','should_retry_export']) {
     const records = [];

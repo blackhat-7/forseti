@@ -30,6 +30,8 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **Trial time limit defaults to 180s.** (M20) Measured: the slowest real task needs 89-107s, and the old 90s default was a coin flip. A censored trial costs evidence, which is worse than a hung trial taking longer to give up.
 - **Turn cap stays at 12.** (M20) Unlike the time limit, raising it lets slow trials do more work and spend more plan quota, so it is the user's call. Cycle it with `T` on Home.
 - **The word "failed" never appears for a trial.** (M12) `pass`, `scored` and `not-run` are the three outcomes; "failed" read as "never ran". A UI test asserts this.
+- **`hygiene` is a gate, reported as `ok (30)` or `2 failed`, never a rate.** (2026-09-18) It was called `quality` and drawn as a bar, which read as praise for something never measured: its three AST checks have 0 failures across every recorded trial. Do not restore a percentage here; a UI test asserts no bar appears.
+- **`readRun` maps the legacy `quality` dimension to `hygiene`.** (2026-09-18) Same three checks under a new name, so mapping on read is truthful and keeps older runs readable. Saved manifests are never rewritten.
 
 ## The design reviewer
 

@@ -697,8 +697,8 @@ export class Dashboard implements Component, Focusable {
       const series: [string, (s: Scorecard) => number | null][] = [
         ['Correctness', s => s.score],
         ['Instructions', s => s.dimensions.instructions],
-        ['Quality', s => s.dimensions.quality],
         ['Tool use', s => s.dimensions.tools],
+        ['Design', s => s.dimensions.design],
       ];
       for (const [title, pick] of series) {
         if (cards.every(s => pick(s) === null)) continue;
@@ -708,6 +708,15 @@ export class Dashboard implements Component, Focusable {
           row(cell(names[i]!, NAME) + rateInk(rate)(bar(rate, barW)) + ' ' + bold(pct(rate).padStart(4))
             + (title === 'Correctness' ? faint(`  ${s.evaluated}/${s.planned} graded`) + (s.notRun ? rose(`  ${s.notRun} not run`) : '') : ''));
         }
+        row();
+      }
+      // Hygiene gets a line, not a bar. Its three checks have never failed in any recorded run,
+      // so a full-width 100% beside correctness would read as praise for an unmeasured thing.
+      const hygiene = this.reportRuns.flatMap(r => r.trials).flatMap(t => t.checks.filter(c => c.dimension === 'hygiene'));
+      if (hygiene.length) {
+        const bad = hygiene.filter(c => !c.passed).length;
+        row(muted('Hygiene gate') + '   ' + (bad ? rose(`${bad} of ${hygiene.length} checks failed`) : green(`all ${hygiene.length} passed`))
+          + faint('   valid AST · stdlib only · no eval — a floor, not a score'));
         row();
       }
       // What each model is good at, not just how much of the suite it passed.
@@ -756,7 +765,7 @@ export class Dashboard implements Component, Focusable {
           // A censored trial is recoverable, and the fix is one key away on Home.
           if (trial.status === 'timeout') row(faint(`The model was still working at ${run.options.timeout}s. Raise the limit with t on Home and rerun to get a real outcome.`));
           row();
-          for (const dimension of ['correctness', 'instructions', 'quality', 'tools'] as const) {
+          for (const dimension of ['correctness', 'instructions', 'tools', 'design', 'hygiene'] as const) {
             const checks = trial.checks.filter(c => c.dimension === dimension);
             if (!checks.length) continue;
             const rate = checks.filter(c => c.passed).length / checks.length;

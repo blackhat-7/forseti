@@ -5,7 +5,7 @@ import { atomicJson, files, inside, readText, slug } from './files.ts';
 import type { Capability, Config, Dimension, JudgeConfig, ModelConfig, RunOptions, Suite } from './types.ts';
 
 export const CAPABILITIES: Capability[] = ['evidence', 'restraint', 'exactness', 'scope', 'safety'];
-export const DIMENSIONS: Dimension[] = ['correctness', 'instructions', 'quality', 'tools', 'design'];
+export const DIMENSIONS: Dimension[] = ['correctness', 'instructions', 'hygiene', 'tools', 'design'];
 
 // 180s, not 90s: on the Claude Code harness a real 24-trial run had two trials finish at 84-86s
 // and one censored at the 90s deadline. A budget that censors outcomes buys nothing, and a fast

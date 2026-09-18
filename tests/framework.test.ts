@@ -63,7 +63,8 @@ test('strict settings, explicit billing, instruction-only rubrics and seeded sch
   for (const o of [{ repeat: 0 }, { repeat: 21 }, { timeout: NaN }, { lane: 'shell' }, { seed: -1 }]) assert.throws(() => validateOptions({ ...DEFAULT_OPTIONS, ...o } as typeof DEFAULT_OPTIONS));
   assert.throws(() => validateConfig(root, { ...cfg(), models: [cfg().models[0], cfg().models[0]] }), /Duplicate/);
   assert.throws(() => validateChecks([]));
-  assert.throws(() => validateChecks([{ id: 'x', dimension: 'quality', passed: 'yes', evidence: '' }]));
+  assert.throws(() => validateChecks([{ id: 'x', dimension: 'hygiene', passed: 'yes', evidence: '' }]), /Invalid\/duplicate grader check/, 'passed must be a boolean');
+  assert.throws(() => validateChecks([{ id: 'x', dimension: 'quality', passed: true, evidence: '' }]), /Invalid\/duplicate grader check/, 'quality was renamed to hygiene and is no longer a dimension');
   assert.equal(validateChecks([{ id: 'pause', dimension: 'instructions', passed: true, evidence: 'No change' }]).length, 1);
   const tasks = loadSuite(root, 'suites/personal/suite.json').suite.tasks;
   assert.deepEqual(schedule(cfg().models, tasks, 2, 42), schedule(cfg().models, tasks, 2, 42));
@@ -96,7 +97,7 @@ test('all independent controls run through real sandbox, persist and compare wit
     assert.equal(t.tokens, null); assert.equal(t.estimatedCost, null); assert.equal(t.auth.billing, 'control');
     assert.ok(existsSync(join(dir, 'runs', run.id, 'trials', t.id, 'events.jsonl')));
   }
-  assert.ok(run.trials.some(t => t.checks.some(c => c.dimension === 'quality')));
+  assert.ok(run.trials.some(t => t.checks.some(c => c.dimension === 'hygiene')));
   assert.equal(readFileSync(join(dir, 'runs', run.id, 'harness/src/runner.ts'), 'utf8'), readFileSync(join(dir, 'src/runner.ts'), 'utf8'));
   assert.equal(listRuns(dir)[0].status, 'completed');
   const report = comparisonReport([run]);

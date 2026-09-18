@@ -27,6 +27,15 @@ export function outcome(status: Trial['status']): { kind: 'pass' | 'scored' | 'n
   if (status === 'failed') return { kind: 'scored', text: 'scored' };
   return { kind: 'not-run', text: `not run · ${status.replace('_', ' ')}` };
 }
+/**
+ * Hygiene is a floor gate, so it reports as pass/fail rather than a rate. Every plausible
+ * submission clears it — across every recorded trial its three checks have never once failed —
+ * and a 100% beside correctness reads as praise for something that was never measured.
+ */
+export function gate(score: { passed: number; total: number }): string {
+  if (!score.total) return 'n/a';
+  return score.passed === score.total ? `ok (${score.total})` : `${score.total - score.passed} failed`;
+}
 export function bar(rate: number | null, width = 10): string {
   if (rate === null) return '·'.repeat(width);
   const filled = Math.max(0, Math.min(width, Math.round(rate * width)));
@@ -51,7 +60,7 @@ export function byCapability(card: Scorecard, runTasks: { id: string; capabiliti
 }
 /**
  * One number per model, weighting every task equally so a task with many checks cannot
- * dominate. The headline is correctness; instruction/quality/tool rates stay separate so a
+ * dominate. The headline is correctness; instruction/tool rates stay separate so a
  * formatting miss never reads as a wrong answer.
  */
 export function scorecard(label: string, trials: Trial[], tasks: { id: string; title: string }[], planned: number): Scorecard {
@@ -98,10 +107,10 @@ export function comparisonReport(runs: Run[]): string {
     if (first.judge?.enabled) {
       lines.push(`> **Design is judged, not computed.** A reviewer model (\`${escape(first.judge.provider)}/${escape(first.judge.model)}\`, thinking ${escape(first.judge.thinking)}, ${first.judge.repeat} round(s), majority) answers a fixed set of yes/no questions against an anchored reference, with every defect required to cite a line that exists in the submission. Uncitable defects are discarded. Design is therefore the only dimension that is not reproducible from the artifacts alone, is excluded from correctness, and is only produced for submissions that already passed every correctness check. Changing the reviewer or the rubric starts a new experiment.`, '');
     }
-    lines.push('### Scorecard', '', 'Headline is correctness, weighting every task equally. Other dimensions stay separate: a formatting miss is not a wrong answer.', '',
-      '| Candidate | Correct | | Instructions | Quality | Tools | Design | Graded |', '|---|---:|---|---:|---:|---:|---:|---:|');
+    lines.push('### Scorecard', '', 'Headline is correctness, weighting every task equally. Other dimensions stay separate: a formatting miss is not a wrong answer. Hygiene is a gate, not a rate — valid AST, stdlib-only imports, no eval/exec — so it reads `ok` or names the failures instead of scoring a percentage nobody can lose.', '',
+      '| Candidate | Correct | | Instructions | Tools | Design | Hygiene | Graded |', '|---|---:|---|---:|---:|---:|---:|---:|');
     for (const s of cards) {
-      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.quality)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
+      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${gate(dimensionScore(candidates.find(c => c.label === s.label)!.trials, 'hygiene'))} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
     }
     const suiteTasks = first.tasks;
     const caps = cards.map(s => byCapability(s, suiteTasks));
@@ -122,13 +131,13 @@ export function comparisonReport(runs: Run[]): string {
       lines.push(`| ${escape(task.title)} | ${cells.join(' | ')} |`);
     }
     lines.push('', '### Detail', '');
-    lines.push('| Candidate | Correct trials | Instructions | Quality checks | Tool checks | Design checks | Evaluated / planned | Non-model outcomes |', '|---|---:|---:|---:|---:|---:|---:|---|');
+    lines.push('| Candidate | Correct trials | Instructions | Tool checks | Design checks | Hygiene gate | Evaluated / planned | Non-model outcomes |', '|---|---:|---:|---:|---:|---:|---:|---|');
     for (const c of candidates) {
       const score = correctness(c.trials);
       const failures = Object.entries(Object.groupBy(c.trials.filter(t => !usable(t)), t => t.status)).map(([s, rows]) => `${s}: ${rows!.length}`).join(', ') || 'none';
       const planned = c.run.planned / c.run.models.length;
       const design = dimensionScore(c.trials, 'design');
-      lines.push(`| ${escape(c.label)} | ${pct(score.rate)} (${score.passed}/${score.total}) | ${pct(dimensionScore(c.trials, 'instructions').rate)} | ${pct(dimensionScore(c.trials, 'quality').rate)} | ${pct(dimensionScore(c.trials, 'tools').rate)} | ${pct(design.rate)} (${design.passed}/${design.total}) | ${c.trials.filter(usable).length}/${planned} | ${failures}${c.trials.length < planned ? `; unrecorded: ${planned - c.trials.length}` : ''} |`);
+      lines.push(`| ${escape(c.label)} | ${pct(score.rate)} (${score.passed}/${score.total}) | ${pct(dimensionScore(c.trials, 'instructions').rate)} | ${pct(dimensionScore(c.trials, 'tools').rate)} | ${pct(design.rate)} (${design.passed}/${design.total}) | ${gate(dimensionScore(c.trials, 'hygiene'))} | ${c.trials.filter(usable).length}/${planned} | ${failures}${c.trials.length < planned ? `; unrecorded: ${planned - c.trials.length}` : ''} |`);
     }
     const notes = candidates.flatMap(c => c.trials.filter(t => t.judgeNote).map(t => `- ${escape(c.label)} / \`${escape(t.task)}\` repeat ${t.repetition}: ${escape(t.judgeNote!)}`));
     if (notes.length) lines.push('', '**Submissions the reviewer did not score.** These are harness outcomes, not model failures, and carry no design score.', '', ...notes);

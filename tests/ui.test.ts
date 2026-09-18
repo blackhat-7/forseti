@@ -306,6 +306,24 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
   f.key(esc); f.finish();
 });
 
+test('hygiene reads as a gate, never as a score beside correctness', () => {
+  const f = fixture();
+  const hygiene = (passed: boolean) => ({ id: 'python-ast-parses', dimension: 'hygiene' as const, passed, evidence: 'parsed' });
+  f.app.runs = [{ ...f.run, trials: [{ ...f.run.trials[0]!, checks: [...f.run.trials[0]!.checks, hygiene(true)] }] }];
+  f.key('4', ' ', 'c');
+  const text = f.text(120);
+  assert.match(text, /Hygiene gate\s+all 1 passed/);
+  assert.match(text, /a floor, not a score/);
+  // The thing this rename exists to prevent: a full-width bar at a percentage that cannot move.
+  assert.doesNotMatch(text, /Hygiene\s+[█░]/);
+  assert.doesNotMatch(text, /Quality/);
+
+  f.key(esc);
+  f.app.runs = [{ ...f.run, trials: [{ ...f.run.trials[0]!, checks: [...f.run.trials[0]!.checks, hygiene(false)] }] }];
+  f.key('c');
+  assert.match(f.text(120), /Hygiene gate\s+1 of 1 checks failed/, 'a real failure is still stated plainly');
+});
+
 test('every run states which credential it will use, reviewer included', () => {
   const f = fixture();
   // Subscription-only is the quiet case, and it must still be stated rather than assumed.

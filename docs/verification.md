@@ -51,7 +51,7 @@ Runs each task's hidden verifier against a correct reference and a deliberately 
 
 - 9 tasks × 2 controls = 18 control gradings
 - 56 checks per control set: the reference passes 56/56; the flawed baseline passes 43/56 and is rejected on **all 9 tasks**
-- 11 tool-trace checks, 9 empty-trace grader checks, 10 quality-probe cases, 9 observation regressions, 4 diagnostic assertions
+- 11 tool-trace checks, 9 empty-trace grader checks, 10 hygiene-probe cases, 9 observation regressions, 4 diagnostic assertions
 - Every reference passes every check; every baseline is rejected on at least one check
 
 A verifier that passed both controls would be silently useless, so this is the gate for adding a task.
@@ -113,7 +113,7 @@ Neither is a workspace defect; both are recorded in the run manifests and the re
 
 Forseti originally sent `cacheRetention: 'none'`, overriding Pi's `'short'` default. Every saved live trial confirms the effect — `cacheRead: 0, cacheWrite: 0` on all four Codex trials, so the system prompt, tool schemas and growing transcript were re-sent **uncached on every turn**. In a 4-turn trial that is most of the input bill paid two to four times over.
 
-Caching is now on by default (`--no-cache` or `p` in the TUI to disable). Prompt caching reuses the prefix KV state; it does not change sampling, so correctness and quality measurements are unaffected. It does change repeated input cost and first-delta latency, so `cache` is part of the comparison key and cached and uncached runs land in separate report groups.
+Caching is now on by default (`--no-cache` or `p` in the TUI to disable). Prompt caching reuses the prefix KV state; it does not change sampling, so correctness and hygiene measurements are unaffected. It does change repeated input cost and first-delta latency, so `cache` is part of the comparison key and cached and uncached runs land in separate report groups.
 
 Covered by `prompt caching is on by default, reaches the provider, and never pools with uncached runs`, which asserts the default, that `'short'`/`'none'` actually reach `streamSimple`, and that the two comparison keys differ.
 

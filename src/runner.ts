@@ -228,6 +228,11 @@ export function readRun(root: string, id: string, active = activeRunId(root)): R
   if (!existsSync(path)) return undefined;
   const run: Run = JSON.parse(readFileSync(path, 'utf8'));
   if (run.schema !== 1 || !Array.isArray(run.trials)) throw new Error(`Invalid run manifest: ${id}`);
+  // `quality` was renamed to `hygiene` on 2026-09-18. Identical checks, so mapping on read is
+  // truthful and keeps older runs readable; the file on disk is left exactly as it was recorded.
+  for (const trial of run.trials) {
+    for (const check of trial.checks) if ((check.dimension as string) === 'quality') check.dimension = 'hygiene';
+  }
   if (run.status === 'running' && run.id !== active) run.status = 'interrupted';
   return run;
 }

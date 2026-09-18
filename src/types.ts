@@ -1,9 +1,15 @@
 /**
- * What kind of check ran. `design` is the only judged dimension: it comes from a reviewer model
- * rather than a deterministic grader, so it is reported separately and never folded into
- * correctness.
+ * What kind of check ran.
+ *
+ * `hygiene` is a floor gate, not a score: valid AST, stdlib-only imports, no eval/exec. Every
+ * plausible submission passes it, so it is reported as pass/fail and never as a percentage
+ * beside correctness. It was called `quality` until 2026-09-18, which read as praise for
+ * something never measured.
+ *
+ * `design` is the only judged dimension: it comes from a reviewer model rather than a
+ * deterministic grader, so it is reported separately and never folded into correctness.
  */
-export type Dimension = 'correctness' | 'instructions' | 'quality' | 'tools' | 'design';
+export type Dimension = 'correctness' | 'instructions' | 'hygiene' | 'tools' | 'design';
 export type Check = { id: string; dimension: Dimension; passed: boolean; evidence: string };
 export type ToolEvent = { tool: string; args: Record<string, unknown>; ok: boolean; ms: number; output: string };
 export type PythonResult = { stdout: string; stderr: string; code: number | null; timedOut: boolean };

@@ -4,7 +4,7 @@ import { readFileSync, readdirSync, mkdirSync, mkdtempSync, writeFileSync, rmSyn
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fixture, toolChecks, pythonQuality, observe, observeCases, equal } from './helpers.mjs';
+import { fixture, toolChecks, pythonHygiene, observe, observeCases, equal } from './helpers.mjs';
 
 const suiteDir = fileURLToPath(new URL('../', import.meta.url));
 const tmp = join(suiteDir, 'private', '.tmp');
@@ -125,13 +125,13 @@ const probes = [
   ['wildcard builtins', 'from builtins import *', [true,true,false]],
   ['transaction rethrow', 'try:\n    operation()\nexcept Exception:\n    rollback()\n    raise', [true,true,true]]
 ];
-const probeDir = mkdtempSync(join(tmp,'personal-quality-'));
+const probeDir = mkdtempSync(join(tmp,'personal-hygiene-'));
 try {
   // A model-created module with an analysis-library name must never be imported.
   writeFileSync(join(probeDir,'ast.py'),'raise RuntimeError("candidate ast imported")');
   writeFileSync(join(probeDir,'json.py'),'raise RuntimeError("candidate json imported")');
   for (const [label,source,expected] of probes) {
-    const checks = await pythonQuality(pythonIn(probeDir),{'candidate.py':source},'candidate.py');
+    const checks = await pythonHygiene(pythonIn(probeDir),{'candidate.py':source},'candidate.py');
     assert.deepEqual(checks.map(c => c.passed),expected,label);
   }
 } finally { rmSync(probeDir,{recursive:true,force:true}); }
@@ -139,7 +139,7 @@ const failure = await observe(async () => ({code:2,timedOut:false,stdout:'partia
 assert(!failure.ok && failure.diagnostic.includes('exit=2') && failure.diagnostic.includes('ValueError'));
 const invalid = await observe(async () => ({code:0,timedOut:false,stdout:'not JSON',stderr:''}),'');
 assert(!invalid.ok && invalid.diagnostic.includes('invalid JSON'));
-await assert.rejects(() => pythonQuality(async () => { throw Error('synthetic unavailable'); },{'candidate.py':'pass'},'candidate.py'), /synthetic unavailable/);
+await assert.rejects(() => pythonHygiene(async () => { throw Error('synthetic unavailable'); },{'candidate.py':'pass'},'candidate.py'), /synthetic unavailable/);
 // Trusted synthetic adversaries: exercise protocol behavior, not a security sandbox.
 const observationDir = mkdtempSync(join(tmp,'personal-observation-'));
 try {
@@ -195,4 +195,4 @@ def plan(snapshot):
 } finally { rmSync(observationDir,{recursive:true,force:true}); }
 const compared = equal('bounded', 'x'.repeat(10000), 'expected');
 assert(!compared.passed && compared.evidence.length < 1300 && compared.evidence.includes('truncated') && compared.evidence.includes('expected="expected"'));
-console.log(JSON.stringify({tasks:suite.tasks.length,controls:results.length,results,calibration,tool_trace_checks:11,live_empty_trace_grader_checks:9,quality_probe_cases:probes.length,diagnostic_assertions:4,observation_regressions:9},null,2));
+console.log(JSON.stringify({tasks:suite.tasks.length,controls:results.length,results,calibration,tool_trace_checks:11,live_empty_trace_grader_checks:9,hygiene_probe_cases:probes.length,diagnostic_assertions:4,observation_regressions:9},null,2));

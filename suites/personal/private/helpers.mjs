@@ -59,7 +59,7 @@ export function observeCases(python, input) {
 runpy.run_path('observe.py')['observe'](${JSON.stringify(JSON.stringify(input))})`);
 }
 // Parse text only: the candidate module is never imported by this probe.
-export async function pythonQuality(python, files, path) {
+export async function pythonHygiene(python, files, path) {
   const r = await observe(python, `import sys
 # Drop the runner's first (workspace) import path before loading analysis modules.
 sys.path = [entry for entry in sys.path if entry not in ('', '.', sys.path[0])]
@@ -89,9 +89,9 @@ print(json.dumps(result))`);
   const disallowed = imports.filter(item => item.level !== 0 || !stdlib.has(item.module));
   const dynamic = r.value?.dynamic ?? [];
   return [
-    check('python-ast-parses','quality',parsed, `${path}: actual=${bounded(r.value?.error ?? {parsed:r.value?.parsed})}; expected=valid Python AST; ${r.ok ? '' : r.diagnostic}`),
-    check('python-stdlib-imports','quality',parsed && disallowed.length === 0, `${path}: imports=${bounded(imports)}; disallowed=${bounded(disallowed)}; expected=only absolute stdlib imports in the edited module`),
-    check('python-no-eval-exec','quality',parsed && dynamic.length === 0, `${path}: named dynamic-evaluation references=${bounded(dynamic)}; expected=[]`)
+    check('python-ast-parses','hygiene',parsed, `${path}: actual=${bounded(r.value?.error ?? {parsed:r.value?.parsed})}; expected=valid Python AST; ${r.ok ? '' : r.diagnostic}`),
+    check('python-stdlib-imports','hygiene',parsed && disallowed.length === 0, `${path}: imports=${bounded(imports)}; disallowed=${bounded(disallowed)}; expected=only absolute stdlib imports in the edited module`),
+    check('python-no-eval-exec','hygiene',parsed && dynamic.length === 0, `${path}: named dynamic-evaluation references=${bounded(dynamic)}; expected=[]`)
   ];
 }
 export function toolChecks(trace = [], requiredReads = [], publicCheck = null, readOnly = false, {lane = 'tools', control = false, agent = 'pi'} = {}) {
