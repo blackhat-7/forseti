@@ -1,0 +1,20 @@
+{
+  "listing": [
+    "v1/exposure.onnx",
+    "v1/contrast.onnx",
+    "v2/exposure.onnx",
+    "v2/contrast.onnx",
+    "v2/tint.onnx",
+    "v3/exposure.onnx",
+    "v3/contrast.onnx",
+    "v3/tint.onnx"
+  ],
+  "settings": {
+    "exposure": "learned",
+    "contrast": "learned",
+    "tint": "learned",
+    "vignette": 1.5,
+    "grain": null,
+    "clarity": "learned"
+  }
+}

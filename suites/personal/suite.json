@@ -311,6 +311,51 @@
         "exactness",
         "evidence"
       ]
+    },
+    {
+      "id": "zip-manifest",
+      "title": "Derive the zip manifest and say what is missing",
+      "tags": [
+        "python",
+        "artifacts",
+        "derivation"
+      ],
+      "prompt": "Fix manifest(listing, settings) in package.py. listing is the entry list of a trained profile zip. A model file is named exactly v<N>/<slider>.onnx, where N is the version as a decimal integer; any other entry, such as a directory entry or a stray file, is ignored. settings maps each slider the zip must cover to the string learned, to a finite number that is its constant, or to null when the slider is switched off. Return {models, constants, missing}: models maps each learned slider to the entry of its highest-numbered version, whichever version directory holds it; constants maps each slider with a number to that number, and zero is a constant like any other; missing is the sorted list of learned sliders with no model file. A switched-off slider appears nowhere, and a file for a slider settings does not mention is ignored. Change only package.py. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public check is a subset: passing it does not mean the code is right. If tools are unavailable, return only JSON {\"files\":{\"package.py\":\"complete replacement contents\"}}. Objective hygiene rubric for the edited Python module: valid Python AST; only absolute standard-library import statements; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. Exception handlers, including transaction rollback and rethrow, are allowed. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/zip-manifest",
+      "grader": "private/zip-manifest.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "evidence"
+      ]
+    },
+    {
+      "id": "double-delivery",
+      "title": "Process each delivered job exactly once",
+      "tags": [
+        "python",
+        "sqlite",
+        "idempotency",
+        "queue"
+      ],
+      "prompt": "Fix handle(conn, delivery) in worker.py. initialize defines the schema and must keep an outbox(job, amount) table. Deliveries come from a queue with at-least-once delivery: the same job can arrive more than once, and a redelivery does not always carry the same delivery id. A delivery is a dictionary with delivery, job and amount keys. Each job gets exactly one outbox row, ever. handle returns True when this call wrote the job's outbox row and False when the job already had one, whatever the payload says. amount must be an int and not a bool; zero and negative amounts are valid. Anything else, including a missing amount, raises ValueError, writes nothing, and leaves the job unprocessed, so that a later corrected delivery for that job is processed. Every call either commits everything it wrote before returning or leaves the database exactly as it found it, and never leaves a transaction open, whether it returned or raised. The connection has no open transaction at entry. Use only Python stdlib. Change only worker.py. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public check is a subset: passing it does not mean the code is right. If tools are unavailable, return only JSON {\"files\":{\"worker.py\":\"complete replacement contents\"}}. Objective hygiene rubric for the edited Python module: valid Python AST; only absolute standard-library import statements; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. Exception handlers, including transaction rollback and rethrow, are allowed. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/double-delivery",
+      "grader": "private/double-delivery.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "safety",
+        "exactness"
+      ]
     }
   ]
 }
