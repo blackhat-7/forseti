@@ -573,3 +573,55 @@ test('headless screen artifacts use only workspace-local mock data', () => {
   f.key('PAY', enter); capture('progress');
   f.key(esc); f.finish();
 });
+
+test('the scorecard says who is better at what, and only where the run can tell', () => {
+  // A tall window, so the whole scorecard is on one page.
+  const f = fixture('subscription', 60);
+  const good = f.run.trials[0]!;
+  const tasks = [
+    { id: 'a', title: 'Task A', hash: 'a', capabilities: ['evidence' as const] },
+    { id: 'b', title: 'Task B', hash: 'b', capabilities: ['evidence' as const] },
+    { id: 'c', title: 'Task C', hash: 'c', capabilities: ['safety' as const] },
+  ];
+  const strong: ModelConfig = { ...model, id: 'strong', label: 'Strong model' };
+  const weak: ModelConfig = { ...model, id: 'weak', label: 'Weak model' };
+  const trial = (m: string, task: string, repetition: number, passed: boolean) => ({
+    ...good, id: `${m}-${task}-${repetition}`, model: m, task, repetition, status: passed ? 'passed' as const : 'failed' as const,
+    checks: [{ id: 'exact', dimension: 'correctness' as const, passed, evidence: '' }],
+  });
+  // The weak model fails every evidence task and passes the safety task, four times over.
+  const record = (repeats: number, weakPasses: string[]) => tasks.flatMap(t => Array.from({ length: repeats }, (_, r) => [trial('strong', t.id, r + 1, true), trial('weak', t.id, r + 1, weakPasses.includes(t.id))]).flat());
+  f.app.runs = [{ ...f.run, models: [weak, strong], tasks, planned: 6 * 4, trials: record(4, ['c']) }];
+  f.key('4', ' ', 'c');
+  let text = f.text(120);
+  assert.match(text, /overall\s+Strong model over Weak model\s+\+67 pts\s+3 tasks/, 'the overall gap is stated as a verdict');
+  assert.match(text, /evidence\s+Strong model over Weak model\s+\+100 pts\s+2 tasks/, 'and so is the kind of task it comes from');
+  assert.doesNotMatch(text, /safety\s+\w+ model over/, 'a kind of task with no gap earns no verdict');
+  assert.ok(text.indexOf('Strong model') < text.indexOf('Weak model'), 'the stronger candidate is listed first');
+  assert.match(text, /Where they differ/);
+  assert.match(text, /Task A/);
+  assert.doesNotMatch(text, /Task C/, 'a task every candidate agrees on is folded into a count');
+  assert.match(text, /1 task where every candidate agrees/);
+  f.key('a');
+  text = f.text(120);
+  assert.match(text, /Per task/);
+  assert.match(text, /Task C/, 'a shows every task');
+
+  // One repetition and a smaller gap is inside the noise, and the screen must say so.
+  f.key(esc);
+  f.app.runs = [{ ...f.run, models: [weak, strong], tasks, planned: 6, trials: record(1, ['a', 'c']) }];
+  f.key('c');
+  text = f.text(120);
+  assert.match(text, /nothing clears the bar/);
+  assert.match(text, /not a ranking/);
+  assert.doesNotMatch(text, /Strong model over/);
+
+  // A pair can be tied overall and still apart on one kind of task; both facts are stated.
+  f.key(esc);
+  f.app.runs = [{ ...f.run, models: [weak, strong], tasks, planned: 6, trials: record(1, ['c']) }];
+  f.key('c');
+  text = f.text(120);
+  assert.match(text, /tied overall: Strong model ≈ Weak model/);
+  assert.match(text, /evidence\s+Strong model over Weak model\s+\+100 pts/);
+  assert.doesNotMatch(text, /overall\s+Strong model over/);
+});

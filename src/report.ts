@@ -112,10 +112,20 @@ export type Scorecard = {
  */
 export function byCapability(card: Scorecard, runTasks: { id: string; capabilities?: Capability[] }[]): { capability: Capability; rate: number | null; tasks: number }[] {
   return CAPABILITIES.map(capability => {
-    const ids = new Set(runTasks.filter(t => t.capabilities?.includes(capability)).map(t => t.id));
-    const scored = card.tasks.filter(t => ids.has(t.id) && t.rate !== null);
-    return { capability, rate: scored.length ? scored.reduce((sum, t) => sum + t.rate!, 0) / scored.length : null, tasks: scored.length };
+    const part = capabilityCard(card, runTasks, capability);
+    return { capability, rate: part.score, tasks: part.tasks.filter(t => t.rate !== null).length };
   }).filter(row => row.tasks > 0);
+}
+/**
+ * The same card restricted to the tasks behind one capability, so `separated` can judge a gap on
+ * that kind of task with only that kind of task as evidence. "Better at evidence" has to clear the
+ * same bar as "better overall", or a one-task capability would hand out verdicts for free.
+ */
+export function capabilityCard(card: Scorecard, runTasks: { id: string; capabilities?: Capability[] }[], capability: Capability): Scorecard {
+  const ids = new Set(runTasks.filter(t => t.capabilities?.includes(capability)).map(t => t.id));
+  const tasks = card.tasks.filter(t => ids.has(t.id));
+  const scored = tasks.filter(t => t.rate !== null);
+  return { ...card, tasks, score: scored.length ? scored.reduce((sum, t) => sum + t.rate!, 0) / scored.length : null };
 }
 /**
  * One number per model, weighting every task equally so a task with many checks cannot

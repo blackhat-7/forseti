@@ -47,6 +47,10 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 
 - **Every rubric shares three questions and adds one of its own.** (2026-09-20) `unearned-abstraction`, `dead-code` and `explanatory-noise` are the same text in all four reviewed tasks, so a design score means the same thing across them; the fourth names the duplication that task invites. Each calibration set keeps two clean traps because a judge rewards length and punishes unfamiliar shapes.
 
+- **The scorecard sorts by headline and names every tied pair beside it.** (2026-09-20) A sorted table invites a ranking, so the verdict list under it says which pairs the run can separate, overall and per kind of task, and lists the pairs tied overall by name. A pair not named as apart is tied; the sort never claims more than that.
+- **"Better at Z" clears the same bar as "better overall".** (2026-09-20) `capabilityCard` restricts a card to one capability's tasks and `separated` judges that gap on that evidence alone, so a capability backed by one task cannot hand out a verdict a rerun would reverse.
+- **Only `report.ts` and `tui.ts` render, so the UI stays in those two files.** (2026-09-20) A new UI module would join the harness hash and split comparison groups on every wording change; a table helper inside `tui.ts` does not.
+
 - **A Python idiom trap does not survive a rewrite.** (2026-09-20) `zip-manifest` and `double-delivery` shipped the obvious wrong spellings and every candidate threw them away and wrote the stated rules directly (Opus 6/6, Sonnet 6/6, Haiku 5/6). The SQL traps discriminate because the *right* spelling is unobvious even with the rule in hand; in Python the rule is the code.
 
 ## Hard-won lessons
