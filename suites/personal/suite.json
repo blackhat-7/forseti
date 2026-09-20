@@ -40,7 +40,8 @@
         "correctness",
         "instructions",
         "hygiene",
-        "tools"
+        "tools",
+        "design"
       ],
       "capabilities": [
         "safety",
@@ -147,7 +148,8 @@
         "correctness",
         "instructions",
         "hygiene",
-        "tools"
+        "tools",
+        "design"
       ],
       "capabilities": [
         "safety",
@@ -191,7 +193,8 @@
         "correctness",
         "instructions",
         "hygiene",
-        "tools"
+        "tools",
+        "design"
       ],
       "capabilities": [
         "exactness"
