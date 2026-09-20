@@ -359,6 +359,48 @@
         "safety",
         "exactness"
       ]
+    },
+    {
+      "id": "due-dates",
+      "title": "List the invoices overdue as of an instant",
+      "tags": [
+        "sql",
+        "calendar",
+        "payments"
+      ],
+      "prompt": "Fix query.sql for SQLite. invoices(id, issued_at, amount) holds one row per invoice; amount is whole cents. payments(invoice_id, paid_at, amount) holds every payment received, possibly several per invoice and possibly none. Bind parameter :asof is an instant. An invoice is due one calendar month after the UTC day it was issued; when that month has no such day, it is due on the last day of that month. Return one row per invoice that is overdue as of :asof, as (id, due, outstanding) ordered by id, where due is YYYY-MM-DD and outstanding is the amount minus the payments received before :asof. An invoice is overdue when its due day is before the UTC day of :asof and its outstanding amount is greater than zero. A payment at or after :asof has not been received yet. issued_at and paid_at values are ISO-8601 and the offsets are not all the same. Do not modify any data. Change only query.sql. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public rows are a subset: passing that check does not mean the query is right. If tools are unavailable, return only JSON {\"files\":{\"query.sql\":\"complete replacement contents\"}}. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/due-dates",
+      "grader": "private/due-dates.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "evidence"
+      ]
+    },
+    {
+      "id": "all-green",
+      "title": "Find the profiles whose every run succeeded",
+      "tags": [
+        "sql",
+        "null",
+        "time-window"
+      ],
+      "prompt": "Fix query.sql for SQLite. runs(id, profile, finished_at, status) holds one row per run; status is succeeded, failed or cancelled, or NULL for a run that never reported. Bind parameters :start and :end are instants. Return one row per profile that has at least one run with finished_at in the half-open interval [:start, :end) and whose every run in that interval has status succeeded, as (profile, runs, last_finished) ordered by profile, where runs is the number of runs in the interval and last_finished is the latest finished_at in the interval written as UTC YYYY-MM-DDTHH:MM:SSZ. Runs outside the interval count neither for nor against a profile. finished_at values are ISO-8601 and the offsets are not all the same. Do not modify any data. Change only query.sql. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public rows are a subset: passing that check does not mean the query is right. If tools are unavailable, return only JSON {\"files\":{\"query.sql\":\"complete replacement contents\"}}. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/all-green",
+      "grader": "private/all-green.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "evidence"
+      ]
     }
   ]
 }

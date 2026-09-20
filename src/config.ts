@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, relative } from 'node:path';
 import { CLAUDE_CODE_MODELS } from './claudecode.ts';
-import { atomicJson, files, inside, readText, slug } from './files.ts';
+import { atomicJson, files, inside, MAX_ENTRIES, readText, slug } from './files.ts';
 import type { Capability, Config, Dimension, JudgeConfig, ModelConfig, RunOptions, Suite } from './types.ts';
 
 export const CAPABILITIES: Capability[] = ['evidence', 'restraint', 'exactness', 'scope', 'safety'];
@@ -82,7 +82,8 @@ export function loadSuite(root: string, path: string): { suite: Suite; dir: stri
     files(inside(dir, task.fixture));
     readText(dir, task.grader);
   }
-  return { suite, dir, contents: files(dir) };
+  // The snapshot holds every task's fixture and grader, so the per-trial file cap does not apply to it.
+  return { suite, dir, contents: files(dir, MAX_ENTRIES) };
 }
 export function validateOptions(o: RunOptions): void {
   const inRange = (v: number, low: number, high: number) => Number.isInteger(v) && v >= low && v <= high;
