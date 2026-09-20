@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, relative } from 'node:path';
 import { CLAUDE_CODE_MODELS } from './claudecode.ts';
+import { LOCAL, localUrl } from './local.ts';
 import { atomicJson, files, inside, MAX_ENTRIES, readText, slug } from './files.ts';
 import type { Capability, Config, Dimension, JudgeConfig, ModelConfig, RunOptions, Suite } from './types.ts';
 
@@ -18,7 +19,7 @@ export const DEFAULT_OPTIONS: RunOptions = { repeat: 2, seed: 42, lane: 'tools',
  */
 export const DEFAULT_JUDGE: JudgeConfig = { enabled: false, provider: 'openai-codex', model: 'gpt-5.5', auth: 'pi', thinking: 'off', repeat: 1 };
 export const DEFAULT_CONFIG: Config = {
-  schema: 1, suite: 'suites/personal/suite.json', disabledTests: [], removedTests: [], judge: DEFAULT_JUDGE,
+  schema: 1, suite: 'suites/personal/suite.json', disabledTests: [], removedTests: [], judge: DEFAULT_JUDGE, local: { url: '' },
   models: [
     { id: 'control-reference', label: 'Reference · synthetic', provider: 'control', model: 'reference', auth: 'none', enabled: true, thinking: 'off' },
     { id: 'control-baseline', label: 'Flawed baseline · synthetic', provider: 'control', model: 'baseline', auth: 'none', enabled: true, thinking: 'off' },
@@ -34,13 +35,17 @@ function unique(ids: string[], name: string) {
 export function validateConfig(root: string, value: Config): Config {
   if (!value || value.schema !== 1 || !Array.isArray(value.models) || !Array.isArray(value.disabledTests) || !Array.isArray(value.removedTests)) throw new Error('Invalid forseti.json schema');
   text(value.suite, 'suite path'); inside(root, value.suite);
+  if (!value.local || typeof value.local.url !== 'string') throw new Error('Invalid local server settings');
+  localUrl(value.local.url);
   for (const m of value.models) {
-    slug(m.id); text(m.label, 'model label', 200); text(m.provider, 'provider', 100); text(m.model, 'model ID', 200);
+    // 500, not 200: llama-server names a model by its file path.
+    slug(m.id); text(m.label, 'model label', 200); text(m.provider, 'provider', 100); text(m.model, 'model ID', 500);
     if (!['pi', 'env', 'none', 'cli'].includes(m.auth) || typeof m.enabled !== 'boolean' || !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(m.thinking)) throw new Error(`Invalid model settings: ${m.id}`);
     if (m.provider === 'control' && (!['reference', 'baseline'].includes(m.model) || m.auth !== 'none')) throw new Error('Unknown control');
     if (m.provider === 'claude-code' && (m.auth !== 'cli' || !CLAUDE_CODE_MODELS.includes(m.model as never))) throw new Error(`Claude Code models use auth "cli" and one of: ${CLAUDE_CODE_MODELS.join(', ')}`);
     if ((m.auth === 'cli') !== (m.provider === 'claude-code')) throw new Error('auth "cli" is only for the claude-code provider');
-    if (m.provider !== 'control' && m.auth === 'none') throw new Error('Live providers require explicit Pi or environment auth');
+    if (m.provider === LOCAL && m.auth !== 'none') throw new Error('A local server model uses auth "none": the server is your own and no credential is sent');
+    if (m.provider !== 'control' && m.provider !== LOCAL && m.auth === 'none') throw new Error('Live providers require explicit Pi or environment auth');
   }
   unique(value.models.map(m => m.id), 'model IDs'); unique(value.disabledTests, 'disabled tests'); unique(value.removedTests, 'removed tests');
   validateJudge(value.judge);
@@ -53,6 +58,7 @@ export function validateJudge(j: JudgeConfig): void {
   if (!Number.isInteger(j.repeat) || j.repeat < 1 || j.repeat > 5) throw new Error('Judge repeat must be 1–5');
   // A synthetic control has no model behind it, so it cannot review anything.
   if (j.provider === 'control') throw new Error('The reviewer must be a real model, not a synthetic control');
+  if (j.provider === LOCAL) throw new Error('The reviewer cannot be a local server model');
   if (j.provider === 'claude-code' && (j.auth !== 'cli' || !CLAUDE_CODE_MODELS.includes(j.model as never))) throw new Error(`A Claude Code reviewer uses auth "cli" and one of: ${CLAUDE_CODE_MODELS.join(', ')}`);
   if ((j.auth === 'cli') !== (j.provider === 'claude-code')) throw new Error('Reviewer auth "cli" is only for the claude-code provider');
 }
@@ -61,6 +67,7 @@ export function loadConfig(root: string): Config {
   if (!existsSync(path)) atomicJson(root, 'forseti.json', DEFAULT_CONFIG);
   const stored = JSON.parse(readText(root, 'forseti.json')) as Config;
   stored.judge ??= DEFAULT_JUDGE;
+  stored.local ??= { url: '' };
   return validateConfig(root, stored);
 }
 export function saveConfig(root: string, config: Config): void {

@@ -77,6 +77,18 @@ Authentication and billing are separate:
 
 **Prompt caching is on by default** (`--no-cache`, or `p` in the TUI, turns it off). Without it the system prompt, tool schemas and transcript are re-sent uncached on every turn, which is where a third-party harness quietly costs 2x+ more than the vendor's own client. Caching reuses the prefix KV state and does not change sampling, so correctness is unaffected — but it does change repeated input cost and first-delta latency, so cached and uncached runs are never pooled in one comparison.
 
+## Use a local model
+
+Any OpenAI-compatible server on your own machine works: llama-server, Ollama, LM Studio, vLLM. Set the base address once, on **Settings** (`5`, then the Address row) or from the shell:
+
+```sh
+npm start -- local http://127.0.0.1:8080        # llama-server; Ollama is :11434, LM Studio :1234
+npm start -- models add local/MODEL_ID          # one of the IDs the line above printed
+npm start -- run --models local-MODEL --tests shared-count --repeat 2
+```
+
+Forseti asks the server only `GET /v1/models`, and only when you set the address or open the model picker, never on startup. Trials go to `POST /v1/chat/completions` in the plain dialect every such server speaks (`max_tokens`, `system` role, no `store`). No credential is sent, and the report shows billing as `local`. A local model runs through the same Pi adapter as every other API model, so it pools with them and never with Claude Code. The address is not part of a model's identity: the run manifest records which server answered, and changing the address changes where every local model is looked up. llama-server names a model by its file path unless you start it with `--alias`; Forseti shortens that to the file name for IDs and labels.
+
 ## Inspect results
 
 ```sh

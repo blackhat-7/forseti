@@ -6,7 +6,7 @@ Every table in the UI has one shape: a left-aligned name column, then right-alig
 
 ## Keys
 
-- **Tab / Shift+Tab, 1–4, ←→:** Home, Models, Tests, Runs.
+- **Tab / Shift+Tab, 1–5, ←→:** Home, Models, Tests, Runs, Settings.
 - **↑↓ / j/k:** select a row. **Space:** toggle a model/test or select a run.
 - **a:** add a model or test. Model search accepts provider, ID, or name; use arrows and Enter to choose, then explicitly choose existing authentication. Test creation asks for a lowercase ID, one-line prompt, and valid expected JSON.
 - **d:** remove a model/test from configuration. Only **y** confirms. Test files and saved evidence remain intact.
@@ -14,6 +14,7 @@ Every table in the UI has one shape: a left-aligned name column, then right-alig
 - **r:** preflight. Review enabled models/tests, authentication, billing, and limits before Enter. Metered/unknown billing then requires typing **PAY** and Enter. Consent applies to one run only; there is no dollar spending cap.
 - **Esc / Ctrl+C during a run:** cancel and retain partial results. Wait for cancellation to finish before quitting.
 - **Runs → c:** compare selected runs, or the highlighted run when none are selected. The scorecard is one table per candidate (headline bar, ± for how far it would move on a rerun, partial credit, the other dimensions, graded count), then **What this run can tell apart**: one line per pair and kind of task whose gap beats two standard errors of the difference, stated as "X over Y +N pts · k tasks"; pairs tied overall are named so the order is never read as a ranking. Below it, correctness by kind of task and the tasks where candidates differ. **a** shows every task; **m** toggles the full markdown report. **Enter:** inspect individual trials and check-level evidence; **←→** changes trials; **↑↓** scrolls a line, **space/b** a page, **gg/G** jump to top/bottom. **e:** export selected/highlighted runs through the app to workspace reports.
+- **Settings → space on Address:** point at a local OpenAI-compatible server (llama-server, Ollama, LM Studio). Enter saves it and lists its models; the picker lists them under `local/` and asks for no credential. Opening the picker asks the server once if it has not been asked yet. Nothing is asked at startup.
 - **R:** refresh local metadata without sending prompts. **?:** help. **q / Ctrl+C:** quit when idle. **Esc:** close a form/dialog without saving.
 
 Synthetic controls are explicitly labeled. Unavailable authentication is visible, not silently replaced with a different credential source. Preflight uses `App.authFor(model)` for the explicitly selected authentication mode, not catalog defaults. The runner independently validates effective authentication and enforces billing consent.

@@ -7,6 +7,7 @@ import {
 import type { App, CatalogEntry } from './app.ts';
 import { bar, byCapability, capabilityCard, outcome, scoreError, scorecards, separated, type Scorecard } from './report.ts';
 import { CAPABILITIES, DEFAULT_OPTIONS } from './config.ts';
+import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
 
 // Strip whole terminal strings first, then remaining controls (including bidi).
@@ -41,6 +42,8 @@ const theme = { selectedPrefix: accent, selectedText: accent, description: muted
 const tabs = ['Home', 'Models', 'Tests', 'Runs', 'Settings'];
 const THINKING: ModelConfig['thinking'][] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const JUDGE_FIELDS = ['Reviewer', 'Model', 'Thinking', 'Rounds'];
+/** Settings rows: the reviewer fields, then the local server address. */
+const LOCAL_ROW = JUDGE_FIELDS.length;
 /** Per-trial time limit. A ladder rather than free entry: these are the values worth choosing. */
 const TIMEOUTS = [30, 60, 90, 120, 180, 300, 600];
 /** Tool-call turns per trial. Too low censors outcomes; too high spends plan quota on stragglers. */
@@ -62,6 +65,7 @@ function statusInk(status: string): (s: string) => string {
 function billingInk(billing: AuthInfo['billing']): string {
   if (billing === 'subscription') return teal('subscription');
   if (billing === 'control') return faint('synthetic control');
+  if (billing === 'local') return teal('no charge');
   return amber(billing);
 }
 /** Controls already say "synthetic control" in their mode; never print it twice. */
@@ -83,7 +87,11 @@ function creditLine(entries: { label: string; auth: AuthInfo }[]): string {
   const live = entries.filter(e => e.auth.billing !== 'control');
   if (!live.length) return faint('Synthetic controls only. No model is called and no credential is used.');
   const keyed = live.filter(e => ['metered', 'unknown'].includes(e.auth.billing));
-  if (!keyed.length) return teal(`Subscription logins only (${count(live.length, 'call site')}). No API key will be used.`);
+  if (!keyed.length) {
+    const local = live.filter(e => e.auth.billing === 'local').length;
+    const who = local === live.length ? 'Your own local server only' : local ? 'Subscription logins and your own local server' : 'Subscription logins only';
+    return teal(`${who} (${count(live.length, 'call site')}). No API key will be used.`);
+  }
   return amber(`${count(keyed.length, 'call site')} would use a metered API key: ${keyed.map(e => e.label).join(', ')}`);
 }
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -219,8 +227,8 @@ function runLine(run: Run): string {
   const state = run.status === 'completed' ? '' : `  ${statusInk(run.status)(plain(run.status))}${live ? faint(` ${run.trials.length}/${run.planned}`) : ''}`;
   return `${faint(runWhen(run.id))}  ${scores}  ${faint(`${run.tasks.length}×${run.options.repeat}`)}${state}`;
 }
-type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'addModel' | 'addTest' | 'authFor'>;
-type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help';
+type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'localModels' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'addModel' | 'addTest' | 'authFor' | 'setLocalUrl' | 'probeLocal'>;
+type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help' | 'local';
 
 export class Dashboard implements Component, Focusable {
   private app: UIApp;
@@ -273,13 +281,13 @@ export class Dashboard implements Component, Focusable {
 
   private listLength(): number {
     return this.tab === 1 ? this.app.config.models.length : this.tab === 2 ? this.tasks().length
-      : this.tab === 4 ? JUDGE_FIELDS.length : this.app.runs.length;
+      : this.tab === 4 ? JUDGE_FIELDS.length + 1 : this.app.runs.length;
   }
   private tasks() { return this.app.suite.tasks.filter(t => !this.app.config.removedTests.includes(t.id)); }
   private enabledTasks() { return this.tasks().filter(t => !this.app.config.disabledTests.includes(t.id)); }
   private models() { return this.app.config.models.filter(m => m.enabled); }
   /** Dialogs that take typed text, where `q` is a letter and only escape can mean "leave". */
-  private typing(): boolean { return this.dialog === 'test' || this.dialog === 'billing' || this.dialog === 'picker'; }
+  private typing(): boolean { return this.dialog === 'test' || this.dialog === 'billing' || this.dialog === 'picker' || this.dialog === 'local'; }
   private close(): void { this.pendingG = false; this.dialog = undefined; this.list = undefined; this.input.setValue(''); this.pendingDelete = undefined; this.pendingOptions = undefined; }
   private attempt(action: () => void): void {
     try { action(); } catch (error) { this.message = `Error: ${plain(error instanceof Error ? error.message : error)}`; }
@@ -369,6 +377,7 @@ export class Dashboard implements Component, Focusable {
       if (index === 0) this.persist(() => { judge.enabled = !judge.enabled; });
       else if (index === 1) this.openPicker('judge');
       else if (index === 2) this.persist(() => { judge.thinking = THINKING[(THINKING.indexOf(judge.thinking) + 1) % THINKING.length]!; });
+      else if (index === LOCAL_ROW) { this.dialog = 'local'; this.input.setValue(this.app.config.local.url); }
       else this.persist(() => { judge.repeat = (judge.repeat % 5) + 1; });
     }
   }
@@ -386,12 +395,24 @@ export class Dashboard implements Component, Focusable {
     this.dialog = 'picker';
     this.input.setValue('');
     this.filterPicker();
+    // The server is asked what it serves the first time someone looks for a model, not at startup.
+    if (target === 'model' && this.app.config.local.url && !this.app.localModels) void this.probeLocal();
+  }
+  private async probeLocal(): Promise<void> {
+    const url = plain(this.app.config.local.url);
+    this.message = `Listing models at ${url}… no prompt is sent.`;
+    this.repaint();
+    try {
+      const found = await this.app.probeLocal();
+      this.message = `${url}: ${count(found.length, 'model')} listed. Press a on Models to add one.`;
+    } catch (error) { this.message = `Local server: ${plain(error instanceof Error ? error.message : error)}`; }
+    finally { if (this.dialog === 'picker') this.filterPicker(); this.repaint(); }
   }
   private filterPicker(): void {
     const filter = this.input.getValue().toLowerCase();
     // Do not offer what will be refused: a synthetic control has no model behind it to review with.
     const items = this.app.catalog.map((c, index) => ({ c, index }))
-      .filter(({ c }) => this.pickerTarget !== 'judge' || c.provider !== 'control')
+      .filter(({ c }) => this.pickerTarget !== 'judge' || (c.provider !== 'control' && c.provider !== LOCAL))
       .map(({ c, index }) => ({ value: String(index), label: plain(`${c.provider}/${c.id} · ${c.name}`) }));
     this.list = new SelectList(items.filter(item => item.label.toLowerCase().includes(filter)), 7, theme);
     this.list.onSelect = item => {
@@ -400,10 +421,12 @@ export class Dashboard implements Component, Focusable {
       const judge = this.pickerTarget === 'judge';
       if (judge && this.candidate.provider === 'control') throw new Error('A synthetic control has no model behind it and cannot review anything.');
       this.dialog = 'auth';
-      // Claude Code authenticates itself, so there is nothing to choose.
+      // Claude Code authenticates itself and a local server takes no credential, so there is nothing to choose.
       this.list = new SelectList(this.candidate.provider === 'claude-code'
         ? [{ value: 'cli', label: 'Claude Code CLI', description: 'Your own plan login; no API key is used' }]
-        : [
+        : this.candidate.provider === LOCAL
+          ? [{ value: 'none', label: 'Your own server', description: 'No credential, no charge' }]
+          : [
           { value: 'pi', label: 'Pi credentials', description: 'Existing credentials; no login here' },
           { value: 'env', label: 'Environment API key', description: 'Metered · confirm again before run' },
           ...(judge ? [] : [{ value: 'none', label: 'No credentials', description: 'Synthetic controls only' }]),
@@ -438,6 +461,13 @@ export class Dashboard implements Component, Focusable {
         this.message = `Added ${this.draft[0]}. Exact JSON grading, independent task.`;
         this.close();
       } else { this.draft.push(value); this.input.setValue(''); }
+    } else if (this.dialog === 'local') {
+      if (!key('enter')) { this.input.handleInput(data); this.cleanInput(); return; }
+      const value = this.input.getValue().trim();
+      this.app.setLocalUrl(value);
+      this.close();
+      if (value) void this.probeLocal();
+      else this.message = 'Local server removed. Models added from it stay listed until you remove them.';
     } else if (this.dialog === 'delete') {
       if (data === 'y') { this.pendingDelete?.(); this.close(); this.message = 'Removed from configuration. Existing run evidence is unchanged.'; }
       else if (data === 'n') this.close();
@@ -657,6 +687,7 @@ export class Dashboard implements Component, Focusable {
     } else if (this.tab === 4) {
       const judge = this.app.config.judge;
       const auth = this.app.authFor({ ...judge, id: 'judge', label: 'judge', enabled: true });
+      const local = this.app.config.local.url;
       const values = [
         judge.enabled ? green('on') : faint('off'),
         plain(`${judge.provider}/${judge.model}`),
@@ -672,12 +703,16 @@ export class Dashboard implements Component, Focusable {
           const marker = i === this.selection[4] ? accent('›') : ' ';
           return `${marker} ${muted(label)}${' '.repeat(Math.max(2, 12 - label.length))}${values[i]}`;
         }), '',
-        judge.enabled ? authLine(auth) : faint('Nothing is sent while the reviewer is off.'),
+        judge.enabled ? authLine(auth) : faint('Nothing is sent while the reviewer is off.'), '',
+        muted('Local server'), '',
+        `${this.selection[4] === LOCAL_ROW ? accent('›') : ' '} ${muted('Address')}${' '.repeat(Math.max(2, 12 - 'Address'.length))}${local ? accent(plain(local)) : faint('not set')}`,
+        faint(!local ? 'space to point at llama-server, Ollama, LM Studio…' : this.app.localModels ? `${count(this.app.localModels.length, 'model')} listed · a on Models adds one` : 'space to change · a on Models lists its models'),
       ], [
         muted('What this changes'), '',
         ...wrap('A reviewer model answers fixed yes/no questions about design on submissions that already passed every correctness check. It never touches the correctness score.', detailWidth, faint), '',
         ...wrap('Each defect must cite a line that exists in the submission. Uncitable ones are dropped, so an invented finding costs the candidate nothing.', detailWidth, faint), '',
-        ...wrap('Design is the only score here that is not reproducible from the saved artifacts. Changing the reviewer starts a new experiment: older runs will not pool with it.', detailWidth, faint),
+        ...wrap('Design is the only score here that is not reproducible from the saved artifacts. Changing the reviewer starts a new experiment: older runs will not pool with it.', detailWidth, faint), '',
+        ...wrap('A local server is any OpenAI-compatible endpoint on your own machine. Forseti only asks it which models it serves, sends no credential, and runs its trials through the same Pi adapter as every other API model, so they compare directly.', detailWidth, faint),
       ], inner, LIST_WIDTH).forEach(row);
       row();
       if (judge.enabled && /anthropic|claude/.test(judge.provider) && this.models().some(m => /anthropic|claude/.test(m.provider))) {
@@ -768,6 +803,13 @@ export class Dashboard implements Component, Focusable {
       this.input.render(width).forEach(row);
       row();
       row(faint('⏎ next / save   esc discard'));
+    } else if (this.dialog === 'local') {
+      head('Local server', 'address and port');
+      row();
+      prose('Base address of an OpenAI-compatible server: llama-server, Ollama (http://127.0.0.1:11434), LM Studio (http://127.0.0.1:1234) or similar. Leave it empty to remove.', muted);
+      this.input.render(width).forEach(row);
+      row();
+      row(faint('⏎ save and list its models   esc keep current'));
     } else if (this.dialog === 'delete') {
       head('Remove from configuration?');
       row();
@@ -804,7 +846,7 @@ export class Dashboard implements Component, Focusable {
         ['tab · 1–5', 'switch view'], ['↑↓ · j k', 'move'], ['space', 'toggle or select'],
         ['a', 'add model or test'], ['d', 'remove, with confirmation'], ['u', 'restore last removed test'],
         ['r', 'review preflight'], ['− +', 'repetitions, or reviewer rounds on Settings'], ['l', 'tools / prompt lane'],
-        ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer'], ['R', 'refresh metadata, sends nothing'],
+        ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer, local server'], ['R', 'refresh metadata, sends nothing'],
         ['c · ⏎ · e', 'runs: compare, evidence, export'], ['m', 'comparison: scorecard / full report'], ['a', 'comparison: every task / only where they differ'], ['←→', 'evidence: previous / next trial'],
         ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc · q', 'leave what you are looking at: close a panel, else quit'], ['esc during a run', 'cancel it safely, keeping completed evidence'], ['during a run', 'tabs and ↑↓ work; edits wait'], ['ctrl+c', 'quit'],
       ] as const) row(`${accent(keys)}${' '.repeat(Math.max(2, 14 - keys.length))}${muted(what)}`);

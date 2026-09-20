@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { visibleWidth } from '@earendil-works/pi-tui';
 import { Dashboard, terminalText } from '../src/tui.ts';
 import { DEFAULT_JUDGE } from '../src/config.ts';
+import type { CatalogEntry } from '../src/app.ts';
 import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite } from '../src/types.ts';
 
 const enter = '\r';
@@ -30,15 +31,25 @@ function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
   };
   const app = {
     root: process.cwd(),
-    config: { schema: 1, suite: 'suite', models: [structuredClone(model)], disabledTests: [], removedTests: [], judge: { ...DEFAULT_JUDGE } } as Config,
+    config: { schema: 1, suite: 'suite', models: [structuredClone(model)], disabledTests: [], removedTests: [], judge: { ...DEFAULT_JUDGE }, local: { url: '' } } as Config,
     suite: { schema: 1, id: 'suite', title: 'Independent benchmark', tasks: [{ id: 'json', title: 'JSON test', tags: ['json'], dimensions: ['correctness', 'instructions'], prompt: 'Return 42.', fixture: 'fixtures/json', grader: 'private/json.mjs' }] } as Suite,
     catalog: [
       { provider: 'example', id: 'model-one', name: 'Example model', auth: { ...auth, billing } },
       { provider: 'other', id: 'model-two', name: 'Second model', auth: { ...auth, ready: false, note: 'Credentials missing', billing: 'unknown' as const } },
     ],
     runs: [run],
+    localModels: undefined as CatalogEntry[] | undefined,
+    probes: 0,
+    setLocalUrl(url: string) { if (url && !url.startsWith('http')) throw new Error('Use a full address'); this.config.local.url = url; this.localModels = undefined; this.catalog = this.catalog.filter(c => c.provider !== 'local'); saves++; },
+    async probeLocal() {
+      this.probes++;
+      if (this.config.local.url.includes('down')) throw new Error(`No answer from ${this.config.local.url}`);
+      this.localModels = [{ provider: 'local', id: '/models/tiny-q4.gguf', name: 'tiny-q4 · local', auth: { ...auth, mode: 'local server', billing: 'local' as const } }];
+      this.catalog = [...this.localModels, ...this.catalog.filter(c => c.provider !== 'local')];
+      return this.localModels;
+    },
     authFor(selected: ModelConfig): AuthInfo {
-      return { ...auth, mode: selected.auth, billing: selected.auth === 'env' ? 'metered' : billing };
+      return { ...auth, mode: selected.auth, billing: selected.provider === 'local' ? 'local' : selected.auth === 'env' ? 'metered' : billing };
     },
     persist() { saves++; },
     async refresh() { refreshes++; },
@@ -624,4 +635,59 @@ test('the scorecard says who is better at what, and only where the run can tell'
   assert.match(text, /tied overall: Strong model ≈ Weak model/);
   assert.match(text, /evidence\s+Strong model over Weak model\s+\+100 pts/);
   assert.doesNotMatch(text, /overall\s+Strong model over/);
+});
+
+test('a local server is set on Settings, listed in the picker and added with no credential', async () => {
+  const f = fixture();
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  f.key('5');
+  assert.match(f.text(), /Local server/);
+  assert.match(f.text(), /not set/);
+  f.key(down, down, down, down, ' ');
+  assert.match(f.text(), /address and port/);
+  f.key('q', esc);
+  assert.equal(f.app.config.local.url, '', 'q is a letter in the address field, and esc keeps what was saved');
+  f.key(' ', 'garbage', enter);
+  assert.match(f.text(), /Error: Use a full address/);
+  assert.match(f.text(), /address and port/, 'a rejected address leaves the field open');
+  f.key(esc, ' ', 'http://127.0.0.1:8080', enter);
+  assert.equal(f.app.config.local.url, 'http://127.0.0.1:8080');
+  await settle();
+  assert.equal(f.app.probes, 1, 'saving the address lists its models');
+  assert.match(f.text(), /1 model listed/);
+  assert.match(f.text(), /http:\/\/127\.0\.0\.1:8080/);
+
+  f.key('2', 'a');
+  await settle();
+  assert.equal(f.app.probes, 1, 'already listed; opening the picker does not ask again');
+  assert.match(f.text(), /local\/\/models\/tiny-q4\.gguf · tiny-q4 · local/);
+  f.key('tiny', enter);
+  assert.match(f.text(), /Your own server/);
+  assert.match(f.text(), /No credential, no charge/);
+  f.key(enter);
+  const added = f.app.config.models.at(-1)!;
+  assert.deepEqual([added.provider, added.model, added.auth], ['local', '/models/tiny-q4.gguf', 'none']);
+  f.key('1');
+  assert.match(f.text(), /Subscription logins and your own local server \(2 call sites\)/);
+  f.app.config.models[0]!.enabled = false;
+  assert.match(f.text(), /Your own local server only \(1 call site\)/);
+  f.key('r');
+  assert.match(f.text(), /local server/);
+  assert.match(f.text(), /start run/, 'no billing confirmation for a server that bills nothing');
+  f.key(esc);
+
+  // The reviewer picker never offers it.
+  f.key('5', up, up, up, enter);
+  assert.match(f.text(), /example\/model-one/);
+  assert.doesNotMatch(f.text(), /local\/\/models/);
+  f.key(esc);
+
+  // A server that does not answer is reported, and the rest of the catalog still opens.
+  f.app.setLocalUrl('http://down:1');
+  f.key('2', 'a');
+  await settle();
+  assert.equal(f.app.probes, 2);
+  assert.match(f.text(), /Local server: No answer from http:\/\/down:1/);
+  assert.match(f.text(), /example\/model-one/);
+  assert.doesNotMatch(f.text(), /local\/\/models/);
 });

@@ -46,8 +46,10 @@ export type ModelConfig = {
  * judge instability instead of hiding it.
  */
 export type JudgeConfig = { enabled: boolean; provider: string; model: string; auth: 'pi' | 'env' | 'cli'; thinking: ModelConfig['thinking']; repeat: number };
-export type Config = { schema: 1; suite: string; models: ModelConfig[]; disabledTests: string[]; removedTests: string[]; judge: JudgeConfig };
-export type AuthInfo = { mode: string; billing: 'subscription' | 'metered' | 'unknown' | 'control'; ready: boolean; note: string };
+/** The user's own OpenAI-compatible server, such as llama-server. Empty means none is configured. */
+export type LocalConfig = { url: string };
+export type Config = { schema: 1; suite: string; models: ModelConfig[]; disabledTests: string[]; removedTests: string[]; judge: JudgeConfig; local: LocalConfig };
+export type AuthInfo = { mode: string; billing: 'subscription' | 'metered' | 'unknown' | 'control' | 'local'; ready: boolean; note: string };
 export type RunOptions = { models?: string[]; tests?: string[]; repeat: number; seed: number; lane: 'tools' | 'prompt'; timeout: number; maxTurns: number; maxTokens: number; allowMetered: boolean; cache: boolean };
 export type Trial = {
   id: string; model: string; task: string; repetition: number;

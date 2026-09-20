@@ -6,6 +6,7 @@ import { App } from './app.ts';
 import { authInfo, defaultAuth, ENV_KEYS } from './auth.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { clean } from './files.ts';
+import { LOCAL } from './local.ts';
 import { checkSandbox, pythonExecutable } from './sandbox.ts';
 import type { ModelConfig, RunOptions } from './types.ts';
 
@@ -19,6 +20,8 @@ const help = `FORSETI  ·  evidence-first LLM benchmarks
   npm start -- models catalog [search]
   npm start -- models add provider/model --auth pi|env|cli
   npm start -- models add claude-code/sonnet     Your Claude plan, via Claude Code
+  npm start -- local http://127.0.0.1:8080       Point at llama-server, Ollama, LM Studio…
+  npm start -- models add local/MODEL_ID         …then add one of the models it lists
   npm start -- models enable|disable|remove ID
   npm start -- tests list
   npm start -- tests add ID --prompt 'Task' --expect '{"answer":42}'
@@ -58,21 +61,25 @@ async function main() {
     await checkSandbox(root);
     console.log(`✓ Sandbox enforced: trial-only writes/reads, no network or child processes\n✓ Python: ${pythonExecutable()}\n✓ ${app.suite.tasks.length} independent tasks; manifest + fixtures validated\n✓ Pi 0.85.1 libraries; no personal extensions or contexts loaded`);
     for (const model of app.config.models) {
-      const a = authInfo(model);
+      const a = authInfo(model, app.config.local.url);
       console.log(clean(`${a.ready ? '✓' : '!'} ${model.id}: ${a.mode} · ${a.billing} · ${a.note}`));
     }
     return;
   }
   if (command === 'models') {
-    if (!action || action === 'list') for (const m of app.config.models) { const a = authInfo(m); console.log(clean(`${m.enabled ? '●' : '○'} ${m.id}  ${m.provider}/${m.model}  ${m.auth} · ${a.billing} · ${a.ready ? 'ready' : a.note}`)); }
-    else if (action === 'catalog') for (const m of app.catalog.filter(m => !id || `${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(id.toLowerCase()))) console.log(clean(`${m.provider}/${m.id}  ${m.auth.ready ? 'ready' : 'not configured'} · ${m.auth.billing}`));
-    else if (action === 'add') {
+    if (!action || action === 'list') for (const m of app.config.models) { const a = authInfo(m, app.config.local.url); console.log(clean(`${m.enabled ? '●' : '○'} ${m.id}  ${m.provider}/${m.model}  ${m.auth} · ${a.billing} · ${a.ready ? 'ready' : a.note}`)); }
+    else if (action === 'catalog') {
+      // The local server is asked here, and only here, what it serves.
+      if (app.config.local.url) { try { await app.probeLocal(); } catch (e) { console.log(clean(`! local: ${(e as Error).message}`)); } }
+      for (const m of app.catalog.filter(m => !id || `${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(id.toLowerCase()))) console.log(clean(`${m.provider}/${m.id}  ${m.auth.ready ? 'ready' : 'not configured'} · ${m.auth.billing}`));
+    } else if (action === 'add') {
       if (!id?.includes('/')) throw new Error('Use provider/model');
       const provider = id.slice(0, id.indexOf('/')), model = id.slice(id.indexOf('/') + 1);
       const auth = values.auth ?? defaultAuth(provider);
       if (!['pi', 'env', 'none', 'cli'].includes(auth)) throw new Error('auth must be pi, env or cli');
       // An API key is never selected for you. If nothing else is configured, say so explicitly.
       if (auth === 'env' && !values.auth) throw new Error(`No subscription credential for ${provider}. Log in with Pi, or pass --auth env to use ${ENV_KEYS[provider] ?? 'a provider API key'} and be billed per token.`);
+      if (provider === LOCAL) await app.probeLocal();
       app.addModel(provider, model, auth as ModelConfig['auth']); console.log(`Added ${app.config.models.at(-1)!.id}`);
     } else {
       const model = app.config.models.find(m => m.id === id);
@@ -98,6 +105,14 @@ async function main() {
       else throw new Error('Unknown tests action');
       app.persist(); console.log(`${action}: ${id}. Fixtures/results retained; restore is reversible.`);
     }
+    return;
+  }
+  if (command === 'local') {
+    if (action) app.setLocalUrl(action);
+    if (!app.config.local.url) { console.log('No local server set. Usage: npm start -- local http://host:port'); return; }
+    const found = await app.probeLocal();
+    console.log(`${app.config.local.url}: ${found.length} model${found.length === 1 ? '' : 's'}`);
+    for (const m of found) console.log(clean(`  local/${m.id}  ${m.name}`));
     return;
   }
   if (command === 'runs') { for (const r of app.runs) console.log(`${r.id}  ${r.status}  ${r.trials.length}/${r.planned}  ${r.options.lane}`); return; }

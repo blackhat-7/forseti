@@ -98,3 +98,10 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **The per-trial file cap does not bound the suite snapshot.** (2026-09-21) `files()` caps a workspace at 80 files so a model cannot flood one; `loadSuite` reads every fixture and grader at once and outgrew that at 18 tasks. It now reads under the 400-entry bound, and the workspace cap is untouched.
 - **A rate-limited measurement is reported with its holes, never re-run to fill them.** (2026-09-21) The plan limit hit at trial 16 of 18 and skipped the rest. The report shows `not-run` for those and the numbers above are quoted with their denominators.
 - **A trap works when the engine offers no spelling for the rule, not when the spelling is a lookup away.** (2026-09-21) `iso-weeks` states the ISO week rule and SQLite has `%G-W%V` for it; Sonnet found it 2/3. `due-dates` states the clamp rule and SQLite has nothing for it; Sonnet wrote `'+1 month'` 4 of 5 times. Build the next task on the first kind.
+
+## Local servers (2026-09-21)
+
+- **One server address, not one per model.** (2026-09-21) `config.local.url` is the only place the address lives; a local model config holds just the model ID. The run manifest records which server answered, so provenance is kept without every model carrying a URL it would silently go stale on.
+- **The local server is asked exactly one thing outside a run: `GET /v1/models`.** (2026-09-21) On saving the address and on opening the model picker with an unlisted address, never on startup or `R`. That keeps "no provider request on startup" true and still makes the picker show what is actually being served.
+- **Local is the standard OpenAI dialect and nothing else.** (2026-09-21) `max_tokens`, `system` role, no `store`, no `reasoning_effort`, thinking `off`. That is what llama.cpp, Ollama, LM Studio and vLLM all accept; anything richer would work on one of them and break on another.
+- **A local model cannot be the reviewer.** (2026-09-21) Nothing asked for it, and a judge is part of the experiment identity; adding a second keyless path there is surface without a use.

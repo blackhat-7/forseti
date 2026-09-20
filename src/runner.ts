@@ -4,12 +4,13 @@ import { arch, platform, release } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { authInfo, catalogModels } from './auth.ts';
+import { authInfo, catalogModels, modelsFor } from './auth.ts';
 import { runAgent, safeError, SYSTEM_PROMPT } from './adapter.ts';
 import { claudeCodeArgs, runClaudeCode } from './claudecode.ts';
 import { DIMENSIONS, loadSuite, selectedModels, validateOptions } from './config.ts';
 import { atomicJson, files, hash, inside, localDir, put } from './files.ts';
 import { makeJudgeCall, review as reviewSubmission, type JudgeCall, type Review } from './judge.ts';
+import { LOCAL } from './local.ts';
 import { checkSandbox, pythonExecutable, runPython } from './sandbox.ts';
 import type { Check, Config, Dimension, GradeContext, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
 
@@ -58,8 +59,8 @@ export function rejectArtifacts(trial: Trial, task: Task, lane: RunOptions['lane
   trial.status = 'failed';
   trial.checks = applicableDimensions(task, lane, control, agent).map(dimension => ({ id: `invalid-submission-${dimension}`, dimension, passed: false, evidence: `Submission rejected before grading: ${reason}` }));
 }
-export function blankTrial(id: string, model: ModelConfig, task: Task, repetition: number): Trial {
-  return { id, model: model.id, task: task.id, repetition, status: 'passed', auth: authInfo(model), checks: [], wallMs: 0, modelMs: 0, toolMs: 0, gradeMs: 0, firstTokenMs: null, tokens: null, estimatedCost: null, trace: [], answer: '', files: {}, turns: 0 };
+export function blankTrial(id: string, model: ModelConfig, task: Task, repetition: number, local = ''): Trial {
+  return { id, model: model.id, task: task.id, repetition, status: 'passed', auth: authInfo(model, local), checks: [], wallMs: 0, modelMs: 0, toolMs: 0, gradeMs: 0, firstTokenMs: null, tokens: null, estimatedCost: null, trace: [], answer: '', files: {}, turns: 0 };
 }
 /**
  * The harness is what ran the trial. report.ts and tui.ts only read finished trials, and every
@@ -79,9 +80,9 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
   if (!tasks.length) throw new Error('Enable at least one test');
   const agent = agentOf(models);
   for (const model of models) {
-    const auth = authInfo(model);
+    const auth = authInfo(model, config.local.url);
     if (auth.ready && ['metered', 'unknown'].includes(auth.billing) && !options.allowMetered) throw new Error(`${model.label}: ${auth.billing} billing. Review costs and rerun with --allow-metered to consent. No calls made.`);
-    if (!['control', 'claude-code'].includes(model.provider) && !catalogModels.getModel(model.provider, model.model)) throw new Error(`Unknown model ${model.provider}/${model.model}`);
+    if (!['control', 'claude-code', LOCAL].includes(model.provider) && !catalogModels.getModel(model.provider, model.model)) throw new Error(`Unknown model ${model.provider}/${model.model}`);
   }
   // Resolved before any trial: a reviewer that cannot run must stop the run, not silently
   // degrade every design score to "not judged" after the quota has already been spent.
@@ -115,7 +116,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     const run: Run = {
       schema: 1, id, created: new Date().toISOString(), status: 'running', suite: suite.id,
       suiteHash: hash(contents), harnessHash: hash(harness),
-      environment: { node: process.version, python: pythonExecutable(), pythonVersion, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)), os: `${platform()} ${release()} ${arch()}`, sandbox: 'macOS Seatbelt; deny default; no network/fork; public trial only', pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : catalogModels.getModel(m.provider, m.model))) },
+      environment: { node: process.version, python: pythonExecutable(), pythonVersion, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)), os: `${platform()} ${release()} ${arch()}`, sandbox: 'macOS Seatbelt; deny default; no network/fork; public trial only', pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url } : catalogModels.getModel(m.provider, m.model))) },
       judge,
       options, models, tasks: tasks.map(t => ({ id: t.id, title: t.title, capabilities: t.capabilities, hash: hash({ task: t, fixture: files(inside(dir, t.fixture)), private: Object.entries(contents).filter(([p]) => p.startsWith('private/')) }) })), planned: jobs.length, trials: [],
     };
@@ -124,7 +125,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     const blockedProviders = new Map<string, string>();
     const blockedModels = new Map<string, string>();
     for (const [i, job] of jobs.entries()) {
-      const trial = blankTrial(`${String(i + 1).padStart(4, '0')}-${job.model.id}-${job.task.id}`, job.model, job.task, job.repetition);
+      const trial = blankTrial(`${String(i + 1).padStart(4, '0')}-${job.model.id}-${job.task.id}`, job.model, job.task, job.repetition, config.local.url);
       const trialDir = localDir(runDir, `trials/${trial.id}`);
       const work = localDir(trialDir, 'public');
       const notify = (phase: string) => onProgress({ completed: i, total: jobs.length, task: job.task.title, model: job.model.label, phase, runId: id });
@@ -156,7 +157,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
             for (const [path, content] of Object.entries(control.files ?? {})) put(work, path, content);
             trial.answer = control.answer ?? '';
           } else if (job.model.provider === 'claude-code') await runClaudeCode(work, job.model, job.task, options, trial, controller.signal, notify, record);
-          else await runAgent(work, job.model, job.task, options, trial, controller.signal, notify, record);
+          else await runAgent(work, job.model, job.task, options, trial, controller.signal, notify, record, modelsFor(job.model, config.local.url));
           if (controller.signal.aborted) {
             trial.status = signal.aborted ? 'cancelled' : 'timeout';
             trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${options.timeout}s exceeded; outcome censored`;

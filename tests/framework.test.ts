@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
 import { App } from '../src/app.ts';
@@ -8,6 +10,7 @@ import { authInfo, catalogModels, validateCredential } from '../src/auth.ts';
 import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
+import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
 import { comparisonKey, comparisonReport, correctness, dimensionScore, median, scorecard, scoreError, separated, stalled, checkShare } from '../src/report.ts';
 import { agentOf, applicableDimensions, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
@@ -471,4 +474,84 @@ test('a rendering-only change does not split comparison groups', () => {
   assert.deepEqual(harnessFiles(dir), before, 'a report wording fix must not strand earlier runs');
   writeFileSync(join(dir, 'src/sandbox.ts'), '// changed\n', { flag: 'a' });
   assert.notDeepEqual(harnessFiles(dir), before, 'anything that touches a trial still starts a new experiment');
+});
+
+/** The standard OpenAI-compatible surface and nothing else: `GET /v1/models`, streamed `POST /v1/chat/completions`. */
+async function fakeLocalServer() {
+  const requests: { path: string; body?: Record<string, unknown>; auth?: string }[] = [];
+  const server = createServer((req, res) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      const body = raw ? JSON.parse(raw) as Record<string, unknown> : undefined;
+      requests.push({ path: req.url!, body, auth: req.headers.authorization });
+      if (req.url === '/v1/models') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ object: 'list', data: [{ id: '/models/tiny-q4.gguf', object: 'model' }, { id: '/models/tiny-q4.gguf' }] })); return; }
+      if (req.url === '/v1/chat/completions') {
+        res.setHeader('content-type', 'text/event-stream');
+        const chunk = (delta: object, finish: string | null, usage?: object) => `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: body!.model, choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`;
+        res.end(chunk({ role: 'assistant', content: 'Done' }, null) + chunk({}, 'stop', { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 }) + 'data: [DONE]\n\n');
+        return;
+      }
+      res.statusCode = 404; res.end();
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests, close: () => server.close() };
+}
+
+test('a local OpenAI-compatible server runs through the Pi adapter with no credential and no charge', async () => {
+  assert.equal(localUrl(' http://127.0.0.1:1234/v1/ '), 'http://127.0.0.1:1234', 'a pasted /v1 base is accepted');
+  assert.equal(localUrl(''), '');
+  for (const bad of ['localhost:1234', 'ftp://h', 'http://u:p@h:1', 'http://h:1?x=1']) assert.throws(() => localUrl(bad), `${bad} is not a local server address`);
+  assert.equal(shortName('/home/me/models/JonathanColetti%2FQwen-GGUF/qwen-27b-Q4_K_M.gguf'), 'qwen-27b-Q4_K_M');
+  assert.equal(shortName('llama3.2:latest'), 'llama3.2:latest', 'an Ollama tag is already a name');
+
+  const local: ModelConfig = { id: 'local-tiny-q4', label: 'tiny-q4 · local', provider: LOCAL, model: '/models/tiny-q4.gguf', auth: 'none', enabled: true, thinking: 'off' };
+  const withLocal = (over: Partial<ModelConfig>, url = 'http://127.0.0.1:1') => validateConfig(root, { ...cfg(), local: { url }, models: [{ ...local, ...over }] });
+  assert.doesNotThrow(() => withLocal({}));
+  assert.doesNotThrow(() => withLocal({}, ''), 'a saved model outlives the address; it is simply not ready');
+  assert.throws(() => withLocal({ auth: 'pi' }), /auth "none"/);
+  assert.throws(() => withLocal({ provider: 'openai' }), /explicit Pi or environment auth/, 'keyless stays reserved for the local server and controls');
+  assert.throws(() => validateConfig(root, { ...cfg(), local: { url: 'nope' } }), /full address/);
+  assert.throws(() => validateJudge({ ...DEFAULT_JUDGE, provider: LOCAL, auth: 'pi' }), /cannot be a local server/);
+  assert.equal(authInfo(local).ready, false, 'no address, not ready');
+  assert.deepEqual([authInfo(local, 'http://127.0.0.1:1').ready, authInfo(local, 'http://127.0.0.1:1').billing], [true, 'local']);
+  await assert.rejects(listLocalModels('http://127.0.0.1:9'), /No answer from http:\/\/127\.0\.0\.1:9/);
+
+  const server = await fakeLocalServer();
+  try {
+    assert.deepEqual(await listLocalModels(server.url), [{ id: '/models/tiny-q4.gguf', name: 'tiny-q4' }], 'ids come from data[] and are deduplicated');
+
+    const dir = temp(); put(dir, 'input.txt', 'public');
+    const t = blankTrial('local', local, task, 1, server.url);
+    await runAgent(dir, local, task, DEFAULT_OPTIONS, t, new AbortController().signal, () => {}, () => {}, localModels(server.url, [local.model]));
+    assert.equal(t.status, 'passed'); assert.equal(t.answer, 'Done'); assert.equal(t.tokens!.output, 1); assert.equal(t.estimatedCost, null);
+    const chat = server.requests.find(r => r.path === '/v1/chat/completions')!;
+    assert.equal(chat.body!.model, '/models/tiny-q4.gguf');
+    assert.ok('max_tokens' in chat.body! && !('store' in chat.body!), 'plain chat-completions dialect, as llama.cpp, Ollama and LM Studio speak it');
+    assert.equal((chat.body!.messages as { role: string }[])[0]!.role, 'system', 'system role, not the OpenAI-only developer role');
+    assert.doesNotMatch(chat.auth ?? '', /sk-|eyJ/, 'no real credential ever goes to a local server');
+
+    // The whole path from Settings to a graded trial, as the app runs it.
+    const ws = workspace(); const app = new App(ws); await app.refresh();
+    assert.equal(app.localModels, undefined, 'startup never asks the server anything');
+    assert.throws(() => app.setLocalUrl('nonsense'), /full address/);
+    app.setLocalUrl(server.url);
+    assert.equal(app.config.local.url, server.url);
+    assert.throws(() => app.addModel(LOCAL, local.model, 'none'), /Unknown provider\/model/, 'unlisted until the server has been asked');
+    const found = await app.probeLocal();
+    assert.equal(found[0]!.name, 'tiny-q4 · local');
+    assert.equal(app.catalog[0]!.provider, LOCAL, 'the local server is listed first');
+    app.addModel(LOCAL, local.model, 'pi');
+    const added = app.config.models.at(-1)!;
+    assert.deepEqual([added.id, added.label, added.auth, added.thinking], ['local-tiny-q4', 'tiny-q4 · local', 'none', 'off'], 'the id is the file name, never the path, and auth is forced to none');
+    const run = await app.run({ ...DEFAULT_OPTIONS, repeat: 1, models: [added.id], tests: [task.id] }, () => {}, new AbortController().signal);
+    const trial = run.trials[0]!;
+    assert.ok(['passed', 'failed'].includes(trial.status), `graded, not a provider failure: ${trial.status} ${trial.error ?? ''}`);
+    assert.equal(trial.auth.billing, 'local');
+    assert.match(run.environment.catalog!, new RegExp(server.url), 'the run records which server answered');
+    assert.match(comparisonReport([run]), /your own server; USD n\/a/);
+    assert.equal(run.environment.agent, 'pi', 'a local model is a Pi-adapter model and pools with the others');
+    assert.throws(() => agentOf([added, { ...added, id: 'cc', provider: 'claude-code' }]), /different harnesses/);
+  } finally { server.close(); }
 });
