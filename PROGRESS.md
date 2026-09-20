@@ -28,6 +28,7 @@ The open PLAN line is still the top one and needs one more task like `due-dates`
 ## Gotchas
 
 - **`forseti.json` holds the local server address and the user's reviewer tweaks; never commit it.** It is tracked but stays modified in the working tree on purpose. A report exported from a local run names the server and the model's file path; do not commit those either.
+- **A hybrid local model thinks unless told not to.** Thinking `off` is now sent as `enable_thinking: false`. With thinking `high`, raise `--tokens` well past 4096 or turns get censored as `budget`.
 - **llama-server names a model by its file path** unless started with `--alias`. Forseti shortens it to the file name for the config ID and label; the API `model` field keeps the full path, so the config `model` limit is 500 characters.
 - **The Claude plan rate limit stops the whole run for that provider**, and the remaining trials of every Claude model are skipped. Budget a measurement below the limit or expect `not-run` rows.
 - **Running `python3` against a fixture directory writes `__pycache__` into it**, and `fixture()` then dies with `EISDIR`. Always `python3 -B`, and check `ls -a` on the fixture afterwards.

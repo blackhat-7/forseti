@@ -4,7 +4,7 @@ import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmS
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
+import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { App } from '../src/app.ts';
 import { authInfo, catalogModels, validateCredential } from '../src/auth.ts';
 import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts';
@@ -530,6 +530,11 @@ test('a local OpenAI-compatible server runs through the Pi adapter with no crede
     assert.equal(chat.body!.model, '/models/tiny-q4.gguf');
     assert.ok('max_tokens' in chat.body! && !('store' in chat.body!), 'plain chat-completions dialect, as llama.cpp, Ollama and LM Studio speak it');
     assert.equal((chat.body!.messages as { role: string }[])[0]!.role, 'system', 'system role, not the OpenAI-only developer role');
+    assert.equal((chat.body!.chat_template_kwargs as { enable_thinking: boolean }).enable_thinking, false, 'thinking off is sent, not assumed: a hybrid model thinks unless told otherwise');
+    assert.ok(!('reasoning_effort' in chat.body!));
+    assert.deepEqual(getSupportedThinkingLevels(localModels(server.url, [local.model]).getModel(LOCAL, local.model)!), ['off', 'high'], 'on or off; a local template has no effort dial');
+    await runAgent(dir, { ...local, thinking: 'high' }, task, DEFAULT_OPTIONS, blankTrial('think', local, task, 1, server.url), new AbortController().signal, () => {}, () => {}, localModels(server.url, [local.model]));
+    assert.equal((server.requests.at(-1)!.body!.chat_template_kwargs as { enable_thinking: boolean }).enable_thinking, true);
     assert.doesNotMatch(chat.auth ?? '', /sk-|eyJ/, 'no real credential ever goes to a local server');
 
     // The whole path from Settings to a graded trial, as the app runs it.

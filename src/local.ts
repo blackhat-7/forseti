@@ -41,6 +41,11 @@ export async function listLocalModels(url: string): Promise<LocalModel[]> {
  * A pi Models collection holding just this server. Keyless by design: the server is the user's
  * own, so `resolve` reports it configured and hands the OpenAI client a placeholder key, which
  * llama-server ignores. The compat flags pin the plain chat-completions dialect llama.cpp speaks.
+ *
+ * Thinking is `off` or `high` and nothing in between: it becomes `chat_template_kwargs.enable_thinking`,
+ * which llama.cpp, vLLM and SGLang honour and Ollama and LM Studio ignore. A hybrid model such as
+ * Qwen3 thinks by default, and with the setting unsent it spent a whole 4096-token turn thinking
+ * while the manifest said thinking was off.
  */
 export function localModels(url: string, ids: string[]): Models {
   if (!url) throw new Error('No local server address. Set one on Settings.');
@@ -50,9 +55,10 @@ export function localModels(url: string, ids: string[]): Models {
     id: LOCAL, name: 'Local server', baseUrl,
     auth: { apiKey: { name: 'Local server (no key)', resolve: async () => ({ auth: { apiKey: 'none' }, source: 'none' }) } },
     models: ids.map((id): Model<'openai-completions'> => ({
-      id, name: shortName(id), api: 'openai-completions', provider: LOCAL, baseUrl, reasoning: false, input: ['text'],
+      id, name: shortName(id), api: 'openai-completions', provider: LOCAL, baseUrl, reasoning: true, input: ['text'],
+      thinkingLevelMap: { minimal: null, low: null, medium: null, xhigh: null, max: null },
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32_768, maxTokens: 8192,
-      compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: 'max_tokens' },
+      compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: 'max_tokens', thinkingFormat: 'qwen-chat-template' },
     })),
     api: openAICompletionsApi(),
   }));
