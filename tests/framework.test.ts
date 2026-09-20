@@ -9,7 +9,7 @@ import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { comparisonKey, comparisonReport, correctness, dimensionScore, median, scorecard, scoreError, separated, stalled, checkShare } from '../src/report.ts';
-import { agentOf, applicableDimensions, blankTrial, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
+import { agentOf, applicableDimensions, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
 import type { Config, Dimension, ModelConfig, ToolEvent, Trial } from '../src/types.ts';
@@ -461,4 +461,14 @@ test('read-only OAuth preflight agrees with Pi five-minute validity window', () 
   assert.throws(() => validateCredential(token), /near expiry/);
   assert.doesNotThrow(() => validateCredential({ ...token, expires: Date.now() + 6 * 60_000 }));
   assert.throws(() => validateCredential({ type: 'api_key', key: '!some-command' }), /Command/);
+});
+
+test('a rendering-only change does not split comparison groups', () => {
+  const dir = workspace();
+  const before = harnessFiles(dir);
+  assert.ok(!('report.ts' in before) && !('tui.ts' in before) && 'runner.ts' in before);
+  writeFileSync(join(dir, 'src/report.ts'), '// reworded\n', { flag: 'a' });
+  assert.deepEqual(harnessFiles(dir), before, 'a report wording fix must not strand earlier runs');
+  writeFileSync(join(dir, 'src/sandbox.ts'), '// changed\n', { flag: 'a' });
+  assert.notDeepEqual(harnessFiles(dir), before, 'anything that touches a trial still starts a new experiment');
 });

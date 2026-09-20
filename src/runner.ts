@@ -61,6 +61,15 @@ export function rejectArtifacts(trial: Trial, task: Task, lane: RunOptions['lane
 export function blankTrial(id: string, model: ModelConfig, task: Task, repetition: number): Trial {
   return { id, model: model.id, task: task.id, repetition, status: 'passed', auth: authInfo(model), checks: [], wallMs: 0, modelMs: 0, toolMs: 0, gradeMs: 0, firstTokenMs: null, tokens: null, estimatedCost: null, trace: [], answer: '', files: {}, turns: 0 };
 }
+/**
+ * The harness is what ran the trial. report.ts and tui.ts only read finished trials, and every
+ * run in a comparison group is rendered by the same current copy of them, so a change there cannot
+ * make two runs incomparable. Hashing them once stranded paid-for runs behind a wording fix.
+ */
+const RENDER_ONLY = new Set(['report.ts', 'tui.ts']);
+export function harnessFiles(root: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(files(inside(root, 'src'))).filter(([path]) => !RENDER_ONLY.has(path)));
+}
 export async function runBenchmark(root: string, config: Config, options: RunOptions, onProgress: (p: Progress) => void = () => {}, signal = new AbortController().signal, makeJudge: typeof makeJudgeCall = makeJudgeCall): Promise<Run> {
   validateOptions(options);
   const models = selectedModels(config, options.models);
@@ -98,7 +107,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     for (const [path, text] of Object.entries(contents)) put(snapshot, path, text);
     for (const task of suite.tasks) localDir(snapshot, task.fixture);
     const jobs = schedule(models, tasks, options.repeat, options.seed);
-    const harness = { src: files(inside(root, 'src')), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8'), system: SYSTEM_PROMPT };
+    const harness = { src: harnessFiles(root), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8'), system: SYSTEM_PROMPT };
     const harnessDir = localDir(runDir, 'harness');
     for (const [path, text] of Object.entries(harness.src)) put(harnessDir, `src/${path}`, text);
     put(harnessDir, 'package-lock.json', harness.lock);

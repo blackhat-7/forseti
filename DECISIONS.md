@@ -43,6 +43,8 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **Thinking level is part of the reviewer's identity.** (2026-09-18) A calibration at `thinking: off` says nothing about a reviewer running at `medium`. Re-validate after changing it; `judgeIdentity` already refuses to pool them.
 - **Generated `reports/comparison-*.md` are not tracked.** (2026-09-18) `exportReport` writes one per export and the PTY smoke test exports every run, so the repo grew by a few hundred lines on each routine verification. The two curated reports the README links are named by hand and stay tracked. Run artifacts already live in the gitignored `runs/`; publish a report by giving it a name.
 
+- **The harness hash leaves out `report.ts` and `tui.ts`.** (2026-09-20) They only read finished trials, and every run in a comparison group is rendered by the same current copy of them, so a wording fix there cannot make two runs incomparable. Hashing them stranded paid-for runs behind rendering changes. Anything that touches a trial still splits the group.
+
 ## Hard-won lessons
 
 - **Look at the instrument's output before changing the thing it measures.** (M18) A citation-check bug was silently discarding *correct* defects. Two full calibration runs were wasted guessing; one raw reviewer reply found it in a minute.
