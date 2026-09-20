@@ -17,7 +17,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 ## Done this session
 
 - **Added the `local` provider.** `src/local.ts` builds a keyless pi `Models` with `createProvider` and the openai-completions API, pinned to the plain dialect every local server speaks: `max_tokens`, `system` role, no `store`, no `reasoning_effort`, thinking `off`. `GET /v1/models` is the only request made outside a run, and only when the address is saved or the model picker opens with an unlisted address. Never on startup.
-- **One real trial on a llama-server (Qwen3 27B Q4): `shared-count` passed 10/10 checks in 5 turns and 52s**, billing `local`, server recorded in `environment.catalog`. Not a measurement, a smoke test.
+- **First local measurement, Qwen3 27B Q4 on llama-server, 19 tasks × 2, thinking off: 88% correct on 30 graded trials, 8 stalls (67% if counted), median 25s per trial.** Same session Haiku × 1: 71% on 17 graded, 1 timeout, median 60s. Separate harnesses, so the report shows them as two experiments, not one ranking. Qwen misses `coverage-audit` 0/2; Haiku misses `weekly-coverage`, `source-map`, `retry-rollup`, `due-dates`. The four Qwen stalls with two repeats are `due-dates` and `iso-weeks` (0/0 graded).
 - Two new tests: a fake OpenAI-compatible server driven from `localUrl` through `App.run` and the report (framework), and the Settings → picker → add → preflight flow (UI).
 - `harnessHash` changed (`auth.ts`, `config.ts`, `runner.ts`, `adapter`-adjacent files), so runs before this commit sit in their own comparison group.
 
