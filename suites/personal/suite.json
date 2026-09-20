@@ -401,6 +401,27 @@
         "exactness",
         "evidence"
       ]
+    },
+    {
+      "id": "iso-weeks",
+      "title": "Count deploys per ISO week",
+      "tags": [
+        "sql",
+        "calendar",
+        "time-window"
+      ],
+      "prompt": "Fix query.sql for SQLite. deploys(id, service, deployed_at) holds one row per deploy. Bind parameters :start and :end are instants. Return one row per ISO 8601 week that has at least one deploy with deployed_at in the half-open interval [:start, :end), as (week, deploys) ordered by week, where week is YYYY-Www. ISO weeks start on Monday, week 01 is the week that contains January 4, and a week belongs to the year of its Thursday, so the days around New Year can belong to the other year's week. deployed_at values are ISO-8601 and the offsets are not all the same; the day is the UTC day. Do not modify any data. Change only query.sql. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public rows are a subset: passing that check does not mean the query is right. If tools are unavailable, return only JSON {\"files\":{\"query.sql\":\"complete replacement contents\"}}. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/iso-weeks",
+      "grader": "private/iso-weeks.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "evidence"
+      ]
     }
   ]
 }

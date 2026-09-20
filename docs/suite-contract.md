@@ -44,6 +44,6 @@ Each run records the capabilities of the tasks it ran, so an old run stays reada
 
 ### Current coverage
 
-`exactness` 12 tasks · `evidence` 12 · `scope` 8 · `restraint` 6 · `safety` 4.
+`exactness` 13 tasks · `evidence` 13 · `scope` 8 · `restraint` 6 · `safety` 4.
 
 Known gaps: nothing here tests architecture or system design, long-horizon planning, performance work, or large multi-file context. Those shapes appear in real work but are not in this suite; do not read a high score as covering them.
