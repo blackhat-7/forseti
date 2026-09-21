@@ -49,13 +49,15 @@ npm start -- run --models claude-code-sonnet,claude-code-haiku --tests shared-co
 
 No API key, no `--allow-metered`. Forseti spawns the first-party client (`claude -p`) in the trial directory and lets it authenticate itself — it never reads, copies or refreshes a Claude credential, and it deletes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and `ANTHROPIC_PROFILE` from the child so this path can never silently bill a metered key. Usage draws on your plan's limits; hitting one stops that provider for the run with no retry.
 
-Flags per trial: `--safe-mode --disable-slash-commands` (so your hooks, plugins, skills, MCP servers and `CLAUDE.md` don't leak into a benchmark), `--permission-mode dontAsk --permission-prompts none` (anything that would prompt is denied, not queued), `--allowedTools Read,Write,Edit,Glob,Grep`, `--max-turns`. They are recorded in each run manifest.
+Flags per trial: `--restricted --disable-slash-commands` (your settings, hooks, plugins, skills and `CLAUDE.md` don't leak into a benchmark, and the built-in shell and code runners are removed), `--strict-mcp-config --mcp-config` (only Forseti's own tool server is loaded, never the host's), `--permission-mode dontAsk --permission-prompts none` (anything that would prompt is denied, not queued), `--allowedTools` naming Forseti's four MCP tools, `--disallowedTools` removing `Read,Write,Edit,Glob,Grep,Bash` and the rest, and `--max-turns`. They are recorded in each run manifest.
+
+**Both lanes get the identical four tools.** Forseti serves `list_files`, `read_file`, `write_file` and sandboxed `python` to Claude Code over MCP, the same implementations the Pi lane uses, with the same 64-call budget and the same Seatbelt confinement, and denies the CLI's native file tools. Before this the Pi lane could run `check_public.py` and iterate while Claude Code could not, so a cross-lane score compared capabilities rather than models.
 
 **This measures the model inside Claude Code, not the model.** Claude Code brings its own system prompt, agent loop, context management and tools. So:
 - A run may not mix `claude-code` models with Pi-adapter models — Forseti refuses, because the table would compare harnesses.
 - Reports tag the harness and never pool the two.
-- Tool checks are **N/A** here: the suite's tool rubric names Forseti's `read_file`/`write_file`/`python`, which Claude Code doesn't have.
-- This lane runs **outside** the Seatbelt sandbox, so it gets no `Bash` tool — file access to its trial directory and nothing else. The Pi lane's sandboxed Python has no equivalent here; that is a capability difference, not a model difference.
+- Tool checks **do** apply here: the lane runs Forseti's own tools, so `read-before-write` and `public-python-check` are graded exactly as in the Pi lane.
+- The CLI process itself runs outside Seatbelt, but every tool it can reach runs inside it: `python` executes through the same sandbox as the Pi lane, and the file tools are confined to the trial directory.
 - Reported cost is Claude Code's client-side list-price estimate, not what a subscription is billed.
 
 API keys are also supported:

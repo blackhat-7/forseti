@@ -8,6 +8,7 @@ import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCal
 import { App } from '../src/app.ts';
 import { authInfo, catalogModels, validateCredential } from '../src/auth.ts';
 import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts';
+import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
@@ -32,6 +33,12 @@ function workspace() {
 }
 const cfg = () => structuredClone(DEFAULT_CONFIG);
 const task = loadSuite(root, 'suites/personal/suite.json').suite.tasks[0];
+/** Which tool checks the suite's own rubric produces for a trace, without importing src into it. */
+async function toolChecksFor(trace: ToolEvent[]): Promise<string[]> {
+  const { toolChecks } = await import(new URL('../suites/personal/private/helpers.mjs', import.meta.url).href) as { toolChecks: (...a: unknown[]) => unknown };
+  return (toolChecks(trace, ['module.py'], 'check_public.py', false, { lane: 'tools' }) as { id: string; passed: boolean }[])
+    .filter(c => c.passed).map(c => c.id).sort();
+}
 
 test('paths, links, special files and oversized outputs fail closed', () => {
   const dir = temp(); const outside = temp(); put(outside, 'secret', 'private');
@@ -347,12 +354,17 @@ test('Claude Code runs under the first-party login, never an API key, and never 
   assert.match(auth.note, /no API key is used/);
 
   // Every credential variable that could divert billing to a metered key is stripped.
-  const args = claudeCodeArgs('sonnet', 7).join(' ');
-  for (const flag of ['--safe-mode', '--permission-mode dontAsk', '--permission-prompts none', '--max-turns 7', '--model sonnet']) assert.ok(args.includes(flag), flag);
+  const args = claudeCodeArgs('sonnet', 7, '/tmp/mcp.json').join(' ');
+  for (const flag of ['--restricted', '--permission-mode dontAsk', '--permission-prompts none', '--max-turns 7', '--model sonnet']) assert.ok(args.includes(flag), flag);
   // --allowedTools only pre-approves; only --disallowedTools removes a tool from the session.
   assert.ok(args.includes(`--disallowedTools ${CLAUDE_CODE_DENIED}`), 'tools must be denied, not merely left un-approved');
   for (const denied of ['Bash', 'Task', 'WebFetch', 'WebSearch']) assert.ok(CLAUDE_CODE_DENIED.split(',').includes(denied), denied);
   assert.ok(!args.includes('--bare'), '--bare would drop the subscription login and demand an API key');
+  assert.ok(!args.includes('--safe-mode'), 'safe mode disables every MCP server, so this lane could not be given Forseti tools');
+  // Uniformity is the point: the CLI's own file tools are gone and only Forseti's four remain.
+  assert.ok(args.includes('--strict-mcp-config') && args.includes('--mcp-config /tmp/mcp.json'), 'only Forseti supplies MCP servers here');
+  for (const native of ['Read', 'Write', 'Edit', 'Glob', 'Grep']) assert.ok(CLAUDE_CODE_DENIED.split(',').includes(native), `${native} must be denied so both lanes hold the same tools`);
+  assert.deepEqual(CLAUDE_CODE_ALLOWED.split(','), ['list_files', 'read_file', 'write_file', 'python'].map(t => `mcp__forseti__${t}`));
   assert.ok(!CLAUDE_CODE_ALLOWED.split(',').includes('Bash'), 'this lane runs outside the sandbox, so it gets no shell');
 
   // The CLI streams the session as an array; the answer is the last result entry, not the first.
@@ -368,10 +380,12 @@ test('Claude Code runs under the first-party login, never an API key, and never 
   assert.equal(agentOf([cc('sonnet'), cc('haiku'), cfg().models[0]]), 'claude-code');
   assert.throws(() => agentOf([cc('sonnet'), pi]), /different harnesses/);
 
-  // Claude Code's trace cannot satisfy a rubric written for Forseti's tool names.
+  // Both lanes are served the same four Forseti tools, so the tool rubric grades either one.
+  // Only a control, which has no trace, and the prompt lane, which has no tools, are exempt.
   const withTools = { ...task, dimensions: ['correctness', 'tools'] as Dimension[] };
-  assert.deepEqual(applicableDimensions(withTools, 'tools', false, 'pi'), ['correctness', 'tools']);
-  assert.deepEqual(applicableDimensions(withTools, 'tools', false, 'claude-code'), ['correctness']);
+  assert.deepEqual(applicableDimensions(withTools, 'tools', false), ['correctness', 'tools']);
+  assert.deepEqual(applicableDimensions(withTools, 'tools', true), ['correctness']);
+  assert.deepEqual(applicableDimensions(withTools, 'prompt', false), ['correctness']);
 
   // Provider messages decide the outcome; a plan limit stops the provider instead of retrying.
   assert.equal(classify("You've hit your Sonnet limit", 1), 'rate_limited');
@@ -559,4 +573,37 @@ test('a local OpenAI-compatible server runs through the Pi adapter with no crede
     assert.equal(run.environment.agent, 'pi', 'a local model is a Pi-adapter model and pools with the others');
     assert.throws(() => agentOf([added, { ...added, id: 'cc', provider: 'claude-code' }]), /different harnesses/);
   } finally { server.close(); }
+});
+
+test('both lanes are served the identical four tools, and the MCP one stays inside the sandbox', async () => {
+  const dir = temp();
+  put(dir, 'module.py', 'print("public")\n');
+  put(dir, 'check_public.py', 'print("ok")\n');
+  const events: ToolEvent[] = [];
+  const handle = createHandler(dir, e => events.push(e), 2);
+  const call = async (name: string, args: Record<string, unknown> = {}) =>
+    await handle({ id: 1, method: 'tools/call', params: { name, arguments: args } }) as { result: { content: { text: string }[]; isError?: boolean } };
+
+  // The handshake the CLI performs, and the tool list it is given.
+  const init = await handle({ id: 0, method: 'initialize' }) as { result: { serverInfo: { name: string } } };
+  assert.equal(init.result.serverInfo.name, 'forseti');
+  const listed = await handle({ id: 0, method: 'tools/list' }) as { result: { tools: { name: string }[] } };
+  // Parity is the whole point: same names, so neither lane is offered a capability the other lacks.
+  const piNames = taskTools(dir, [], new AbortController().signal, () => {}).map(t => t.name);
+  assert.deepEqual(listed.result.tools.map(t => t.name).sort(), piNames.sort());
+  assert.deepEqual(MCP_ALLOWED.split(',').sort(), piNames.map(n => `mcp__forseti__${n}`).sort());
+
+  assert.match((await call('read_file', { path: 'module.py' })).result.content[0]!.text, /public/);
+  // Confinement holds independently of the CLI's own --restricted working-directory rule.
+  assert.equal((await call('read_file', { path: '../../../etc/passwd' })).result.isError, true);
+  assert.equal((await call('read_file', { path: 'module.py' })).result.isError, true, 'the call budget is enforced, as in the Pi lane');
+
+  // A recorded event carries exactly the shape the suite's tool rubric reads.
+  const fresh = createHandler(dir, e => events.push(e));
+  await fresh({ id: 2, method: 'tools/call', params: { name: 'python', arguments: { source: "import runpy; runpy.run_path('check_public.py', run_name='__main__')" } } });
+  const ran = events.at(-1)!;
+  assert.equal(ran.tool, 'python');
+  assert.equal(ran.ok, true);
+  assert.equal(JSON.parse(ran.output).code, 0, 'the sandboxed interpreter really executed the public check');
+  assert.deepEqual(await toolChecksFor([events[0]!, ran]), ['read-before-write', 'public-python-check'].sort());
 });

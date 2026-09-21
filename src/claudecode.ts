@@ -1,26 +1,34 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { safeError } from './adapter.ts';
-import { files } from './files.ts';
-import type { ModelConfig, RunOptions, Task, Trial } from './types.ts';
+import { files, inside } from './files.ts';
+import { MCP_ALLOWED, MCP_SERVER } from './mcpserver.ts';
+import type { ModelConfig, RunOptions, Task, ToolEvent, Trial } from './types.ts';
 
 /** Model aliases the CLI accepts. Full IDs also work; these are what we offer in the catalog. */
 export const CLAUDE_CODE_MODELS = ['opus', 'sonnet', 'haiku', 'fable'] as const;
-/** Auto-approved so file work never stalls on a prompt. This is an allow list, not a restriction. */
-export const CLAUDE_CODE_ALLOWED = 'Read,Write,Edit,Glob,Grep';
+/**
+ * The only tools this lane gets, and they are Forseti's own, served over MCP. The CLI's native
+ * file tools are denied below so both lanes hold the identical four: a Claude model and a local
+ * model now read, write and run code through the same implementations, under the same sandbox
+ * and the same 64-call budget. Before this, the Pi lane could run `check_public.py` and this one
+ * could not, so a cross-lane score compared capabilities rather than models.
+ */
+export const CLAUDE_CODE_ALLOWED = MCP_ALLOWED;
 /**
  * Actually removes tools. `--allowedTools` only pre-approves; without this the session still
  * carries Bash, web access and subagents, which this lane must not have: it runs outside the
  * Seatbelt sandbox, and network/subagent access would also make it a different benchmark.
  */
-export const CLAUDE_CODE_DENIED = 'Bash,Task,WebFetch,WebSearch,NotebookEdit,Workflow,SendMessage,RemoteTrigger,CronCreate,CronDelete,CronList,ScheduleWakeup,EnterWorktree,ExitWorktree';
+export const CLAUDE_CODE_DENIED = 'Read,Write,Edit,Glob,Grep,Bash,Task,WebFetch,WebSearch,NotebookEdit,Workflow,SendMessage,RemoteTrigger,CronCreate,CronDelete,CronList,ScheduleWakeup,EnterWorktree,ExitWorktree';
 
 /**
  * A reviewer only reads the prompt and answers, so it gets no tools at all — not even Read.
  * `--allowedTools` alone would only pre-approve; the tools have to be denied to be absent.
  */
-export const CLAUDE_CODE_JUDGE_DENIED = `${CLAUDE_CODE_DENIED},Read,Write,Edit,Glob,Grep,TodoWrite,BashOutput,KillShell`;
+export const CLAUDE_CODE_JUDGE_DENIED = `${CLAUDE_CODE_DENIED},TodoWrite,BashOutput,KillShell`;
 
 let binary: string | undefined;
 export function claudeCodeBinary(): string {
@@ -31,15 +39,20 @@ export function claudeCodeBinary(): string {
 }
 
 /** The flags are part of the result: they are recorded per run so an old run stays reproducible. */
-export function claudeCodeArgs(model: string, maxTurns: number): string[] {
+export function claudeCodeArgs(model: string, maxTurns: number, mcpConfig = 'MCP_CONFIG'): string[] {
   return [
     '-p',
     '--model', model,
     '--output-format', 'json',
-    // Disable the host's hooks, plugins, skills, MCP servers and CLAUDE.md so a trial
-    // measures Claude Code, not this machine's configuration. Unlike --bare, this keeps
-    // the subscription login.
-    '--safe-mode',
+    // `--restricted`, not `--safe-mode`: safe mode disables every customization including MCP
+    // servers, so Forseti could not hand this lane its own tools. Restricted mode ignores the
+    // host's settings files, removes the built-in code runners and confines file tools to the
+    // working directory, and a check confirms it does not pull in this repo's CLAUDE.md.
+    // Unlike `--bare` it keeps the subscription login.
+    '--restricted',
+    // Only the server named on the next flag; the host's MCP configuration is ignored.
+    '--strict-mcp-config',
+    '--mcp-config', mcpConfig,
     '--disable-slash-commands',
     // Locked-down: anything that would prompt is denied rather than waiting for a human.
     '--permission-mode', 'dontAsk',
@@ -66,6 +79,14 @@ export function claudeCodeJudgeArgs(model: string): string[] {
   ];
 }
 
+/** The MCP server's append-only log of every tool call, in the same shape the Pi lane records. */
+export function readTrace(path: string): ToolEvent[] {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, 'utf8').split('\n').flatMap(line => {
+    if (!line.trim()) return [];
+    try { return [JSON.parse(line) as ToolEvent]; } catch { return []; }
+  });
+}
 /** Shared child-process plumbing: bounded output, killed on abort or deadline. */
 function runCli(args: string[], prompt: string, cwd: string, timeoutMs: number, signal: AbortSignal) {
   const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' };
@@ -136,18 +157,31 @@ export function classify(text: string, exitCode: number | null): Trial['status']
  * itself. API-key variables are stripped so this lane can never silently bill a metered key.
  */
 export async function runClaudeCode(
-  work: string, model: ModelConfig, task: Task, options: RunOptions, trial: Trial,
+  work: string, scratch: string, model: ModelConfig, task: Task, options: RunOptions, trial: Trial,
   signal: AbortSignal, notify: (phase: string) => void, record: (event: unknown) => void,
 ): Promise<void> {
   const root = realpathSync(work);
+  // Both files live beside the workspace, never inside it: anything under `work` is part of the
+  // submission, would be graded as an added file and would be readable by the model.
+  const tracePath = inside(scratch, 'tools.jsonl');
+  const configPath = inside(scratch, 'mcp.json');
+  writeFileSync(configPath, JSON.stringify({ mcpServers: { [MCP_SERVER]: {
+    command: process.execPath,
+    args: [fileURLToPath(new URL('mcpserver.ts', import.meta.url)), root, tracePath],
+  } } }), { mode: 0o600 });
   const prompt = `${task.prompt}\n\nWork only inside this directory. Public files:\n${Object.keys(files(root)).join('\n') || '(empty)'}`;
-  const args = claudeCodeArgs(model.model, options.maxTurns);
+  const args = claudeCodeArgs(model.model, options.maxTurns, configPath);
   record({ type: 'claude-code', binary: claudeCodeBinary(), args });
   notify(`claude code · ${model.model}`);
 
   const start = performance.now();
   const { stdout, stderr, code } = await runCli(args, prompt, root, options.timeout * 1000, signal);
   trial.modelMs = performance.now() - start;
+  // Recovered whatever the outcome: the trace is the only record of what the model did, and a
+  // censored or failed trial is exactly when it is worth having.
+  trial.trace = readTrace(tracePath);
+  trial.toolMs = trial.trace.reduce((sum, e) => sum + e.ms, 0);
+  trial.modelMs = Math.max(0, trial.modelMs - trial.toolMs);
   if (signal.aborted) return;
 
   const parsed = resultMessage(stdout);

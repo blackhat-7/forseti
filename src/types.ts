@@ -20,7 +20,7 @@ export type GradeContext = {
   files: Record<string, string>;
   trace: ToolEvent[];
   python: (source: string) => Promise<PythonResult>;
-  /** Which agent produced the submission. The tool rubric only applies to Forseti's own harness. */
+  /** Which agent produced the submission. Both run Forseti's own tools, so the tool rubric grades both. */
   agent?: 'pi' | 'claude-code';
 };
 /**

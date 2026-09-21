@@ -7,34 +7,33 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## State
 
-- Nineteen tasks. Across the whole record the suite separates the bottom of the table by ~36 points (Haiku 59%, Sonnet 80%, Opus 95% at n=19). **`due-dates` is the first task the report calls a separation between Opus and Sonnet**: pooled over two runs Opus 6/6, Sonnet 1/5 (one stall), Haiku 0/2. `retry-rollup` (2/3 vs 3/3) and `iso-weeks` (2/3 vs 3/3) lean the same way but stay inside the noise.
+- Nineteen tasks. Two lanes: `src/adapter.ts` (Pi, for API and local models) and `src/claudecode.ts` (the Claude Code CLI, under your own plan login). **Both lanes now hold the identical four tools**, so a cross-lane number is a model number.
 - **Do not trust a one-repeat run.** Twelve tasks at one repetition once read 90/91/93; the full record reads 59/80/95.
 - Four tasks carry a design rubric: `duplicate-rule`, `event-ledger`, `regression-boundary`, `reconcile-plan`. The reviewer reproduces the recorded standard **104/104**.
-- **Models on your own machine now run.** Provider `local` is any OpenAI-compatible server (llama-server, Ollama, LM Studio). Address on Settings (`5`, Address row) or `npm start -- local URL`; the picker lists what it serves under `local/`; no credential; billing `local`; trials go through the Pi adapter and pool with other API models. Code: `src/local.ts`, plus `local.url` in `forseti.json`.
-- `claude-code/opus`, `sonnet` and `haiku` are enabled. Codex OAuth is still rejected server-side; Kimi quota is still exhausted. Public at **https://github.com/blackhat-7/forseti**, tracking `origin/main`.
-- Battery this session: `npm run check` clean · `npm test` **58/58** · `npm run test:suite`, `test:terminal` and `test:judge` were not re-run: no suite, PTY-visible-key or reviewer change.
+- **Models on your own machine run.** Provider `local` is any OpenAI-compatible server (llama-server, Ollama, LM Studio). Address on Settings (`5`, Address row) or `npm start -- local URL`. No credential, billing `local`, Pi lane.
+- `claude-code/opus`, `sonnet`, `haiku` and one local Qwen are enabled. Codex OAuth is still rejected server-side; Kimi quota is still exhausted. Public at **https://github.com/blackhat-7/forseti**.
+- Battery this session: `npm run check` clean · `npm test` **59/59** · `npm run test:suite` passes. `test:terminal` and `test:judge` not re-run: no UI or reviewer change.
 
 ## Done this session
 
-- **Added the `local` provider.** `src/local.ts` builds a keyless pi `Models` with `createProvider` and the openai-completions API, pinned to the plain dialect every local server speaks: `max_tokens`, `system` role, no `store`, no `reasoning_effort`, thinking `off`. `GET /v1/models` is the only request made outside a run, and only when the address is saved or the model picker opens with an unlisted address. Never on startup.
-- **First local measurement, Qwen3 27B Q4 on llama-server, 19 tasks × 2, thinking off: 88% correct on 30 graded trials, 8 stalls (67% if counted), median 25s per trial.** Same session Haiku × 1: 71% on 17 graded, 1 timeout, median 60s. Separate harnesses, so the report shows them as two experiments, not one ranking. Qwen misses `coverage-audit` 0/2; Haiku misses `weekly-coverage`, `source-map`, `retry-rollup`, `due-dates`. The four Qwen stalls with two repeats are `due-dates` and `iso-weeks` (0/0 graded).
-- Two new tests: a fake OpenAI-compatible server driven from `localUrl` through `App.run` and the report (framework), and the Settings → picker → add → preflight flow (UI).
-- `harnessHash` changed (`auth.ts`, `config.ts`, `runner.ts`, `adapter`-adjacent files), so runs before this commit sit in their own comparison group.
+- **Added the `local` provider** (`src/local.ts`) and measured Qwen3 27B Q4 at 19 tasks × 2: 88% on 30 graded trials, 8 stalls, median 25s. Haiku × 1 the same day: 71% on 17 graded, 1 timeout.
+- **Diagnosed the stalls.** Qwen writes its answer early then loops on self-written Python tests to the turn cap. Seven of eight stalls were that; four were tasks it solved on the other repeat.
+- **Found the comparison was invalid** and fixed it. Haiku stalled less because the Claude Code lane had no execution tool at all, not because it stops better. Forseti now serves its four tools to the CLI over MCP and denies the CLI's own, so both lanes read, write and run code identically.
+- Verified with a real Haiku trial: four reads, one write, and it ran `check_public.py` through the Seatbelt sandbox. Tool checks now grade that lane.
 
 ## Next
 
-The open PLAN line is still the top one and needs one more task like `due-dates`. What discriminated is behaviour the engine offers no spelling for: Postgres and MySQL clamp `+1 month`, SQLite does not, and the fix is an expression nobody has memorised. A rule the prompt states (`all-green`) or a format code the docs name (`iso-weeks`, `%G-W%V`) gets found by Sonnet. **Do not start another full-suite run.** A local model is a cheap way to measure the bottom of the table; expect a 27B Q4 model at ~1 minute per trial.
+**Every number above predates the uniform lane and cannot be compared across lanes.** Re-measure Qwen and Haiku under the current harness before quoting either. The open PLAN line still wants one more task like `due-dates`.
 
 ## Gotchas
 
-- **`forseti.json` holds the local server address and the user's reviewer tweaks; never commit it.** It is tracked but stays modified in the working tree on purpose. A report exported from a local run names the server and the model's file path; do not commit those either.
-- **A hybrid local model thinks unless told not to.** Thinking `off` is now sent as `enable_thinking: false`. With thinking `high`, raise `--tokens` well past 4096 or turns get censored as `budget`.
-- **llama-server names a model by its file path** unless started with `--alias`. Forseti shortens it to the file name for the config ID and label; the API `model` field keeps the full path, so the config `model` limit is 500 characters.
-- **The Claude plan rate limit stops the whole run for that provider**, and the remaining trials of every Claude model are skipped. Budget a measurement below the limit or expect `not-run` rows.
-- **Running `python3` against a fixture directory writes `__pycache__` into it**, and `fixture()` then dies with `EISDIR`. Always `python3 -B`, and check `ls -a` on the fixture afterwards.
-- **A calibration case is Python inside a JS template literal.** Indentation must match where the fragment lands, and a `\d` needs doubling. `npm run test:suite` catches both.
-- **`quality` is a substring of `equality`.** A blind `sed s/quality/hygiene/` corrupts `regression-boundary`'s title and prompt.
-- **`npm run test:terminal` and `npm run test:judge` spend Claude plan quota.** The PTY test copies `forseti.json` with the reviewer enabled and restores it afterwards.
-- **The UI test fixture is a 24-row window.** A scorecard longer than 13 lines is paged, so a test asserting on the lower sections must pass `fixture('subscription', 60)`.
-- **A reviewer's thinking level is part of its identity.** Re-run `npm run test:judge` after any reviewer change.
+- **The harness hash changed twice this session.** Every run before this commit sits in its own comparison group. That is correct, not a bug.
+- **`--safe-mode` disables every MCP server**, so the Claude Code lane cannot be given tools under it. It uses `--restricted`. Do not switch back.
+- **`forseti.json` holds the local server address; never commit it.** It is tracked but stays modified on purpose. Exported reports name the server and the model's file path.
+- **A hybrid local model thinks unless told not to.** Thinking `off` is sent as `enable_thinking: false`. With thinking `high`, raise `--tokens` well past 4096 or turns get censored as `budget`.
+- **llama-server names a model by its file path** unless started with `--alias`. The config `model` limit is 500 characters for that reason.
+- **The Claude plan rate limit stops the whole run for that provider.** Budget a measurement below the limit or expect `not-run` rows.
+- **Running `python3` against a fixture directory writes `__pycache__` into it**, and `fixture()` then dies with `EISDIR`. Always `python3 -B`.
+- **`quality` is a substring of `equality`.** A blind `sed s/quality/hygiene/` corrupts `regression-boundary`.
+- **`npm run test:terminal` and `npm run test:judge` spend Claude plan quota.**
 - `TMPDIR="$PWD/.tmp"` is required for `npm ci` and `npm run test:terminal`. `CLAUDE.md` is a symlink to `AGENTS.md`; edit `AGENTS.md`.

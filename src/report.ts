@@ -178,7 +178,7 @@ export function comparisonReport(runs: Run[]): string {
     const hasControls = candidates.some(c => c.model.provider === 'control');
     if (hasControls) lines.push('> **Synthetic controls are fixture checks, not LLMs.** Their answers are supplied by the trusted runner. Do not compare their latency/tokens with real models.', '');
     if (first.environment.agent === 'claude-code') {
-      lines.push(`> **Claude Code harness.** These trials ran through the first-party Claude Code CLI under your own plan login, not the Pi adapter. Claude Code brings its own system prompt, agent loop, context management and tools, so a result here measures *the model inside Claude Code*, never the model alone. Tool checks are N/A because the suite's tool rubric names Forseti's tools. Cost is a client-side estimate at list price and is not what a subscription is billed. Flags: \`${escape(first.environment.agentFlags ?? '')}\`.`, '');
+      lines.push(`> **Claude Code harness.** These trials ran through the first-party Claude Code CLI under your own plan login, not the Pi adapter. Forseti supplies the same four sandboxed tools it gives the Pi lane, over MCP, and denies the CLI's own file and shell tools, so both lanes have identical capabilities and the tool rubric grades both. What still differs is Claude Code's own system prompt, agent loop and context management, so a result here measures *the model inside Claude Code*, never the model alone. Cost is a client-side estimate at list price and is not what a subscription is billed. Flags: \`${escape(first.environment.agentFlags ?? '')}\`.`, '');
     }
     const cards = candidates.map(c => scorecard(c.label, c.trials, first.tasks, c.run.planned / c.run.models.length));
     if (first.judge?.enabled) {
