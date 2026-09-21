@@ -33,11 +33,11 @@ function workspace() {
 }
 const cfg = () => structuredClone(DEFAULT_CONFIG);
 const task = loadSuite(root, 'suites/personal/suite.json').suite.tasks[0];
-/** Which tool checks the suite's own rubric produces for a trace, without importing src into it. */
-async function toolChecksFor(trace: ToolEvent[]): Promise<string[]> {
+/** Which tool checks the suite's own rubric passes for a trace, without importing src into it. */
+async function toolChecksFor(trace: ToolEvent[]): Promise<string> {
   const { toolChecks } = await import(new URL('../suites/personal/private/helpers.mjs', import.meta.url).href) as { toolChecks: (...a: unknown[]) => unknown };
-  return (toolChecks(trace, ['module.py'], 'check_public.py', false, { lane: 'tools' }) as { id: string; passed: boolean }[])
-    .filter(c => c.passed).map(c => c.id).sort();
+  return (toolChecks(trace, [], 'check_public.py', false, { lane: 'tools' }) as { id: string; passed: boolean }[])
+    .filter(c => c.passed).map(c => c.id).sort().join(',');
 }
 
 test('paths, links, special files and oversized outputs fail closed', () => {
@@ -360,12 +360,13 @@ test('Claude Code runs under the first-party login, never an API key, and never 
   assert.ok(args.includes(`--disallowedTools ${CLAUDE_CODE_DENIED}`), 'tools must be denied, not merely left un-approved');
   for (const denied of ['Bash', 'Task', 'WebFetch', 'WebSearch']) assert.ok(CLAUDE_CODE_DENIED.split(',').includes(denied), denied);
   assert.ok(!args.includes('--bare'), '--bare would drop the subscription login and demand an API key');
-  assert.ok(!args.includes('--safe-mode'), 'safe mode disables every MCP server, so this lane could not be given Forseti tools');
-  // Uniformity is the point: the CLI's own file tools are gone and only Forseti's four remain.
+  assert.ok(!args.includes('--safe-mode'), 'safe mode disables every MCP server, so this lane could not be given a Python tool');
   assert.ok(args.includes('--strict-mcp-config') && args.includes('--mcp-config /tmp/mcp.json'), 'only Forseti supplies MCP servers here');
-  for (const native of ['Read', 'Write', 'Edit', 'Glob', 'Grep']) assert.ok(CLAUDE_CODE_DENIED.split(',').includes(native), `${native} must be denied so both lanes hold the same tools`);
-  assert.deepEqual(CLAUDE_CODE_ALLOWED.split(','), ['list_files', 'read_file', 'write_file', 'python'].map(t => `mcp__forseti__${t}`));
-  assert.ok(!CLAUDE_CODE_ALLOWED.split(',').includes('Bash'), 'this lane runs outside the sandbox, so it gets no shell');
+  // Each lane keeps its own file dialect; what had to be equalised is the ability to run code.
+  for (const native of ['Read', 'Write', 'Edit', 'Glob', 'Grep']) assert.ok(CLAUDE_CODE_ALLOWED.split(',').includes(native), `${native} is this lane's own dialect and stays`);
+  assert.ok(CLAUDE_CODE_ALLOWED.split(',').includes('mcp__forseti__python'), 'the Pi lane can run arbitrary Python, so this lane must too');
+  assert.ok(!CLAUDE_CODE_ALLOWED.split(',').includes('Bash'), 'Bash is unsandboxed and networked; the sandboxed interpreter is the fair equivalent');
+  assert.ok(CLAUDE_CODE_DENIED.split(',').includes('Bash'));
 
   // The CLI streams the session as an array; the answer is the last result entry, not the first.
   const stream = JSON.stringify([{ type: 'system' }, { type: 'assistant' }, { type: 'result', result: 'done', num_turns: 3 }]);
@@ -380,12 +381,10 @@ test('Claude Code runs under the first-party login, never an API key, and never 
   assert.equal(agentOf([cc('sonnet'), cc('haiku'), cfg().models[0]]), 'claude-code');
   assert.throws(() => agentOf([cc('sonnet'), pi]), /different harnesses/);
 
-  // Both lanes are served the same four Forseti tools, so the tool rubric grades either one.
-  // Only a control, which has no trace, and the prompt lane, which has no tools, are exempt.
+  // The tool rubric names Forseti's own file tools, which the CLI lane does not use.
   const withTools = { ...task, dimensions: ['correctness', 'tools'] as Dimension[] };
-  assert.deepEqual(applicableDimensions(withTools, 'tools', false), ['correctness', 'tools']);
-  assert.deepEqual(applicableDimensions(withTools, 'tools', true), ['correctness']);
-  assert.deepEqual(applicableDimensions(withTools, 'prompt', false), ['correctness']);
+  assert.deepEqual(applicableDimensions(withTools, 'tools', false, 'pi'), ['correctness', 'tools']);
+  assert.deepEqual(applicableDimensions(withTools, 'tools', false, 'claude-code'), ['correctness']);
 
   // Provider messages decide the outcome; a plan limit stops the provider instead of retrying.
   assert.equal(classify("You've hit your Sonnet limit", 1), 'rate_limited');
@@ -575,7 +574,7 @@ test('a local OpenAI-compatible server runs through the Pi adapter with no crede
   } finally { server.close(); }
 });
 
-test('both lanes are served the identical four tools, and the MCP one stays inside the sandbox', async () => {
+test('the CLI lane gets the Pi lane\'s interpreter, sandboxed and budgeted the same way', async () => {
   const dir = temp();
   put(dir, 'module.py', 'print("public")\n');
   put(dir, 'check_public.py', 'print("ok")\n');
@@ -587,23 +586,23 @@ test('both lanes are served the identical four tools, and the MCP one stays insi
   // The handshake the CLI performs, and the tool list it is given.
   const init = await handle({ id: 0, method: 'initialize' }) as { result: { serverInfo: { name: string } } };
   assert.equal(init.result.serverInfo.name, 'forseti');
-  const listed = await handle({ id: 0, method: 'tools/list' }) as { result: { tools: { name: string }[] } };
-  // Parity is the whole point: same names, so neither lane is offered a capability the other lacks.
-  const piNames = taskTools(dir, [], new AbortController().signal, () => {}).map(t => t.name);
-  assert.deepEqual(listed.result.tools.map(t => t.name).sort(), piNames.sort());
-  assert.deepEqual(MCP_ALLOWED.split(',').sort(), piNames.map(n => `mcp__forseti__${n}`).sort());
+  const listed = await handle({ id: 0, method: 'tools/list' }) as { result: { tools: { name: string; description: string }[] } };
+  // Only the interpreter is served; files stay each lane's own dialect. The description matches
+  // the Pi lane's word for word, so neither lane is told more about the same capability.
+  const pythonTool = taskTools(dir, [], new AbortController().signal, () => {}).find(t => t.name === 'python')!;
+  assert.deepEqual(listed.result.tools.map(t => t.name), ['python']);
+  assert.equal(listed.result.tools[0]!.description, pythonTool.description);
+  assert.deepEqual(MCP_ALLOWED.split(','), ['mcp__forseti__python']);
 
-  assert.match((await call('read_file', { path: 'module.py' })).result.content[0]!.text, /public/);
-  // Confinement holds independently of the CLI's own --restricted working-directory rule.
-  assert.equal((await call('read_file', { path: '../../../etc/passwd' })).result.isError, true);
-  assert.equal((await call('read_file', { path: 'module.py' })).result.isError, true, 'the call budget is enforced, as in the Pi lane');
-
-  // A recorded event carries exactly the shape the suite's tool rubric reads.
-  const fresh = createHandler(dir, e => events.push(e));
-  await fresh({ id: 2, method: 'tools/call', params: { name: 'python', arguments: { source: "import runpy; runpy.run_path('check_public.py', run_name='__main__')" } } });
-  const ran = events.at(-1)!;
-  assert.equal(ran.tool, 'python');
-  assert.equal(ran.ok, true);
-  assert.equal(JSON.parse(ran.output).code, 0, 'the sandboxed interpreter really executed the public check');
-  assert.deepEqual(await toolChecksFor([events[0]!, ran]), ['read-before-write', 'public-python-check'].sort());
+  // The same interpreter and the same confinement as the Pi lane, independent of the CLI's rules.
+  const ran = await call('python', { source: "import runpy; runpy.run_path('check_public.py', run_name='__main__')" });
+  assert.equal(JSON.parse(ran.result.content[0]!.text).code, 0, 'the sandboxed interpreter really executed the public check');
+  assert.notEqual((await call('python', { source: "open('../../../etc/passwd').read()" })).result.isError, true, 'the sandbox reports the denial through the result, not a tool error');
+  assert.match(events.at(-1)!.output, /Errno|denied|No such file/, 'reaching outside the trial directory fails inside the sandbox');
+  assert.equal((await call('python', { source: 'print(1)' })).result.isError, true, 'the call budget is enforced, as in the Pi lane');
+  assert.deepEqual(events.map(e => e.tool), ['python', 'python', 'python']);
+  // A recorded event is the Pi lane's shape, so the same rubric could read it; it is kept as
+  // evidence of how much a model verifies, which is how the Qwen stalling was diagnosed.
+  assert.equal(events[0]!.ok, true);
+  assert.equal(await toolChecksFor([events[0]!]), 'public-python-check');
 });

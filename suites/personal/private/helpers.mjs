@@ -107,10 +107,9 @@ print(json.dumps(result))`);
     check('python-no-eval-exec','hygiene',parsed && dynamic.length === 0, `${path}: named dynamic-evaluation references=${bounded(dynamic)}; expected=[]`)
   ];
 }
-export function toolChecks(trace = [], requiredReads = [], publicCheck = null, readOnly = false, {lane = 'tools', control = false} = {}) {
-  // Both lanes call the same Forseti tools, so this rubric grades either one. Only a control,
-  // which has no trace, and the prompt lane, which has no tools, are exempt.
-  if (lane === 'prompt' || control) return [];
+export function toolChecks(trace = [], requiredReads = [], publicCheck = null, readOnly = false, {lane = 'tools', control = false, agent = 'pi'} = {}) {
+  // This rubric names the Forseti tool harness. Another agent's file tools cannot satisfy it.
+  if (lane === 'prompt' || control || agent !== 'pi') return [];
   const checks = [];
   if (readOnly) checks.push(equal('no-write-tool', trace.filter(e => e.tool === 'write_file').length, 0, 'tools'));
   if (requiredReads.length) {

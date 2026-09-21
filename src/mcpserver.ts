@@ -1,25 +1,26 @@
 /**
- * Forseti's four task tools, served to the Claude Code CLI over stdio MCP.
+ * The sandboxed Python tool, served to the Claude Code CLI over stdio MCP.
  *
- * The Pi lane hands a model `list_files`, `read_file`, `write_file` and `python` directly. The
- * Claude Code CLI brings its own file tools and no way to run code, so the two lanes measured
- * different capabilities: a local model could run `check_public.py` and iterate, a Claude model
- * could not. Supplying the identical tools here is what makes a cross-lane score comparable.
+ * Each lane keeps its own way of reading and writing files: `Read`/`Write`/`Edit`/`Glob`/`Grep`
+ * here, `read_file`/`write_file`/`list_files` in the Pi lane. Those are one capability in two
+ * dialects, and swapping one for the other would only measure which tools a client is tuned for.
+ *
+ * Running code is not a dialect difference. The Pi lane can execute arbitrary Python and so
+ * verify its own work against `check_public.py`; without this the CLI lane could not run anything,
+ * and its scores and its stall count were not comparable. `Bash` is not the answer: it is
+ * unsandboxed and networked. This is the Pi lane's exact interpreter, under the same sandbox.
  *
  * Run as a script by the CLI itself: `node src/mcpserver.ts <workDir> <traceFile>`. Every call is
  * appended to the trace file so the runner can recover it, because the CLI reports no tool detail.
  */
 import { appendFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
-import { clean, files, put, readText } from './files.ts';
+import { clean } from './files.ts';
 import { runPython } from './sandbox.ts';
 import type { ToolEvent } from './types.ts';
 
-/** Identical names, descriptions and schemas to `taskTools` in adapter.ts, so neither lane is told more. */
+/** Name, description and schema copied from `taskTools` in adapter.ts, so neither lane is told more. */
 export const MCP_TOOLS = [
-  { name: 'list_files', description: 'List all public workspace files.', inputSchema: { type: 'object', properties: {}, required: [] } },
-  { name: 'read_file', description: 'Read a UTF-8 file relative to the task workspace (max 32,000 returned characters).', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
-  { name: 'write_file', description: 'Write complete UTF-8 contents to a relative file (128 KiB max).', inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } },
   { name: 'python', description: 'Run Python source in the task directory with stdlib only. Network, child processes and access outside the task are denied. Max 5 seconds.', inputSchema: { type: 'object', properties: { source: { type: 'string' } }, required: ['source'] } },
 ] as const;
 /** What the CLI must be told to allow: MCP tools are addressed by server-qualified name. */
@@ -27,9 +28,6 @@ export const MCP_SERVER = 'forseti';
 export const MCP_ALLOWED = MCP_TOOLS.map(t => `mcp__${MCP_SERVER}__${t.name}`).join(',');
 
 export async function callTool(work: string, name: string, args: Record<string, unknown>): Promise<string> {
-  if (name === 'list_files') return Object.keys(files(work)).join('\n');
-  if (name === 'read_file') return readText(work, String(args.path));
-  if (name === 'write_file') { put(work, String(args.path), String(args.content)); files(work); return 'Written'; }
   if (name === 'python') return JSON.stringify(await runPython(work, String(args.source)));
   throw new Error(`Unknown tool: ${name}`);
 }

@@ -101,7 +101,7 @@ const read = {tool:'read_file',args:{path:'module.py'},ok:true,ms:1,output:'publ
 const write = {tool:'write_file',args:{path:'module.py',content:'replacement'},ok:true,ms:1,output:''};
 const run = {tool:'python',args:{source:"import runpy; runpy.run_path('check_public.py', run_name='__main__')"},ok:true,ms:1,output:JSON.stringify({code:0,stdout:'public check passed',stderr:'',timedOut:false})};
 assert.deepEqual(toolChecks([],['module.py'],'check_public.py',false,{lane:'prompt'}),[]);
-assert(toolChecks([read,write,run],['module.py'],'check_public.py',false,{lane:'tools',agent:'claude-code'}).every(c => c.passed),'the Claude Code lane is served the same Forseti tools over MCP, so the same rubric grades it');
+assert.deepEqual(toolChecks([],['module.py'],'check_public.py',false,{lane:'tools',agent:'claude-code'}),[],'another harness cannot satisfy a rubric naming Forseti tools');
 assert(toolChecks([read,write,run],['module.py'],'check_public.py').every(c => c.passed));
 assert(!toolChecks([write,read,run],['module.py'],'check_public.py')[0].passed);
 assert(!toolChecks([read,write,{...run,output:'{"code":1}'}],['module.py'],'check_public.py')[1].passed);

@@ -10,25 +10,27 @@ import type { ModelConfig, RunOptions, Task, ToolEvent, Trial } from './types.ts
 /** Model aliases the CLI accepts. Full IDs also work; these are what we offer in the catalog. */
 export const CLAUDE_CODE_MODELS = ['opus', 'sonnet', 'haiku', 'fable'] as const;
 /**
- * The only tools this lane gets, and they are Forseti's own, served over MCP. The CLI's native
- * file tools are denied below so both lanes hold the identical four: a Claude model and a local
- * model now read, write and run code through the same implementations, under the same sandbox
- * and the same 64-call budget. Before this, the Pi lane could run `check_public.py` and this one
- * could not, so a cross-lane score compared capabilities rather than models.
+ * The CLI's own file tools, plus Forseti's sandboxed Python over MCP. Each lane keeps its native
+ * way of reading and writing files, because `Edit`/`Glob`/`Grep` against `read_file`/`write_file`
+ * is one capability in two dialects, and swapping them would measure which tools a client is
+ * tuned for. Running code is not a dialect difference: the Pi lane can execute arbitrary Python
+ * and so verify itself against `check_public.py`, and without an equivalent here the two lanes'
+ * scores and stall counts were not comparable. `Bash` stays denied — it is unsandboxed and
+ * networked — and the Pi lane's own interpreter is supplied instead.
  */
-export const CLAUDE_CODE_ALLOWED = MCP_ALLOWED;
+export const CLAUDE_CODE_ALLOWED = `Read,Write,Edit,Glob,Grep,${MCP_ALLOWED}`;
 /**
  * Actually removes tools. `--allowedTools` only pre-approves; without this the session still
  * carries Bash, web access and subagents, which this lane must not have: it runs outside the
  * Seatbelt sandbox, and network/subagent access would also make it a different benchmark.
  */
-export const CLAUDE_CODE_DENIED = 'Read,Write,Edit,Glob,Grep,Bash,Task,WebFetch,WebSearch,NotebookEdit,Workflow,SendMessage,RemoteTrigger,CronCreate,CronDelete,CronList,ScheduleWakeup,EnterWorktree,ExitWorktree';
+export const CLAUDE_CODE_DENIED = 'Bash,Task,WebFetch,WebSearch,NotebookEdit,Workflow,SendMessage,RemoteTrigger,CronCreate,CronDelete,CronList,ScheduleWakeup,EnterWorktree,ExitWorktree';
 
 /**
  * A reviewer only reads the prompt and answers, so it gets no tools at all — not even Read.
  * `--allowedTools` alone would only pre-approve; the tools have to be denied to be absent.
  */
-export const CLAUDE_CODE_JUDGE_DENIED = `${CLAUDE_CODE_DENIED},TodoWrite,BashOutput,KillShell`;
+export const CLAUDE_CODE_JUDGE_DENIED = `${CLAUDE_CODE_DENIED},Read,Write,Edit,Glob,Grep,TodoWrite,BashOutput,KillShell`;
 
 let binary: string | undefined;
 export function claudeCodeBinary(): string {

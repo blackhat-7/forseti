@@ -36,13 +36,14 @@ export function validateChecks(checks: unknown, dimensions?: Dimension[]): Check
   return checks;
 }
 /**
- * What the deterministic grader must produce. Both lanes now run Forseti's own four tools — the
- * Claude Code CLI gets them over MCP — so the tool rubric grades either harness. Only controls,
- * which have no trace, and the prompt lane, which has no tools, carry no tool checks. `design`
- * never appears here because it comes from the reviewer model, which runs after grading.
+ * What the deterministic grader must produce. The tool rubric names Forseti's own file tools, so
+ * it grades the Pi lane only: the Claude Code lane reads and writes with its own, which Forseti
+ * cannot observe. That is a process check, not a capability one — both lanes can run code, so
+ * correctness stays comparable. `design` never appears here because it comes from the reviewer
+ * model, which runs after grading and is appended separately.
  */
-export function applicableDimensions(task: Task, lane: RunOptions['lane'], control: boolean): Dimension[] {
-  return task.dimensions.filter(d => d !== 'design' && (d !== 'tools' || (lane === 'tools' && !control)));
+export function applicableDimensions(task: Task, lane: RunOptions['lane'], control: boolean, agent: Agent = 'pi'): Dimension[] {
+  return task.dimensions.filter(d => d !== 'design' && (d !== 'tools' || (lane === 'tools' && !control && agent === 'pi')));
 }
 export type Agent = 'pi' | 'claude-code';
 export function agentOf(models: ModelConfig[]): Agent {
@@ -53,11 +54,11 @@ export function agentOf(models: ModelConfig[]): Agent {
   }
   return 'claude-code';
 }
-export function rejectArtifacts(trial: Trial, task: Task, lane: RunOptions['lane'], control: boolean, reason: string): void {
+export function rejectArtifacts(trial: Trial, task: Task, lane: RunOptions['lane'], control: boolean, reason: string, agent: Agent = 'pi'): void {
   trial.error = [trial.error, `Invalid submission: ${reason}`].filter(Boolean).join('; ');
   if (!['passed', 'failed'].includes(trial.status)) return;
   trial.status = 'failed';
-  trial.checks = applicableDimensions(task, lane, control).map(dimension => ({ id: `invalid-submission-${dimension}`, dimension, passed: false, evidence: `Submission rejected before grading: ${reason}` }));
+  trial.checks = applicableDimensions(task, lane, control, agent).map(dimension => ({ id: `invalid-submission-${dimension}`, dimension, passed: false, evidence: `Submission rejected before grading: ${reason}` }));
 }
 export function blankTrial(id: string, model: ModelConfig, task: Task, repetition: number, local = ''): Trial {
   return { id, model: model.id, task: task.id, repetition, status: 'passed', auth: authInfo(model, local), checks: [], wallMs: 0, modelMs: 0, toolMs: 0, gradeMs: 0, firstTokenMs: null, tokens: null, estimatedCost: null, trace: [], answer: '', files: {}, turns: 0 };
@@ -162,16 +163,16 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
             trial.status = signal.aborted ? 'cancelled' : 'timeout';
             trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${options.timeout}s exceeded; outcome censored`;
           }
-          if (trial.status === 'failed') rejectArtifacts(trial, job.task, options.lane, job.model.provider === 'control', trial.checks.map(c => c.evidence).join('; '));
+          if (trial.status === 'failed') rejectArtifacts(trial, job.task, options.lane, job.model.provider === 'control', trial.checks.map(c => c.evidence).join('; '), agent);
           try { trial.files = files(work); }
-          catch (e) { rejectArtifacts(trial, job.task, options.lane, job.model.provider === 'control', safeError(e)); }
+          catch (e) { rejectArtifacts(trial, job.task, options.lane, job.model.provider === 'control', safeError(e), agent); }
           if (trial.status === 'passed' && !controller.signal.aborted) {
             notify('verifying hidden checks');
             const grading = performance.now();
             const checks = await grader.grade({ lane: options.lane, control: job.model.provider === 'control', agent, answer: trial.answer, files: trial.files, trace: trial.trace, python: source => runPython(work, source, controller.signal, 5000, true) });
             trial.gradeMs = performance.now() - grading;
             if (controller.signal.aborted) { trial.status = signal.aborted ? 'cancelled' : 'timeout'; trial.error = 'Cancelled/deadline during grading'; }
-            else { trial.checks = validateChecks(checks, applicableDimensions(job.task, options.lane, job.model.provider === 'control')); trial.status = trial.checks.every(c => c.passed) ? 'passed' : 'failed'; }
+            else { trial.checks = validateChecks(checks, applicableDimensions(job.task, options.lane, job.model.provider === 'control', agent)); trial.status = trial.checks.every(c => c.passed) ? 'passed' : 'failed'; }
           }
           if (judge && judgeCall && job.task.dimensions.includes('design') && !controller.signal.aborted && ['passed', 'failed'].includes(trial.status)) {
             if (!grader.review) throw new Error(`${job.task.id} declares the design dimension but its grader exports no review rubric`);
