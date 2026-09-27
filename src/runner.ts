@@ -166,7 +166,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
           else await runAgent(work, job.model, job.task, budget, trial, controller.signal, notify, record, modelsFor(job.model, config.local.url));
           if (controller.signal.aborted) {
             trial.status = signal.aborted ? 'cancelled' : 'timeout';
-            trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${budget.timeout}s exceeded; outcome censored`;
+            trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${budget.timeout}s exceeded; counted as unsolved`;
           }
           if (trial.status === 'failed') rejectArtifacts(trial, job.task, options.lane, job.model.provider === 'control', trial.checks.map(c => c.evidence).join('; '), agent);
           try { trial.files = files(work); }

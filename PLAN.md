@@ -29,6 +29,7 @@ Each line carries its own done-check. A task too big for one session gets split 
 - [ ] Rerun `npm start -- run --models openai-codex-gpt-5-5 --tests shared-count,incident-window --repeat 2` and regenerate `reports/live-smoke.md`. Done when both report groups share the current suite and harness hash.
 - [ ] Run Sonnet vs Haiku on `duplicate-rule` with the reviewer on, then `npm run test:judge -- --run <id> --alt <provider>/<model>`. Done when a self-preference number exists for real submissions.
 - [ ] Add a second entitled live model when quota allows. Done when one run compares two live models under the same harness, with no recorded provider failure standing in for a result.
+- [ ] **Measure the rebuilt hard tier properly.** Run Haiku, Sonnet and Opus on `due-dates,sheet-eval,lock-refresh,crew-schedule,log-query` at `--repeat 3` (45 trials; each up to 15 min). Done when the page calls Opus over Sonnet and Sonnet over Haiku a separation, or the tier is rebuilt. Run it alone: no parallel subagents, and check `/usage` first.
 
 ## Later
 

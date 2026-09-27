@@ -516,7 +516,7 @@
     {
       "id": "room-bookings",
       "title": "Find why a booked room shows as free",
-      "tier": "hard",
+      "tier": "standard",
       "turns": 40,
       "timeout": 900,
       "tags": [
@@ -544,7 +544,7 @@
     {
       "id": "order-pricing",
       "title": "Find why a repeat order costs less",
-      "tier": "hard",
+      "tier": "standard",
       "turns": 40,
       "timeout": 900,
       "tags": [
@@ -597,7 +597,7 @@
     {
       "id": "log-query",
       "title": "Build a log filter query language from a written spec",
-      "tier": "hard",
+      "tier": "standard",
       "tags": [
         "python",
         "parser",
@@ -646,7 +646,7 @@
     {
       "id": "crew-schedule",
       "title": "Plan a week of jobs across several crews",
-      "tier": "hard",
+      "tier": "standard",
       "turns": 40,
       "timeout": 900,
       "tags": [

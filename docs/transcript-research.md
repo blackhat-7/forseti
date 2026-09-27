@@ -286,3 +286,18 @@ each reference passes and each near-miss baseline fails on exactly one trap.
 They are tier `basic`, not `hard`: `zip-manifest` and `double-delivery` showed that every Claude model
 rewrites a Python trap from the stated rule (Opus 6/6, Sonnet 6/6, Haiku 5/6), and these fixes are
 equally a lookup away. They are kept to separate small local models. Re-tier after a measurement.
+
+### Rebuilding the hard tier, 2026-09-27 — pilot, one try each
+
+The 11-task run read Haiku 68% · Sonnet 95% · Opus 91% (stalls excluded): nothing separated. Six bigger tasks were built, each with a 40-turn, 900s budget. One try per model, so these are signals, not measurements:
+
+| Task | Kind | Haiku | Sonnet | Opus | Tier |
+|---|---|---|---|---|---|
+| `lock-refresh` | search: greedy is wrong, plain backtracking too slow | ✗ 2/6 | ✗ 4/6 | ✓ | hard |
+| `sheet-eval` | 31-rule spec, 338 hidden cells | ✗ ran out | ✗ 9/10 | ✓ | hard |
+| `crew-schedule` | K crews; one-crew DP repeated is wrong | ✗ 1/3 | ✓ | not run | standard |
+| `log-query` | 29-rule query language, 180 hidden queries | ✗ 6/7 | ✓ | not run | standard |
+| `room-bookings` | 3 masked defects across 15 modules | not run | ✓ | ✓ | standard |
+| `order-pricing` | 3 masked defects across 15 modules | ✓ | ✓ | ✓ | standard |
+
+The bug hunts were too easy: their prompts list the expected behaviours, which points at each defect. Search and long specs are what separated tiers. Opus ran only where Sonnet failed, to save quota; re-run all three at 3 tries before quoting a gap.

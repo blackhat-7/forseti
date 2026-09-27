@@ -208,7 +208,7 @@ export async function runClaudeCode(
     // makes a tight budget look like Forseti broke.
     if (parsed && (parsed.stop_reason === 'tool_use' || (parsed.num_turns ?? 0) >= options.maxTurns)) {
       trial.status = 'budget';
-      trial.error = `Turn budget of ${options.maxTurns} exhausted after ${parsed.num_turns ?? 0} turns while still calling tools; outcome is censored, not a correctness failure.`;
+      trial.error = `Turn budget of ${options.maxTurns} exhausted after ${parsed.num_turns ?? 0} turns while still calling tools; counted as unsolved.`;
       return;
     }
     // No parseable result is a harness failure, not a wrong answer. Counting it as a model

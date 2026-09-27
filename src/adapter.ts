@@ -109,7 +109,7 @@ export async function runAgent(root: string, modelConfig: ModelConfig, task: Tas
       trial.status = failureStatus(trial.error, httpStatus); return;
     }
     if (last.stopReason === 'length' || (last.stopReason === 'toolUse' && (trial.turns >= options.maxTurns || trial.trace.length >= 64))) {
-      trial.status = 'budget'; trial.error = 'Output or turn budget exhausted; outcome is censored, not a correctness failure.'; return;
+      trial.status = 'budget'; trial.error = 'Output or turn budget exhausted while still working; counted as unsolved.'; return;
     }
     if (options.lane === 'prompt') {
       try {
