@@ -38,6 +38,8 @@ const amber = ink(196, 178, 138); // dragonYellow
 const rose = ink(196, 116, 110); // dragonRed
 const muted = ink(166, 166, 156); // dragonGray
 const faint = ink(115, 124, 115); // dragonAsh
+// One colour per model on the comparison chart, so a model reads as the same bar in every group.
+const SERIES = [accent, ink(137, 146, 167) /* dragonViolet */, green, ink(182, 146, 123) /* dragonOrange */, teal, rose];
 const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
 const theme = { selectedPrefix: accent, selectedText: accent, description: muted, scrollInfo: faint, noMatch: amber };
 const tabs = ['Home', 'Models', 'Tests', 'Runs', 'Settings'];
@@ -145,24 +147,40 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean): string[
   if (tagged) { prose(HARNESS_WARNING, amber); row(); }
   else if (mixed) { prose('Different suite, harness, lane or settings — these are not one controlled comparison.', amber); row(); }
 
-  row(bold(LABEL.solved));
+  // One chart answers the page's question: who is ahead, by how much, and at which difficulty.
+  // Overall carries the rank; each difficulty group carries the place on those tasks alone.
+  row(bold('How the models compare') + faint(`   ${LABEL.solved.toLowerCase()}`));
   const nameW = Math.max(8, Math.min(22, Math.max(...names.map(width_)) + 2));
   const tagW = tagged || cards.some(c => c.synthetic) ? Math.max(...cards.map(c => c.harness.length)) + 2 : 0;
   // A bar too short to read is dropped, so the percentage itself stays on screen on a narrow terminal.
   const room = Math.min(30, width - 4 - nameW - 12 - tagW - 10), barW = room < 6 ? 0 : room;
-  for (const { card, rank } of ranked) {
+  const barLine = (i: number, lead: string, rate: number | null, tail: string) =>
+    lead + pad(names[i]!, nameW) + (barW ? (cards[i]!.synthetic ? faint : SERIES[i % SERIES.length]!)(bar(rate, barW)) + ' ' : '') + bold(pct(rate).padStart(4)) + tail;
+  row(muted('Overall') + faint(`   ${weighting(tasks)}`));
+  for (const [i, { card, rank }] of ranked.entries()) {
     // A control's answers are fixed, so a rerun spread would be a number about nothing.
     const error = card.synthetic ? null : scoreError(card);
     const tag = tagW ? faint(pad(tagged || card.synthetic ? card.harness : '', tagW)) : '';
-    const line = muted(String(rank ?? '–').padStart(2)) + '  ' + pad(plain(card.label), nameW) + (barW ? rateInk(card.score)(bar(card.score, barW)) + ' ' : '') + bold(pct(card.score).padStart(4))
-      + faint(pad(error === null ? '' : ` ±${Math.round(error * 100)}`, 6)) + tag + (card.notRun ? amber(`${card.notRun} not run `) : '');
+    const line = barLine(i, muted(String(rank ?? '–').padStart(2)) + '  ', card.score, faint(pad(error === null ? '' : ` ±${Math.round(error * 100)}`, 6)) + tag + (card.notRun ? amber(`${card.notRun} not run `) : ''));
     // What the score rests on stays on its line when it fits, and wraps under it when it does not.
     const note = card.synthetic ? null : ungradedNote(card, tasks);
     if (note && width_(line) + note.length > width) { row(line); prose(`    ${note}`, amber); }
     else row(line + amber(note ?? ''));
   }
+  const tiers = cards.map(c => byTier(c, tasks)), tierGaps: string[] = [];
+  for (const [t, { tier, ids }] of (tiers[0]?.length ? tierSlices(tasks) : []).entries()) {
+    const label = TIER_NAME[tier], rows = tiers.map(r => r[t]!), places = slicePlaces(cards, ids), placing = places.some(p => p !== null);
+    row(muted(`${label} (${ids.size})`));
+    for (const [i, r] of rows.entries()) {
+      const gap = sliceGap(r), dash = placing && thin(r);
+      if (gap) tierGaps.push(`* ${label}, ${names[i]}: ${pct(r.rate)} · ${gap}${dash ? ` · ${NO_PLACE}` : ''}.`);
+      const mark = places[i] ? place(places[i]) : dash ? '–' : '';
+      row(barLine(i, '    ', r.rate, (gap ? amber('*') : '') + faint(mark ? ` ${mark}` : '')));
+    }
+  }
+  for (const gap of tierGaps) prose(gap, amber);
   row();
-  prose(`${weighting(tasks)}. Rank = 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart. ± = how far the number could move on a rerun.`, faint);
+  prose(`Rank = 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart. ± = how far the number could move on a rerun.${tiers[0]?.length ? ' Place = rank on that difficulty alone, by the same rule. Basic tasks tell small models apart; hard tasks tell the strongest apart.' : ''}`, faint);
   if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
   if (cards.some(c => c.notRun)) prose('Not run = lost to login, quota, crash or cancellation. It never counts against a model.', faint);
   const calls = verdicts(ranked), stalls = cards.map(stallNote).filter(n => n !== null);
@@ -204,16 +222,6 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean): string[
     });
   };
   const flushGaps = () => { for (const gap of gaps.splice(0)) prose(gap, amber); };
-  const PLACES = 'Place = rank on those tasks alone, by the same rule; a shared place means this run cannot tell them apart there.';
-  const tiers = cards.map(c => byTier(c, tasks));
-  if (tiers[0]?.length) {
-    row(bold('By difficulty') + faint('   share of tasks fully solved, and place · (n) tasks'));
-    columns();
-    for (const [i, { tier, ids }] of tierSlices(tasks).entries()) line(`${TIER_NAME[tier]} (${ids.size})`, placed(TIER_NAME[tier], tiers.map(rows => rows[i]!), ids));
-    flushGaps();
-    prose(`Basic tasks tell small models apart; hard tasks tell the strongest apart.${rivals.length > 1 && colW >= 9 ? ` ${PLACES}` : ''}`, faint);
-    row();
-  }
   const skills = cards.map(c => byCapability(c, tasks));
   if (skills[0]?.length) {
     row(bold('By skill') + faint('   share of tasks fully solved, and place · (n) tasks'));

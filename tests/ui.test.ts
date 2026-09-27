@@ -430,13 +430,16 @@ test('the comparison page ranks with ties, splits by difficulty and names each h
   assert.match(text, /^\s+1\s+Claude sonnet\s+[█░]+\s+75%.*Claude Code/m, 'inside the noise, so it shares first place');
   assert.match(text, /^\s+3\s+qwen-local\s+[█░]+\s+25%.*Forseti agent/m);
   assert.match(text, /^\s+–\s+Reference · synthetic\s+[█░]+\s+100%\s+synthetic/m, 'a control is shown, never ranked, and carries no ±');
-  assert.equal(text.match(/Claude sonnet\s+[█░]/g)?.length, 1, 'pooled into one card');
+  // One bar per model in Overall and in each of the two difficulty groups: pooled, so never a second Sonnet line per group.
+  assert.equal(text.match(/Claude sonnet\s+[█░]/g)?.length, 3, 'pooled into one card');
   assert.match(text, /Claude opus and Claude sonnet are tied: 13 points apart/);
   assert.match(text, /different harnesses, so each gap is the\s+model plus its harness/);
-  assert.match(text, /By difficulty/);
-  // Each cell now carries the place on that difficulty alone; the control is never placed.
-  assert.match(text, /Basic \(8\)\s+100% 1st\s+100% 1st\s+50% 3rd\s+100%\s*$/m);
-  assert.match(text, /Hard \(4\)\s+75% 1st\s+50% 1st\s+0% 3rd\s+100%\s*$/m);
+  // The difficulty table became one chart: a bar per model under each difficulty heading, with the
+  // place on that difficulty alone; the control is never placed.
+  const group = (name: string) => text.slice(text.indexOf(name), text.indexOf('\n\n', text.indexOf(name)));
+  const basic = group('Basic (8)'), hard = group('Hard (4)');
+  for (const [pattern, where] of [[/Claude opus\s+[█░]+\s+100% 1st/, basic], [/Claude sonnet\s+[█░]+\s+100% 1st/, basic], [/qwen-local\s+[█░]+\s+50% 3rd/, basic], [/Reference · synthetic\s+[█░]+\s+100%\s*$/m, basic],
+    [/Claude opus\s+[█░]+\s+75% 1st/, hard], [/Claude sonnet\s+[█░]+\s+50% 1st/, hard], [/qwen-local\s+[█░]+\s+0% 3rd/, hard], [/Reference · synthetic\s+[█░]+\s+100%\s*$/m, hard]] as const) assert.match(where, pattern);
   assert.match(text, /Edge cases right \(12\)/);
   assert.match(text, /Task number 11\s+0\/3 ✗\s+0\/6 ✗\s+0\/3 ✗\s+3\/3 ✓/, 'hardest first, one column per model');
   assert.match(text, /4 tasks every model solved/, 'rows with no difference fold away');
@@ -447,7 +450,7 @@ test('the comparison page ranks with ties, splits by difficulty and names each h
   f.key(esc);
   f.app.runs = [{ ...f.app.runs[0]!, tasks: tasks.map(({ tier, ...t }) => t) }];
   f.key('c');
-  assert.doesNotMatch(f.text(120), /By difficulty/);
+  assert.doesNotMatch(f.text(120), /Basic \(|Hard \(/);
 });
 
 test('a model that ran out of turns says so beside its score', () => {
@@ -491,7 +494,11 @@ test('a tier or skill cell the provider left short says so, and earns no place',
   f.key('4', ' ', 'c');
   const text = f.text(120);
   assert.match(text, /refused model.*rests on 1 of 2 hard tasks/, 'the rank line says what the score rests on');
-  assert.match(text, /Hard \(2\)\s+100%\* –\s+100% 1st\s+50% 1st/, 'starred, and a dash where the place would be');
+  const hard = text.slice(text.indexOf("Hard (2)"));
+  // The difficulty table became one bar per model under its difficulty heading; the cell rules are unchanged.
+  assert.match(hard, /refused model\s+[█░]+\s+100%\* –/, "starred, and a dash where the place would be");
+  assert.match(hard, /solves model\s+[█░]+\s+100% 1st/);
+  assert.match(hard, /stalls model\s+[█░]+\s+50% 1st/);
   assert.match(text, /\* Hard, refused model: 100% · 1 of 2 graded · no place/);
   assert.doesNotMatch(text, /stalls model.*rests on|if stalls count/, 'a stall is scored, not a gap');
   assert.match(text, /Hard one\s+·\s+2\/2 ✓\s+0\/2 ✗ out×2/, 'a stalled try sits in the denominator, compact when narrow');
