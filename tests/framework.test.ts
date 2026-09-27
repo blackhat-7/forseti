@@ -12,7 +12,7 @@ import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
-import { byTier, comparisonKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, stalled, checkShare, verdicts } from '../src/report.ts';
+import { byTier, comparisonKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
 import { agentOf, applicableDimensions, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -267,6 +267,69 @@ test('ranks share a place when the run cannot tell models apart, and pool only l
   assert.doesNotMatch(report, /\bexactness\b \|/, 'skill ids are never shown as names');
 });
 
+test('each difficulty level counts equally, and its error is the error of that weighted mean', () => {
+  const tasks = [...['b0', 'b1', 'b2'].map(id => ({ id, title: id, tier: 'basic' as const })), ...['h0', 'h1'].map(id => ({ id, title: id, tier: 'hard' as const }))];
+  const candidate = DEFAULT_CONFIG.models[0]!;
+  // Every basic task solved on both tries, every hard task missed on both.
+  const trials = tasks.flatMap(t => [1, 2].map((r): Trial => ({
+    ...blankTrial(`${t.id}-${r}`, candidate, { ...task, id: t.id }, r),
+    status: t.tier === 'basic' ? 'passed' : 'failed', checks: [{ id: 'c', dimension: 'correctness', passed: t.tier === 'basic', evidence: '' }],
+  })));
+  const tiered = scorecard('m', trials, tasks, 10), flat = scorecard('m', trials, tasks.map(({ tier, ...t }) => t), 10);
+  // Three easy wins no longer outvote two hard misses: (100% + 0%) / 2, not 3 of 5.
+  assert.equal(tiered.score, 0.5);
+  assert.equal(flat.score, 0.6, 'a run without tiers keeps per-task weighting');
+  // A 2/2 or 0/2 task smooths to 3/4 or 1/4, so each has variance 0.1875 / 2 tries.
+  const v = 0.1875 / 2;
+  // Per-task weights 1/(tiers × tasks in tier): 1/6 for basic, 1/4 for hard. Var = Σ w² · var.
+  assert.ok(Math.abs(scoreError(tiered)! - Math.sqrt(3 * (1 / 6) ** 2 * v + 2 * (1 / 4) ** 2 * v)) < 1e-12);
+  assert.ok(Math.abs(scoreError(flat)! - Math.sqrt(5 * v) / 5) < 1e-12, 'equal weights reduce to the old per-task error');
+  assert.ok(scoreError(tiered)! > scoreError(flat)!, 'two hard tasks carrying half the score is less certain than five equal ones');
+  const bar = separated(tiered, flat)!.bar;
+  assert.ok(Math.abs(bar - 2 * Math.hypot(scoreError(tiered)!, scoreError(flat)!)) < 1e-12, 'the tie bar uses the same errors');
+});
+
+test('a tier or skill cell says what it left out, and a thin cell earns no place', () => {
+  const tasks = [...['b0', 'b1'].map(id => ({ id, title: id, hash: id, tier: 'basic' as const, capabilities: ['scope' as const] })),
+    ...['h0', 'h1'].map(id => ({ id, title: id, hash: id, tier: 'hard' as const, capabilities: ['exactness' as const] }))];
+  const model = (id: string): ModelConfig => ({ id, label: id, provider: 'example', model: id, auth: 'pi', enabled: true, thinking: 'off' });
+  // `outcomes` per task, same on both tries: pass, fail, run out of turns, or refused by the provider.
+  const trials = (m: ModelConfig, outcomes: Record<string, 'pass' | 'fail' | 'stall' | 'refused'>) => tasks.flatMap(t => [1, 2].map((r): Trial => {
+    const o = outcomes[t.id] ?? 'pass';
+    const status = ({ pass: 'passed', fail: 'failed', stall: 'budget', refused: 'auth_error' } as const)[o];
+    return { ...blankTrial(`${m.id}-${t.id}-${r}`, m, { ...task, id: t.id }, r),
+      status, checks: ['pass', 'fail'].includes(o) ? [{ id: 'c', dimension: 'correctness', passed: o === 'pass', evidence: '' }] : [] };
+  }));
+  // `refused` solves the one hard task the provider let it run; `stalls` runs out on it instead.
+  const [refused, solves, stalls] = [model('refused'), model('solves'), model('stalls')];
+  const run: Run = {
+    schema: 1, id: '2026-09-27T10-00-00-x', created: '', status: 'completed', suite: 's', suiteHash: 's', harnessHash: 'h', environment: {}, judge: null,
+    options: { ...DEFAULT_OPTIONS, repeat: 2 }, models: [refused, solves, stalls], tasks, planned: 24,
+    trials: [...trials(refused, { h1: 'refused' }), ...trials(solves, {}), ...trials(stalls, { h1: 'stall' })],
+  };
+  const { cards } = scorecards([run]);
+  const hard = byTier(cards[0]!, tasks)[1]!;
+  assert.deepEqual([hard.rate, hard.tasks, hard.total], [1, 1, 2]);
+  assert.equal(sliceGap(hard), '1 of 2 graded');
+  // A stall is graded, as an unsolved try, so nothing is left out of that cell.
+  assert.deepEqual([byTier(cards[2]!, tasks)[1]!.rate, sliceGap(byTier(cards[2]!, tasks)[1]!)], [0.5, null]);
+  // Half its hard tasks ungraded: no place for it, and it costs no one else one.
+  assert.deepEqual(slicePlaces(cards, new Set(['h0', 'h1'])), [null, 1, 1]);
+  assert.equal(taskCell(cards[2]!.tasks.find(t => t.id === 'h1')!).text, '0/2 ✗ · ran out ×2', 'stalls sit in the denominator, and are named');
+  assert.equal(taskCell(cards[0]!.tasks.find(t => t.id === 'h1')!).text, '·', 'a task the provider never ran stays blank');
+  assert.equal(ungradedNote(cards[0]!, tasks), 'rests on 1 of 2 hard tasks');
+  assert.equal(ungradedNote(cards[2]!, tasks), null, 'a stall is not a gap in the evidence');
+
+  const report = comparisonReport([run]);
+  assert.match(report, /\| Hard \(2 tasks\) \| 100% \(–\) · 1 of 2 graded \| 100% \(1st\) \| 50% \(1st\) \|/);
+  assert.match(report, /\(–\) no place: half or more of these tasks were not graded/);
+  assert.match(report, /\| refused \| \*\*100%\*\* .*\| rests on 1 of 2 hard tasks \|/, 'the rank line says what the score rests on');
+  assert.match(report, /Each difficulty level counts equally/);
+  assert.match(report, /stalls ran out of turns or time on 2 tries \(counted as unsolved\)\./);
+  assert.doesNotMatch(report, /if stalls count/);
+  assert.match(report, /\| h1 · Hard \| · \| 2\/2 ✓ \| 0\/2 ✗ · ran out ×2 \|/);
+});
+
 test('partial credit says how much of a task was right, without becoming the headline', () => {
   const tasks = [{ id: 'wide', title: 'Nine checks' }, { id: 'narrow', title: 'One check' }];
   const candidate = DEFAULT_CONFIG.models[0]!;
@@ -293,7 +356,10 @@ test('partial credit says how much of a task was right, without becoming the hea
   assert.equal(checkShare([]), null);
 });
 
-test('a stall stays out of correctness but never out of sight', () => {
+// Reversed on 2026-09-27: a stall used to be left out of correctness and shown beside it. Tasks now
+// declare their own turn and time budget, so running out is the model failing inside a budget sized
+// for the task, and it counts as an unsolved try. A provider failure still never counts.
+test('a stall counts as unsolved, and a provider failure never does', () => {
   const tasks = [{ id: 'a', title: 'Task A' }, { id: 'b', title: 'Task B' }];
   const candidate = DEFAULT_CONFIG.models[0]!;
   const trial = (id: string, status: Trial['status'], passed: boolean): Trial => ({
@@ -305,17 +371,18 @@ test('a stall stays out of correctness but never out of sight', () => {
   const even = scorecard('even', [trial('a', 'passed', true), trial('b', 'passed', true)], tasks, 2);
   const stalling = scorecard('stalling', [trial('a', 'passed', true), trial('b', 'budget', false)], tasks, 2);
   assert.equal(even.score, 1);
-  assert.equal(stalling.score, 1, 'a stall is still excluded from correctness; that rule is not what changed');
+  assert.equal(stalling.score, 0.5, 'a stall is an unsolved try');
+  assert.equal(stalling.checkScore, 0.5, 'and earns no partial credit');
+  assert.equal(stalling.evaluated, 2, 'it is graded');
   assert.equal(even.stalled, 0);
-  assert.equal(stalling.stalled, 1, 'and it is counted');
-  assert.equal(stalling.scoreCountingStalls, 0.5, 'with the size of what the score leaves out');
+  assert.equal(stalling.stalled, 1, 'and still counted on its own, so the page can say which tries ran out');
   assert.equal(stalling.notRun, 0, 'a stall is the model, so it is not also listed as not run');
-  assert.equal(even.scoreCountingStalls, 1);
   // Auth and quota are the provider refusing, not the model failing to converge. They must not
   // be swept into the same number, or the rule this benchmark exists to enforce is lost.
   const refused = scorecard('refused', [trial('a', 'passed', true), trial('b', 'auth_error', false)], tasks, 2);
   assert.equal(refused.stalled, 0);
-  assert.equal(refused.scoreCountingStalls, 1, 'a provider failure never counts against a model');
+  assert.equal(refused.score, 1, 'a provider failure never counts against a model');
+  assert.equal(refused.evaluated, 1);
   assert.equal(refused.notRun, 1, 'but it is still visible as not run');
   assert.equal(stalled([trial('b', 'timeout', false)]), 1, 'running out of time is a stall too');
 });
@@ -518,7 +585,8 @@ test('invalid submissions cannot inflate correctness or overwrite censored outco
   for (const status of ['timeout', 'cancelled', 'provider_error', 'budget'] as const) {
     const censored = blankTrial(status, cfg().models[0], task, 1); censored.status = status;
     rejectArtifacts(censored, task, 'tools', false, 'symlink');
-    assert.equal(censored.status, status); assert.equal(correctness([censored]).rate, null);
+    // A stall counts as unsolved since tasks size their own budget (2026-09-27); not-run stays out.
+    assert.equal(censored.status, status); assert.equal(correctness([censored]).rate, ['timeout', 'budget'].includes(status) ? 0 : null);
     assert.match(censored.error!, /symlink/);
   }
   assert.throws(() => validateChecks([{id:'x',dimension:'instructions',passed:true,evidence:'x'}], ['correctness']), /declared/);

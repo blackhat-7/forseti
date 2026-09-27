@@ -423,12 +423,15 @@ test('the comparison page ranks with ties, splits by difficulty and names each h
   f.key('4', ' ', down, ' ', down, ' ', 'c');
   const text = f.text(120);
   assert.match(text, /3 models · 12 tasks · 3–6 tries each/);
-  assert.match(text, /^\s+1\s+Claude opus\s+[█░]+\s+92%.*Claude Code/m);
-  assert.match(text, /^\s+1\s+Claude sonnet\s+[█░]+\s+83%.*Claude Code/m, 'inside the noise, so it shares first place');
-  assert.match(text, /^\s+3\s+qwen-local\s+[█░]+\s+33%.*Forseti agent/m);
+  // Each difficulty level counts equally, so 3 of 4 hard tasks weighs as much as 8 of 8 basic ones:
+  // opus (100% + 75%) / 2, not 11 of 12 tasks.
+  assert.match(text, /Each difficulty level counts equally/);
+  assert.match(text, /^\s+1\s+Claude opus\s+[█░]+\s+88%.*Claude Code/m);
+  assert.match(text, /^\s+1\s+Claude sonnet\s+[█░]+\s+75%.*Claude Code/m, 'inside the noise, so it shares first place');
+  assert.match(text, /^\s+3\s+qwen-local\s+[█░]+\s+25%.*Forseti agent/m);
   assert.match(text, /^\s+–\s+Reference · synthetic\s+[█░]+\s+100%\s+synthetic/m, 'a control is shown, never ranked, and carries no ±');
   assert.equal(text.match(/Claude sonnet\s+[█░]/g)?.length, 1, 'pooled into one card');
-  assert.match(text, /Claude opus and Claude sonnet are tied: 8 points apart/);
+  assert.match(text, /Claude opus and Claude sonnet are tied: 13 points apart/);
   assert.match(text, /different harnesses, so each gap is the\s+model plus its harness/);
   assert.match(text, /By difficulty/);
   // Each cell now carries the place on that difficulty alone; the control is never placed.
@@ -458,16 +461,42 @@ test('a model that ran out of turns says so beside its score', () => {
   f.key('4', ' ', 'c');
   const text = f.text(120);
   // Reworded from a "Stalled" column to a sentence under the ranking, in plain words.
-  assert.match(text, /ran out of turns or time on 1 try/);
-  assert.match(text, /counted as unsolved it\s+would be 50% instead of 100%/, 'the size of what the score omits, not just the count');
-  assert.match(text, /Left out, not scored/);
+  assert.match(text, /ran out of turns or time on 1 try \(counted as unsolved\)/);
+  // Changed 2026-09-27: a stall used to be left out of the score. Tasks now size their own budget,
+  // so running out is an unsolved try and the score says 50%, not 100%.
+  assert.match(text, /Example model\s+[█░]+\s+50%/);
+  assert.match(text, /1\/2 out×1/, 'the grid names the stalled try inside the denominator, compact in a narrow column');
   assert.doesNotMatch(text, /1 not run/, 'a stall is the model, not the provider');
 
   // No stall, no line: this must not become standing noise that stops being read.
   f.key(esc);
   f.app.runs = [{ ...f.run, trials: [good] }];
   f.key('c');
-  assert.doesNotMatch(f.text(120), /ran out of turns/);
+  // The grid legend always explains "ran out", so the check is on the per-model sentence.
+  assert.doesNotMatch(f.text(120), /ran out of turns or time on/);
+});
+
+test('a tier or skill cell the provider left short says so, and earns no place', () => {
+  const f = fixture('subscription', 200);
+  const tasks = [{ id: 'h0', title: 'Hard zero', hash: 'h0', tier: 'hard' as const, capabilities: ['exactness' as const] }, { id: 'h1', title: 'Hard one', hash: 'h1', tier: 'hard' as const, capabilities: ['exactness' as const] }];
+  const m = (id: string): ModelConfig => ({ ...model, id, model: id, label: `${id} model` });
+  const trial = (who: string, task: string, repetition: number, status: 'passed' | 'failed' | 'budget' | 'auth_error') => ({
+    ...f.run.trials[0]!, id: `${who}-${task}-${repetition}`, model: who, task, repetition, status,
+    checks: ['passed', 'failed'].includes(status) ? [{ id: 'c', dimension: 'correctness' as const, passed: status === 'passed', evidence: '' }] : [],
+  });
+  // `refused` solves the hard task the provider let it run; `stalls` runs out on it instead.
+  const outcome = { refused: ['passed', 'auth_error'], solves: ['passed', 'passed'], stalls: ['passed', 'budget'] } as const;
+  f.app.runs = [{ ...f.run, tasks, models: Object.keys(outcome).map(m), planned: 12,
+    trials: Object.entries(outcome).flatMap(([who, [a, b]]) => [1, 2].flatMap(r => [trial(who, 'h0', r, a), trial(who, 'h1', r, b)])) }];
+  f.key('4', ' ', 'c');
+  const text = f.text(120);
+  assert.match(text, /refused model.*rests on 1 of 2 hard tasks/, 'the rank line says what the score rests on');
+  assert.match(text, /Hard \(2\)\s+100%\* –\s+100% 1st\s+50% 1st/, 'starred, and a dash where the place would be');
+  assert.match(text, /\* Hard, refused model: 100% · 1 of 2 graded · no place/);
+  assert.doesNotMatch(text, /stalls model.*rests on|if stalls count/, 'a stall is scored, not a gap');
+  assert.match(text, /Hard one\s+·\s+2\/2 ✓\s+0\/2 ✗ out×2/, 'a stalled try sits in the denominator, compact when narrow');
+  for (const width of [40, 80, 120]) f.ui.render(width).forEach(row => assert.ok(visibleWidth(row) <= width, `width ${width}: ${visibleWidth(row)}`));
+  assert.match(f.text(40), /100%\*/, 'the star survives a narrow terminal');
 });
 
 test('every run states which credential it will use, reviewer included', () => {

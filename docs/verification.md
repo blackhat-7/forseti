@@ -32,7 +32,7 @@ Accounting honesty
 - missing auth stops the provider cohort without fallback; metered consent precedes calls
 - read-only OAuth preflight agrees with Pi five-minute validity window
 - invalid submissions cannot inflate correctness or overwrite censored outcomes
-- a stall stays out of correctness but never out of sight, and a provider refusal is not a stall
+- a stall counts as an unsolved try, and a provider refusal is not a stall: it stays `not run` and out of every score
 - partial credit says how much of a task was right, without becoming the headline
 - cancelled plans, stale/incomplete manifests and verifier crashes remain distinguishable
 

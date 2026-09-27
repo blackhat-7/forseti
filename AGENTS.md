@@ -41,7 +41,7 @@ npm run demo                       # 36 synthetic trials, no provider needed
 
 ## Project rules
 
-- **Never make a model look wrong for a harness failure.** Auth, quota, timeout and crash are `not-run`, excluded from scores.
+- **Never make a model look wrong for a harness failure.** Auth, quota, crash and cancellation are `not-run`, excluded from scores. Running out of a task's own turn or time budget is the model's failure and counts as unsolved.
 - **Never present controls, single tasks or small samples as model rankings.**
 - **Never expose hidden answers, verifiers, credentials or transcripts to a benchmark agent.**
 - **This repository is public.** Nothing you commit may contain a credential, a real transcript excerpt, an employer or product name, or a production path. Suite fixtures are invented data. A `gitleaks` pre-commit hook is the backstop, not the check.

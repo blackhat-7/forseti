@@ -4,14 +4,27 @@ import { judgeIdentity } from './judge.ts';
 import type { Capability, Dimension, Run, Tier, Trial } from './types.ts';
 
 const usable = (t: Trial) => ['passed', 'failed'].includes(t.status);
+/**
+ * Running out of turns or time is the model failing inside a budget sized for the task: every task
+ * may declare its own `turns` and `timeout`, and the effective budget is the larger of the run's
+ * and the task's. So a stall counts as an unsolved try. The provider or harness failing (auth,
+ * quota, crash, cancellation) is still `not run` and never counts against a model.
+ */
+export const STALL: Trial['status'][] = ['budget', 'timeout'];
+export function stalled(trials: Trial[]): number {
+  return trials.filter(t => STALL.includes(t.status)).length;
+}
+/** A try that counts: graded, or ran out of its budget. Anything else is `not run`. */
+const counts = (t: Trial) => usable(t) || STALL.includes(t.status);
+const scoredTry = (t: Trial) => STALL.includes(t.status) || (usable(t) && t.checks.some(c => c.dimension === 'correctness'));
 export function dimensionScore(trials: Trial[], dimension: Dimension): { passed: number; total: number; rate: number | null } {
   const checks = trials.filter(usable).flatMap(t => t.checks.filter(c => c.dimension === dimension));
   const passed = checks.filter(c => c.passed).length;
   return { passed, total: checks.length, rate: checks.length ? passed / checks.length : null };
 }
 export function correctness(trials: Trial[]) {
-  const observed = trials.filter(t => usable(t) && t.checks.some(c => c.dimension === 'correctness'));
-  const passed = observed.filter(t => t.checks.filter(c => c.dimension === 'correctness').every(c => c.passed)).length;
+  const observed = trials.filter(scoredTry);
+  const passed = observed.filter(t => usable(t) && t.checks.filter(c => c.dimension === 'correctness').every(c => c.passed)).length;
   return { passed, total: observed.length, rate: observed.length ? passed / observed.length : null };
 }
 /**
@@ -20,12 +33,14 @@ export function correctness(trials: Trial[]) {
  * difference is real: one recorded model solves 0% of `weekly-coverage` while passing 80% of its
  * checks, which is "close but never complete", not "cannot do it". Averaged per trial and then per
  * task, like the headline, so a task with many checks cannot outweigh a task with one. A flat
- * check rate does not do that, and on this record it reverses the model order.
+ * check rate does not do that, and on this record it reverses the model order. A stall produced
+ * nothing to check, so it earns no partial credit.
  */
 export function checkShare(trials: Trial[]): number | null {
-  const observed = trials.filter(t => usable(t) && t.checks.some(c => c.dimension === 'correctness'));
+  const observed = trials.filter(scoredTry);
   if (!observed.length) return null;
   return observed.reduce((sum, t) => {
+    if (!usable(t)) return sum;
     const checks = t.checks.filter(c => c.dimension === 'correctness');
     return sum + checks.filter(c => c.passed).length / checks.length;
   }, 0) / observed.length;
@@ -41,13 +56,14 @@ export function checkShare(trials: Trial[]): number | null {
  * has not earned.
  */
 export function scoreError(card: Scorecard): number | null {
-  const scored = card.tasks.filter(t => t.rate !== null && t.evaluated > 0);
+  const scored = card.tasks.filter(t => t.rate !== null);
   if (!scored.length) return null;
-  const variance = scored.reduce((sum, t) => {
+  // The score is a weighted mean of independent task rates, so its variance is Σ w² · var.
+  const w = weights(scored, card.weighting);
+  return Math.sqrt(scored.reduce((sum, t, i) => {
     const smoothed = (t.passed + 1) / (t.evaluated + 2);
-    return sum + (smoothed * (1 - smoothed)) / t.evaluated;
-  }, 0);
-  return Math.sqrt(variance) / scored.length;
+    return sum + w[i]! ** 2 * (smoothed * (1 - smoothed)) / t.evaluated;
+  }, 0));
 }
 /**
  * Whether two candidates are far enough apart to be called apart. Two standard errors of the
@@ -61,18 +77,6 @@ export function separated(a: Scorecard, b: Scorecard): { gap: number; bar: numbe
   const gap = Math.abs(a.score - b.score);
   return { gap, bar, clear: gap > bar };
 }
-/**
- * A stall is the model failing to converge inside a declared budget, which is not the same thing
- * as the provider refusing to answer. Both stay out of correctness — a censored trial is not a
- * wrong answer, and that rule is why this benchmark exists. But lumping them together under
- * "not run" hides a real difference between models: across every trial recorded here, all eight
- * stalls belong to the weakest model and the other two have none, so silently dropping them
- * flatters exactly the model that earned them. Counted and shown, never scored.
- */
-export const STALL: Trial['status'][] = ['budget', 'timeout'];
-export function stalled(trials: Trial[]): number {
-  return trials.filter(t => STALL.includes(t.status)).length;
-}
 export function median(values: number[]): number | null {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b), mid = Math.floor(sorted.length / 2);
@@ -84,6 +88,7 @@ export const GRADED = ['passed', 'failed'];
 export function outcome(status: Trial['status']): { kind: 'pass' | 'scored' | 'not-run'; text: string } {
   if (status === 'passed') return { kind: 'pass', text: 'all checks passed' };
   if (status === 'failed') return { kind: 'scored', text: 'scored' };
+  if (STALL.includes(status)) return { kind: 'scored', text: `ran out of ${status === 'budget' ? 'turns' : 'time'} · counted as unsolved` };
   return { kind: 'not-run', text: `not run · ${status.replace('_', ' ')}` };
 }
 /**
@@ -100,11 +105,35 @@ export function bar(rate: number | null, width = 10): string {
   const filled = Math.max(0, Math.min(width, Math.round(rate * width)));
   return '█'.repeat(filled) + '░'.repeat(width - filled);
 }
-export type TaskScore = { id: string; title: string; rate: number | null; checkRate: number | null; passed: number; evaluated: number; planned: number; stalled: number };
+export type TaskScore = { id: string; title: string; tier?: Tier; rate: number | null; checkRate: number | null; passed: number; evaluated: number; planned: number; stalled: number };
 export type Scorecard = {
-  label: string; score: number | null; checkScore: number | null; scoreCountingStalls: number | null; dimensions: Record<Dimension, number | null>;
+  label: string; score: number | null; checkScore: number | null; dimensions: Record<Dimension, number | null>;
   evaluated: number; planned: number; notRun: number; stalled: number; tasks: TaskScore[];
+  /** 'tier': each difficulty tier counts equally. 'task': every task counts equally. */
+  weighting: 'tier' | 'task';
 };
+/**
+ * Per-task weights for a mean over `tasks`. Under 'tier' each tier present counts equally and each
+ * task equally within its tier, so eleven tasks everyone solves cannot outvote two hard ones. A
+ * run without tiers is a single group, which is plain per-task weighting.
+ */
+function groups(tasks: TaskScore[], weighting: Scorecard['weighting']): TaskScore[][] {
+  return [...Map.groupBy(tasks, t => (weighting === 'tier' ? t.tier ?? 'unrated' : '')).values()];
+}
+function weights(tasks: TaskScore[], weighting: Scorecard['weighting']): number[] {
+  const all = groups(tasks, weighting);
+  return tasks.map(t => 1 / (all.length * all.find(g => g.includes(t))!.length));
+}
+/** The mean of the group means, which is the mean under `weights`. */
+function weightedMean(tasks: TaskScore[], weighting: Scorecard['weighting'], value: (t: TaskScore) => number): number | null {
+  const all = groups(tasks, weighting);
+  return all.length ? all.reduce((sum, g) => sum + g.reduce((s, t) => s + value(t), 0) / g.length, 0) / all.length : null;
+}
+/** Both headline numbers, weighted the same way so they can be read side by side. */
+function headline(tasks: TaskScore[], weighting: Scorecard['weighting']) {
+  const scored = tasks.filter(t => t.rate !== null);
+  return { score: weightedMean(scored, weighting, t => t.rate!), checkScore: weightedMean(scored, weighting, t => t.checkRate!) };
+}
 /**
  * What the reader sees. The ids stay terse because they live in suite JSON and saved runs; the
  * names are for someone who has never read the suite, so each one says what it checks.
@@ -121,8 +150,9 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
  */
 export function sliceCard<T extends Scorecard>(card: T, ids: Set<string>): T {
   const tasks = card.tasks.filter(t => ids.has(t.id));
-  const scored = tasks.filter(t => t.rate !== null);
-  return { ...card, tasks, score: scored.length ? scored.reduce((sum, t) => sum + t.rate!, 0) / scored.length : null };
+  // Every task counts equally inside a slice: a tier slice is one tier, and a skill row reads as
+  // the share of its tasks solved.
+  return { ...card, tasks, weighting: 'task', ...headline(tasks, 'task') };
 }
 type RunTask = Run['tasks'][number];
 // Rows come from the task list, never from one card, so every card gets the same rows in the same order.
@@ -145,6 +175,29 @@ function rollup(card: Scorecard, ids: Set<string>) {
   const part = sliceCard(card, ids);
   return { rate: part.score, tasks: part.tasks.filter(t => t.rate !== null).length, total: ids.size };
 }
+export type SliceRow = ReturnType<typeof rollup>;
+/** Half or more of the slice's tasks not graded: the number rests on too little to place. */
+export const thin = (row: { tasks: number; total: number }) => row.tasks * 2 <= row.total;
+/**
+ * What a tier or skill cell leaves out, or null when nothing. A task the provider or harness never
+ * let run drops out of the cell, so a cell can read 100% on one task of two; the count graded
+ * sits beside it.
+ */
+export function sliceGap(row: SliceRow): string | null {
+  return row.tasks < row.total ? `${row.tasks} of ${row.total} graded` : null;
+}
+export const NO_PLACE = 'no place: half or more of these tasks were not graded';
+/**
+ * Where the headline rests on fewer tasks than the run had. Each tier keeps its full weight however
+ * few of its tasks were graded, so one graded hard task can carry half the score.
+ */
+export function ungradedNote(card: Scorecard, runTasks: RunTask[]): string | null {
+  const rows = tierSlices(runTasks).length
+    ? byTier(card, runTasks).map(r => ({ ...r, name: `${TIER_NAME[r.tier].toLowerCase()} ` }))
+    : [{ ...rollup(card, new Set(runTasks.map(t => t.id))), name: '' }];
+  const short = rows.filter(r => r.tasks < r.total);
+  return short.length ? `rests on ${short.map(r => `${r.tasks} of ${r.total} ${r.name}tasks`).join(', ')}` : null;
+}
 export function byCapability(card: Scorecard, runTasks: RunTask[]) {
   return skillSlices(runTasks).map(({ capability, ids }) => ({ capability, ...rollup(card, ids) }));
 }
@@ -157,37 +210,30 @@ export function byTier(card: Scorecard, runTasks: RunTask[]) {
  * card is a control, has nothing graded there, or there is no second model to be placed against.
  */
 export function slicePlaces(cards: ModelCard[], ids: Set<string>): (number | null)[] {
-  const parts = cards.map(c => sliceCard(c, ids));
+  // A thin card is left out, so it neither takes a place nor costs another model one.
+  const parts = cards.map(c => sliceCard(c, ids)).map(p => (thin({ tasks: p.tasks.filter(t => t.rate !== null).length, total: ids.size }) ? { ...p, score: null } : p));
   const ranked = ranking(parts);
   if (ranked.filter(r => r.rank !== null).length < 2) return cards.map(() => null);
   return parts.map(p => ranked.find(r => r.card === p)!.rank);
 }
 export const place = (n: number) => ['1st', '2nd', '3rd'][n - 1] ?? `${n}th`;
 /**
- * One number per model, weighting every task equally so a task with many checks cannot
- * dominate. The headline is correctness; instruction/tool rates stay separate so a
- * formatting miss never reads as a wrong answer.
+ * One number per model: each difficulty tier counts equally and each task equally within its tier,
+ * so a task with many checks cannot dominate and a pile of easy tasks cannot drown the hard ones.
+ * The headline is correctness; instruction/tool rates stay separate so a formatting miss never
+ * reads as a wrong answer.
  */
-export function scorecard(label: string, trials: Trial[], tasks: { id: string; title: string }[], planned: number): Scorecard {
+export function scorecard(label: string, trials: Trial[], tasks: { id: string; title: string; tier?: Tier }[], planned: number): Scorecard {
   const perTask = tasks.map(t => {
     const subset = trials.filter(x => x.task === t.id);
     const score = correctness(subset);
-    return { id: t.id, title: t.title, rate: score.rate, checkRate: checkShare(subset), passed: score.passed, evaluated: score.total, planned: subset.length, stalled: stalled(subset) };
+    return { id: t.id, title: t.title, tier: t.tier, rate: score.rate, checkRate: checkShare(subset), passed: score.passed, evaluated: score.total, planned: subset.length, stalled: stalled(subset) };
   });
-  const scored = perTask.filter(t => t.rate !== null);
-  // The same headline, computed as if every stall were a failed trial on its own task. Not the
-  // score; the size of what the score leaves out.
-  const counted = perTask.filter(t => t.rate !== null || t.stalled);
   return {
-    label,
-    score: scored.length ? scored.reduce((sum, t) => sum + t.rate!, 0) / scored.length : null,
-    checkScore: scored.length ? scored.reduce((sum, t) => sum + t.checkRate!, 0) / scored.length : null,
-    scoreCountingStalls: counted.length
-      ? counted.reduce((sum, t) => sum + t.passed / (t.evaluated + t.stalled), 0) / counted.length
-      : null,
+    label, weighting: 'tier', ...headline(perTask, 'tier'),
     dimensions: Object.fromEntries(DIMENSIONS.map(d => [d, dimensionScore(trials, d).rate])) as Record<Dimension, number | null>,
-    // A stall has its own count; `notRun` is only the provider or harness failing.
-    evaluated: trials.filter(usable).length, planned, notRun: trials.filter(t => !usable(t) && !STALL.includes(t.status)).length,
+    // A stall is scored and has its own count; `notRun` is only the provider or harness failing.
+    evaluated: trials.filter(counts).length, planned, notRun: trials.filter(t => !counts(t)).length,
     stalled: stalled(trials), tasks: perTask,
   };
 }
@@ -272,14 +318,17 @@ export function taskOrder(cards: Scorecard[], tasks: Run['tasks']): number[] {
 /** A per-task cell: tries solved, and how close the rest came. Shared so both views say the same. */
 export function taskCell(t: TaskScore): { text: string; kind: 'solved' | 'partly' | 'unsolved' | 'none' } {
   if (t.rate === null) return { text: '·', kind: 'none' };
-  const close = t.rate < 1 && t.checkRate ? ` (${pct(t.checkRate)})` : '';
+  // Stalls are already in the denominator; the note says which unsolved tries they were.
+  const close = t.stalled ? ` · ran out ×${t.stalled}` : t.rate < 1 && t.checkRate ? ` (${pct(t.checkRate)})` : '';
   return { text: `${t.passed}/${t.evaluated}${t.rate === 1 ? ' ✓' : t.rate === 0 ? ' ✗' : ''}${close}`, kind: t.rate === 1 ? 'solved' : t.rate === 0 ? 'unsolved' : 'partly' };
 }
-/** A stall is shown beside the score it was left out of, never scored. */
+/** Stalls are scored as unsolved; this says how many of a model's unsolved tries they were. */
 export function stallNote(card: Scorecard): string | null {
-  if (!card.stalled) return null;
-  const counted = pct(card.scoreCountingStalls), scored = pct(card.score);
-  return `${card.label} ran out of turns or time on ${tries(card.stalled)}. Left out, not scored; ${counted === scored ? 'counting it as unsolved would not change the score' : `counted as unsolved it would be ${counted} instead of ${scored}`}.`;
+  return card.stalled ? `${card.label} ran out of turns or time on ${tries(card.stalled)} (counted as unsolved).` : null;
+}
+/** How the headline weighs tasks, in one plain phrase, so the page states what its number means. */
+export function weighting(runTasks: RunTask[]): string {
+  return tierSlices(runTasks).length ? 'Each difficulty level counts equally, and each task within its level' : 'Every task counts equally';
 }
 export function triesLabel(cards: ModelCard[]): string {
   const counts = [...new Set(cards.map(c => c.tries))].sort((a, b) => a - b);
@@ -295,16 +344,17 @@ function summaryMarkdown(runs: Run[]): string[] {
   const { cards: all, tasks, mixed } = scorecards(runs);
   const ranked = ranking(all), cards = ranked.map(r => r.card);
   const tagged = harnesses(cards).length > 1, lost = cards.some(c => c.notRun);
+  const caveats = cards.map(c => (c.synthetic ? null : ungradedNote(c, tasks))), caveat = caveats.some(n => n);
   const names = cards.map(c => escape(c.label));
   const table = (first: string) => [`| ${first} | ${names.join(' | ')} |`, `|---|${cards.map(() => '---:').join('|')}|`];
   const lines = ['# Model comparison', '', `${cards.some(c => !c.synthetic) ? plural(cards.filter(c => !c.synthetic).length, 'model') : plural(cards.length, 'synthetic control')} · ${plural(tasks.length, 'task')} · ${triesLabel(cards)}${tagged || cards.every(c => c.synthetic) ? '' : ` · ${cards[0]!.harness}`}`, ''];
   if (tagged) lines.push(`> **${HARNESS_WARNING}**`, '');
   else if (mixed) lines.push('> **Not one controlled comparison:** suite, selected tasks, lane or settings differ between these runs. See Details for each group.', '');
-  lines.push(`## Who is best overall`, '', `**${LABEL.solved}**: the share of tasks a model got completely right, every task counting equally. **±** is how far the number could move if the run were repeated. A model's **rank** is 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart.`, '',
-    `| Rank | Model |${tagged ? ' Harness |' : ''} ${LABEL.solved} | | ± |${lost ? ' Not run |' : ''}`, `|---:|---|${tagged ? '---|' : ''}---:|---|---:|${lost ? '---:|' : ''}`);
-  for (const { card, rank } of ranked) {
+  lines.push(`## Who is best overall`, '', `**${LABEL.solved}**: the share of tasks a model got completely right. ${weighting(tasks)}. **±** is how far the number could move if the run were repeated. A model's **rank** is 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart.`, '',
+    `| Rank | Model |${tagged ? ' Harness |' : ''} ${LABEL.solved} | | ± |${lost ? ' Not run |' : ''}${caveat ? ' Caveat |' : ''}`, `|---:|---|${tagged ? '---|' : ''}---:|---|---:|${lost ? '---:|' : ''}${caveat ? '---|' : ''}`);
+  for (const [i, { card, rank }] of ranked.entries()) {
     const error = card.synthetic ? null : scoreError(card);
-    lines.push(`| ${rank ?? '–'} | ${escape(card.label)}${card.synthetic && !/synthetic/i.test(card.label) ? ' (synthetic)' : ''} |${tagged ? ` ${card.harness} |` : ''} **${pct(card.score)}** | \`${bar(card.score)}\` | ${error === null ? '' : `±${Math.round(error * 100)}`} |${lost ? ` ${card.notRun} |` : ''}`);
+    lines.push(`| ${rank ?? '–'} | ${escape(card.label)}${card.synthetic && !/synthetic/i.test(card.label) ? ' (synthetic)' : ''} |${tagged ? ` ${card.harness} |` : ''} **${pct(card.score)}** | \`${bar(card.score)}\` | ${error === null ? '' : `±${Math.round(error * 100)}`} |${lost ? ` ${card.notRun} |` : ''}${caveat ? ` ${caveats[i] ?? ''} |` : ''}`);
   }
   if (cards.some(c => c.synthetic)) lines.push('', 'Synthetic controls check the grader, not a model, so they are never ranked.');
   if (lost) lines.push('', '**Not run** counts tries lost to login, quota, crash or cancellation. They never count against a model.');
@@ -312,24 +362,32 @@ function summaryMarkdown(runs: Run[]): string[] {
   if (calls.length) lines.push('', '**Can this run tell them apart?** A gap counts only when it is bigger than two standard errors of the difference.', '', ...calls.map(v => `- ${escape(v)}`));
   if (stalls.length) lines.push('', ...stalls.map(n => `- ${escape(n)}`));
   lines.push('', '## Where each model is strong or weak', '');
-  const cells = (rates: (number | null)[], ids: Set<string>) => {
-    const places = slicePlaces(cards, ids);
-    return rates.map((rate, i) => `${pct(rate)}${places[i] ? ` (${place(places[i])})` : ''}`).join(' | ');
+  let unplaced = false;
+  const cells = (rows: SliceRow[], ids: Set<string>) => {
+    const places = slicePlaces(cards, ids), placing = places.some(p => p !== null);
+    return rows.map((row, i) => {
+      const gap = sliceGap(row), dash = placing && thin(row);
+      unplaced ||= dash;
+      return `${pct(row.rate)}${places[i] ? ` (${place(places[i])})` : dash ? ' (–)' : ''}${gap ? ` · ${gap}` : ''}`;
+    }).join(' | ');
   };
-  const PLACES = 'The place in brackets is judged on those tasks alone, by the same rule as the rank; a shared place means this run cannot tell them apart there.';
+  const PLACES = 'The place in brackets is judged on those tasks alone, by the same rule as the rank; a shared place means this run cannot tell them apart there. Where login, quota or a crash kept tasks from being graded, the cell says how many were.';
+  const dashNote = () => { if (unplaced) lines.push(`(–) ${NO_PLACE} for that model.`, ''); unplaced = false; };
   const tiers = cards.map(c => byTier(c, tasks));
   if (tiers[0]?.length) {
     lines.push(`**By difficulty** — share of tasks fully solved at each level. Basic tasks tell small models apart; hard tasks tell the strongest apart. ${PLACES}`, '', ...table('Difficulty'));
-    for (const [i, { tier, ids }] of tierSlices(tasks).entries()) lines.push(`| ${TIER_NAME[tier]} (${ids.size} tasks) | ${cells(tiers.map(rows => rows[i]!.rate), ids)} |`);
+    for (const [i, { tier, ids }] of tierSlices(tasks).entries()) lines.push(`| ${TIER_NAME[tier]} (${ids.size} tasks) | ${cells(tiers.map(rows => rows[i]!), ids)} |`);
     lines.push('');
+    dashNote();
   }
   const skills = cards.map(c => byCapability(c, tasks));
   if (skills[0]?.length) {
     lines.push(`**By skill** — share of tasks fully solved among the tasks that test each skill. ${PLACES}`, '', ...table('Skill'));
-    for (const [i, { capability, ids }] of skillSlices(tasks).entries()) lines.push(`| ${SKILL_NAME[capability]} (${ids.size} tasks) | ${cells(skills.map(rows => rows[i]!.rate), ids)} |`);
+    for (const [i, { capability, ids }] of skillSlices(tasks).entries()) lines.push(`| ${SKILL_NAME[capability]} (${ids.size} tasks) | ${cells(skills.map(rows => rows[i]!), ids)} |`);
     lines.push('');
+    dashNote();
   }
-  lines.push('**Per task**, hardest first — tries fully solved out of tries graded. ✓ every try solved, ✗ none, (80%) share of checks passed when not fully solved, · not graded.', '', ...table('Task'));
+  lines.push('**Per task**, hardest first — tries fully solved out of tries graded. ✓ every try solved, ✗ none, (80%) share of checks passed when not fully solved, ran out ×2 = tries that ran out of turns or time, counted as unsolved, · not graded.', '', ...table('Task'));
   for (const i of taskOrder(cards, tasks)) lines.push(`| ${escape(tasks[i]!.title)}${tasks[i]!.tier ? ` · ${TIER_NAME[tasks[i]!.tier!]}` : ''} | ${cards.map(c => taskCell(c.tasks[i]!).text).join(' | ')} |`);
   lines.push('', '**Other signals** — never part of the rank.', '', ...table('Signal'),
     `| ${LABEL.checks} (partial credit) | ${cards.map(c => pct(c.checkScore)).join(' | ')} |`,
@@ -340,7 +398,7 @@ function summaryMarkdown(runs: Run[]): string[] {
 export function comparisonReport(runs: Run[]): string {
   if (!runs.length) throw new Error('Select at least one saved run');
   const lines = summaryMarkdown(runs);
-  lines.push('## Details', '', `**${LABEL.solved}** is the fraction of graded tries passing every correctness check; **${LABEL.checks}** gives partial credit for the ones that did not. Other signals are explicit check pass rates, not subjective model grades. Tasks without a signal are N/A, not failures. Infrastructure/auth/limits/cancellation are excluded, counted, and shown separately. If outcomes are missing, overall rates are not a paired estimate; use the matched-case observations.`, '');
+  lines.push('## Details', '', `**${LABEL.solved}** is the fraction of graded tries passing every correctness check; **${LABEL.checks}** gives partial credit for the ones that did not. Other signals are explicit check pass rates, not subjective model grades. Tasks without a signal are N/A, not failures. Login, quota, crash and cancellation are excluded, counted, and shown separately. Running out of turns or time counts as an unsolved try. If outcomes are missing, overall rates are not a paired estimate; use the matched-case observations.`, '');
   const groups = Map.groupBy(runs, comparisonKey);
   if (groups.size > 1) lines.push('> **Not a controlled model comparison:** suite, selected tasks, harness, lane, settings or environment differ. Results are split into separate groups. Do not attribute cross-group differences to models. A prompt/tool lane change is an elicitation + harness ablation, not a pure model change.', '');
   for (const [key, group] of groups) {
@@ -356,14 +414,14 @@ export function comparisonReport(runs: Run[]): string {
     if (first.judge?.enabled) {
       lines.push(`> **Design is judged, not computed.** A reviewer model (\`${escape(first.judge.provider)}/${escape(first.judge.model)}\`, thinking ${escape(first.judge.thinking)}, ${first.judge.repeat} round(s), majority) answers a fixed set of yes/no questions against an anchored reference, with every defect required to cite a line that exists in the submission. Uncitable defects are discarded. Design is therefore the only dimension that is not reproducible from the artifacts alone, is excluded from correctness, and is only produced for submissions that already passed every correctness check. Changing the reviewer or the rubric starts a new experiment.`, '');
     }
-    lines.push('#### Scores per run', '', `The headline is ${LABEL.solved}, weighting every task equally. Other signals stay separate: a formatting miss is not a wrong answer. The ${LABEL.hygiene} is a floor, not a score — valid Python, standard library only, no eval/exec — so it reads \`ok\` or names the failures instead of scoring a percentage nobody can lose.`, '',
-      `**${LABEL.solved}** is the share of tasks a model got entirely right, weighting every task equally. **${LABEL.checks}** is the share of individual correctness checks it passed, averaged the same way — partial credit, for reading beside the headline and never instead of it. A task is done or it is not, so many checks passed beside few tasks solved means close but never complete, which is a different thing from cannot do it.`, '',
-      `**${LABEL.stalled}** counts tries that ran out of the ${first.options.maxTurns}-turn or ${first.options.timeout}s budget while still working. They are excluded from the score, because a censored try is not a wrong answer — but a model that cannot finish inside the budget is not equal to one that finishes every time, and the excluded tries are rarely spread evenly. Read the score and this column together.`, '',
+    lines.push('#### Scores per run', '', `The headline is ${LABEL.solved}. ${weighting(first.tasks)}. Other signals stay separate: a formatting miss is not a wrong answer. The ${LABEL.hygiene} is a floor, not a score — valid Python, standard library only, no eval/exec — so it reads \`ok\` or names the failures instead of scoring a percentage nobody can lose.`, '',
+      `**${LABEL.solved}** is the share of tasks a model got entirely right. ${weighting(first.tasks)}. **${LABEL.checks}** is the share of individual correctness checks it passed, averaged the same way — partial credit, for reading beside the headline and never instead of it. A task is done or it is not, so many checks passed beside few tasks solved means close but never complete, which is a different thing from cannot do it.`, '',
+      `**${LABEL.stalled}** counts tries that ran out of their turn or time budget while still working: at least ${first.options.maxTurns} turns and ${first.options.timeout}s, more where a task declares its own. They count as unsolved, because the budget is sized for the task.`, '',
       '**±** is how far the headline would move if the same run happened again. A gap between two models smaller than the two errors combined is not a difference this run can see; the check below says which pairs clear it.', '',
       `| Model | ${LABEL.solved} | | ± | ${LABEL.checks} | ${LABEL.stalled} | ${LABEL.instructions} | ${LABEL.tools} | ${LABEL.design} | ${LABEL.hygiene} | Graded |`, '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|');
     for (const s of cards) {
       const error = scoreError(s);
-      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${error === null ? 'n/a' : `±${(error * 100).toFixed(1)}`} | ${pct(s.checkScore)} | ${s.stalled ? `**${s.stalled}** · ${pct(s.scoreCountingStalls)} if counted` : '0'} | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${gate(dimensionScore(candidates.find(c => c.label === s.label)!.trials, 'hygiene'))} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
+      lines.push(`| ${escape(s.label)} | **${pct(s.score)}** | \`${bar(s.score)}\` | ${error === null ? 'n/a' : `±${(error * 100).toFixed(1)}`} | ${pct(s.checkScore)} | ${s.stalled} | ${pct(s.dimensions.instructions)} | ${pct(s.dimensions.tools)} | ${pct(s.dimensions.design)} | ${gate(dimensionScore(candidates.find(c => c.label === s.label)!.trials, 'hygiene'))} | ${s.evaluated}/${s.planned}${s.notRun ? ` (${s.notRun} not run)` : ''} |`);
     }
     // Stated next to the scorecard, because a table of percentages invites a ranking whether or
     // not the run can support one, and the reader has no way to tell from the numbers alone.
@@ -383,10 +441,10 @@ export function comparisonReport(runs: Run[]): string {
     lines.push(`| Model | Tries fully solved | ${LABEL.instructions} | ${LABEL.tools} | ${LABEL.design} | ${LABEL.hygiene} | Graded / planned | Not graded, by reason |`, '|---|---:|---:|---:|---:|---:|---:|---|');
     for (const c of candidates) {
       const score = correctness(c.trials);
-      const failures = Object.entries(Object.groupBy(c.trials.filter(t => !usable(t)), t => t.status)).map(([s, rows]) => `${s}: ${rows!.length}`).join(', ') || 'none';
+      const failures = Object.entries(Object.groupBy(c.trials.filter(t => !counts(t)), t => t.status)).map(([s, rows]) => `${s}: ${rows!.length}`).join(', ') || 'none';
       const planned = c.run.planned / c.run.models.length;
       const design = dimensionScore(c.trials, 'design');
-      lines.push(`| ${escape(c.label)} | ${pct(score.rate)} (${score.passed}/${score.total}) | ${pct(dimensionScore(c.trials, 'instructions').rate)} | ${pct(dimensionScore(c.trials, 'tools').rate)} | ${pct(design.rate)} (${design.passed}/${design.total}) | ${gate(dimensionScore(c.trials, 'hygiene'))} | ${c.trials.filter(usable).length}/${planned} | ${failures}${c.trials.length < planned ? `; unrecorded: ${planned - c.trials.length}` : ''} |`);
+      lines.push(`| ${escape(c.label)} | ${pct(score.rate)} (${score.passed}/${score.total}) | ${pct(dimensionScore(c.trials, 'instructions').rate)} | ${pct(dimensionScore(c.trials, 'tools').rate)} | ${pct(design.rate)} (${design.passed}/${design.total}) | ${gate(dimensionScore(c.trials, 'hygiene'))} | ${c.trials.filter(counts).length}/${planned} | ${failures}${c.trials.length < planned ? `; unrecorded: ${planned - c.trials.length}` : ''} |`);
     }
     const notes = candidates.flatMap(c => c.trials.filter(t => t.judgeNote).map(t => `- ${escape(c.label)} / \`${escape(t.task)}\` try ${t.repetition}: ${escape(t.judgeNote!)}`));
     if (notes.length) lines.push('', '**Submissions the reviewer did not score.** These are harness outcomes, not model failures, and carry no design score.', '', ...notes);
@@ -413,7 +471,7 @@ export function comparisonReport(runs: Run[]): string {
         const repeats = new Set([...lt, ...rt].map(t => t.repetition));
         for (const repetition of repeats) {
           const l = lt.find(t => t.repetition === repetition), r = rt.find(t => t.repetition === repetition);
-          if (!l || !r || !usable(l) || !usable(r)) { unmatched++; continue; }
+          if (!l || !r || !counts(l) || !counts(r)) { unmatched++; continue; }
           const lc = correctness([l]).rate, rc = correctness([r]).rate;
           if (lc === null || rc === null) dimensionNA++;
           else if (lc > rc) wins++; else if (lc < rc) losses++; else ties++;
@@ -425,7 +483,7 @@ export function comparisonReport(runs: Run[]): string {
           }
         }
       }
-      lines.push('', `**${escape(left.label)} vs ${escape(right.label)}**: ${wins} correctness wins, ${losses} losses, ${ties} ties, ${unmatched} missing/censored pairs, ${dimensionNA} pairs without a correctness rubric. Only common task hashes and try numbers with that dimension are paired.`, '');
+      lines.push('', `**${escape(left.label)} vs ${escape(right.label)}**: ${wins} correctness wins, ${losses} losses, ${ties} ties, ${unmatched} missing or not-run pairs, ${dimensionNA} pairs without a correctness rubric. Only common task hashes and try numbers with that dimension are paired.`, '');
     }
     if (!differences) lines.push('No differing matched checks observed (or fewer than two comparable candidates). This is not evidence of equivalence.', '');
     lines.push('#### Per-task repeatability', '', '| Model / task | Tries fully solved | Observed rate |', '|---|---:|---:|');

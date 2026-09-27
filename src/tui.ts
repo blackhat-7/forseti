@@ -5,7 +5,7 @@ import {
   type Component, type Focusable,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { HARNESS_WARNING, LABEL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, place, skillSlices, slicePlaces, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts } from './report.ts';
+import { HARNESS_WARNING, LABEL, NO_PLACE, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, place, skillSlices, sliceGap, slicePlaces, stallNote, taskCell, taskOrder, thin, tierSlices, triesLabel, ungradedNote, verdicts, weighting, type SliceRow } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
@@ -145,7 +145,7 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean): string[
   if (tagged) { prose(HARNESS_WARNING, amber); row(); }
   else if (mixed) { prose('Different suite, harness, lane or settings — these are not one controlled comparison.', amber); row(); }
 
-  row(bold(LABEL.solved) + faint('   every task counts equally'));
+  row(bold(LABEL.solved));
   const nameW = Math.max(8, Math.min(22, Math.max(...names.map(width_)) + 2));
   const tagW = tagged || cards.some(c => c.synthetic) ? Math.max(...cards.map(c => c.harness.length)) + 2 : 0;
   // A bar too short to read is dropped, so the percentage itself stays on screen on a narrow terminal.
@@ -154,11 +154,15 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean): string[
     // A control's answers are fixed, so a rerun spread would be a number about nothing.
     const error = card.synthetic ? null : scoreError(card);
     const tag = tagW ? faint(pad(tagged || card.synthetic ? card.harness : '', tagW)) : '';
-    row(muted(String(rank ?? '–').padStart(2)) + '  ' + pad(plain(card.label), nameW) + (barW ? rateInk(card.score)(bar(card.score, barW)) + ' ' : '') + bold(pct(card.score).padStart(4))
-      + faint(pad(error === null ? '' : ` ±${Math.round(error * 100)}`, 6)) + tag + (card.notRun ? amber(`${card.notRun} not run`) : ''));
+    const line = muted(String(rank ?? '–').padStart(2)) + '  ' + pad(plain(card.label), nameW) + (barW ? rateInk(card.score)(bar(card.score, barW)) + ' ' : '') + bold(pct(card.score).padStart(4))
+      + faint(pad(error === null ? '' : ` ±${Math.round(error * 100)}`, 6)) + tag + (card.notRun ? amber(`${card.notRun} not run `) : '');
+    // What the score rests on stays on its line when it fits, and wraps under it when it does not.
+    const note = card.synthetic ? null : ungradedNote(card, tasks);
+    if (note && width_(line) + note.length > width) { row(line); prose(`    ${note}`, amber); }
+    else row(line + amber(note ?? ''));
   }
   row();
-  prose('Rank = 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart. ± = how far the number could move on a rerun.', faint);
+  prose(`${weighting(tasks)}. Rank = 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart. ± = how far the number could move on a rerun.`, faint);
   if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
   if (cards.some(c => c.notRun)) prose('Not run = lost to login, quota, crash or cancellation. It never counts against a model.', faint);
   const calls = verdicts(ranked), stalls = cards.map(stallNote).filter(n => n !== null);
@@ -186,32 +190,45 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean): string[
   const rates = (values: (number | null)[]) => values.map(v => rateInk(v)(pct(v)));
   // A slice row carries each model's place on those tasks alone, so a lead in one row is only
   // claimed where the run can see it there.
-  const placed = (values: (number | null)[], ids: Set<string>) => {
-    const places = slicePlaces(cards, ids);
-    // "100% 1st" needs eight columns; below that every cell drops its place, never only some.
-    return values.map((v, i) => rateInk(v)(pct(v)) + (places[i] && colW >= 8 ? faint(` ${place(places[i])}`) : ''));
+  // A cell that leaves tasks out is starred, and a sentence under the table says what it left out,
+  // so the columns keep their alignment at any width.
+  const gaps: string[] = [];
+  const placed = (label: string, rows: SliceRow[], ids: Set<string>) => {
+    const places = slicePlaces(cards, ids), placing = places.some(p => p !== null);
+    return rows.map((r, i) => {
+      const gap = sliceGap(r), dash = placing && thin(r);
+      if (gap) gaps.push(`* ${label}, ${names[i]}: ${pct(r.rate)} · ${gap}${dash ? ` · ${NO_PLACE}` : ''}.`);
+      // "100%* 1st" needs nine columns; below that every cell drops its place, never only some.
+      const mark = places[i] ? place(places[i]) : dash ? '–' : '';
+      return rateInk(r.rate)(pct(r.rate)) + (gap ? amber('*') : '') + (mark && colW >= 9 ? faint(` ${mark}`) : '');
+    });
   };
+  const flushGaps = () => { for (const gap of gaps.splice(0)) prose(gap, amber); };
   const PLACES = 'Place = rank on those tasks alone, by the same rule; a shared place means this run cannot tell them apart there.';
   const tiers = cards.map(c => byTier(c, tasks));
   if (tiers[0]?.length) {
     row(bold('By difficulty') + faint('   share of tasks fully solved, and place · (n) tasks'));
     columns();
-    for (const [i, { tier, ids }] of tierSlices(tasks).entries()) line(`${TIER_NAME[tier]} (${ids.size})`, placed(tiers.map(rows => rows[i]!.rate), ids));
-    prose(`Basic tasks tell small models apart; hard tasks tell the strongest apart.${rivals.length > 1 && colW >= 8 ? ` ${PLACES}` : ''}`, faint);
+    for (const [i, { tier, ids }] of tierSlices(tasks).entries()) line(`${TIER_NAME[tier]} (${ids.size})`, placed(TIER_NAME[tier], tiers.map(rows => rows[i]!), ids));
+    flushGaps();
+    prose(`Basic tasks tell small models apart; hard tasks tell the strongest apart.${rivals.length > 1 && colW >= 9 ? ` ${PLACES}` : ''}`, faint);
     row();
   }
   const skills = cards.map(c => byCapability(c, tasks));
   if (skills[0]?.length) {
     row(bold('By skill') + faint('   share of tasks fully solved, and place · (n) tasks'));
     columns();
-    for (const [i, { capability, ids }] of skillSlices(tasks).entries()) line(`${SKILL_NAME[capability]} (${ids.size})`, placed(skills.map(rows => rows[i]!.rate), ids));
+    for (const [i, { capability, ids }] of skillSlices(tasks).entries()) line(`${SKILL_NAME[capability]} (${ids.size})`, placed(SKILL_NAME[capability], skills.map(rows => rows[i]!), ids));
+    flushGaps();
     row();
   }
   row(bold('Per task') + faint('   hardest first'));
-  prose('Tries fully solved out of tries graded. ✓ every try solved, ✗ none, (80%) share of checks passed when not fully solved, · not graded. Rows where models differ are bright.', faint);
+  prose('Tries fully solved out of tries graded. ✓ every try solved, ✗ none, (80%) share of checks passed when not fully solved, out×2 = tries that ran out of turns or time, counted as unsolved, · not graded. Rows where models differ are bright.', faint);
   columns();
   const paint = { solved: green, partly: amber, unsolved: rose, none: faint };
   const order = taskOrder(cards, tasks);
+  // A cell too wide for its column keeps the tries first: "0/2 ✗ · ran out ×2" → "0/2 ✗ out×2" → "0/2 ✗".
+  const fit = (text: string) => [text, text.replace(' · ran out ×', ' out×'), text.replace(/ (\(\d+%\)| · ran out ×\d+)$/, '')].find(t => width_(t) <= colW) ?? text;
   for (const tier of [...new Set(order.map(i => tasks[i]!.tier ?? 'unrated'))]) {
     const group = order.filter(i => (tasks[i]!.tier ?? 'unrated') === tier);
     if (tasks.some(t => t.tier)) row(muted(TIER_NAME[tier]));
@@ -220,7 +237,7 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean): string[
     for (const i of group.filter(i => !everyone.includes(i))) {
       const cells = cards.map(c => taskCell(c.tasks[i]!));
       const same = cells.every(x => x.text === cells[0]!.text);
-      line(plain(tasks[i]!.title), cells.map(x => paint[x.kind](width_(x.text) <= colW ? x.text : x.text.replace(/ \(\d+%\)$/, ''))), same ? faint : s => s);
+      line(plain(tasks[i]!.title), cells.map(x => paint[x.kind](fit(x.text))), same ? faint : s => s);
     }
     if (everyone.length) prose(`${count(everyone.length, 'task')} every model solved: ${everyone.map(i => plain(tasks[i]!.title)).join(', ')} · a shows them`, faint);
   }
@@ -900,10 +917,9 @@ export class Dashboard implements Component, Focusable {
             const chip = state.kind === 'pass' ? green('PASS') : state.kind === 'scored' ? amber('SCORED') : rose('NOT RUN');
             row();
             row(`${chip}  ${bold(plain(trial.model))}${muted(' / ')}${plain(trial.task)}${faint(`  try ${trial.repetition}`)}`);
-            // "not run" never means a wrong answer: those trials are excluded from correctness.
-            row(faint(state.kind === 'not-run' ? `${state.text} — excluded from scores, not counted against the model` : `${trial.checks.filter(c => c.passed).length} of ${trial.checks.length} checks passed`));
-            // A censored trial is recoverable, and the fix is one key away on Home.
-            if (trial.status === 'timeout') row(faint(`The model was still working at ${run.options.timeout}s. Raise the limit with t on Home and rerun to get a real outcome.`));
+            // "not run" never means a wrong answer: those trials are excluded from correctness. A
+            // stall is the model running out of a budget sized for the task, so it is scored.
+            row(faint(state.kind === 'not-run' ? `${state.text} — excluded from scores, not counted against the model` : STALL.includes(trial.status) ? state.text : `${trial.checks.filter(c => c.passed).length} of ${trial.checks.length} checks passed`));
             row();
             for (const dimension of ['correctness', 'instructions', 'tools', 'design', 'hygiene'] as const) {
               const checks = trial.checks.filter(c => c.dimension === dimension);

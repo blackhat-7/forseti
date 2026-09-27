@@ -310,7 +310,7 @@
     {
       "id": "retry-rollup",
       "title": "Count the failures the retries did not fix",
-      "tier": "hard",
+      "tier": "standard",
       "tags": [
         "sql",
         "metrics",
@@ -380,6 +380,8 @@
       "id": "due-dates",
       "title": "List the invoices overdue as of an instant",
       "tier": "hard",
+      "turns": 40,
+      "timeout": 900,
       "tags": [
         "sql",
         "calendar",
