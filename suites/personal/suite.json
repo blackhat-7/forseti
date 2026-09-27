@@ -512,6 +512,62 @@
         "exactness",
         "evidence"
       ]
+    },
+    {
+      "id": "room-bookings",
+      "title": "Find why a booked room shows as free",
+      "tier": "hard",
+      "turns": 40,
+      "timeout": 900,
+      "tags": [
+        "python",
+        "root-cause",
+        "multi-file",
+        "time-zone",
+        "paging",
+        "cache"
+      ],
+      "prompt": "Bug report from the Harbour site (UTC+05:30): \"Dana booked the Boardroom, HBR-2, for 09:00 to 10:00 local time on 3 March 2031. The free-slots page still lists 09:00 for that day, and Ravi then booked the same hour. Our Kestrel site, on UTC+00:00, has never had this problem.\" The room-booking service is in this workspace: start at app.py, and README.md maps the modules. Fix it so the report is resolved and all of the following hold, at every site and on every day. (1) A room's free hours for a local day are its opening hours minus every hour overlapped by one of its active bookings. (2) A booking that overlaps an active booking of the same room is refused with SlotTaken. (3) Cancelling a booking frees its hours at once, and they can be booked again. (4) The day report gives, for every room at the site, the number of active booked hours on that local day. (5) A confirmation shows the booking in the site's local time. (6) Repository reads stay paged: page_for_room and page_for_site return at most `limit` bookings per call, and following their cursors returns every matching booking exactly once. Keep the public API of app.Service, and of BookingRepository.page_for_room and page_for_site (their arguments and the (rows, cursor) result, where the cursor is opaque to callers), unchanged. You may change any .py module except config.py, observe.py and check_public.py. Do not add, rename or delete files; try things with the python tool rather than writing scripts. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public check covers only the reported case: passing it does not mean the service is right. If tools are unavailable, return only JSON {\"files\":{\"module.py\":\"complete replacement contents\"}} with one entry for each module you changed. Objective hygiene rubric for each module you change: valid Python AST; only absolute imports of the standard library or of this service's own modules; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/room-bookings",
+      "grader": "private/room-bookings.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "scope"
+      ]
+    },
+    {
+      "id": "order-pricing",
+      "title": "Find why a repeat order costs less",
+      "tier": "hard",
+      "turns": 40,
+      "timeout": 900,
+      "tags": [
+        "python",
+        "root-cause",
+        "multi-file",
+        "shared-state",
+        "cache",
+        "refunds"
+      ],
+      "prompt": "Bug report from the shop's trade desk: \"Brook Landscaping (customer C-200, trade tier) ordered 2 packs of tulip bulbs and 3 packets of basil seeds, then placed the identical order again. The first invoice was EUR 33.74 and the second EUR 31.72. Nothing changed in between.\" The order service is in this workspace: start at app.py, and README.md maps the modules. Fix it so the report is resolved and all of the following hold. (1) An order's price depends only on the catalog, the customer's tier and the promotions active when it is placed, never on earlier orders. (2) Each product appears on one invoice line however many cart entries it came from, and each promotion applies to that line once. (3) A list-price change applies to every order placed after it, in every tier; an invoice already issued never changes. (4) Ending a promotion stops it applying to orders placed afterwards. (5) A refund pays back, for each returned unit, the unit price charged on that order's invoice, plus VAT on the refunded amount rounded half up to the cent as on an invoice line, even if prices or promotions have changed since. Free units are not refundable, and no more units can be refunded than were paid for. (6) Delivery is EUR 4.95, and free when the goods, after promotions and with VAT, reach EUR 50.00. Keep the public API of app.Shop unchanged. You may change any .py module except observe.py and check_public.py. Do not add, rename or delete files; try things with the python tool rather than writing scripts. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public check covers only the reported case: passing it does not mean the service is right. If tools are unavailable, return only JSON {\"files\":{\"module.py\":\"complete replacement contents\"}} with one entry for each module you changed. Objective hygiene rubric for each module you change: valid Python AST; only absolute imports of the standard library or of this service's own modules; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/order-pricing",
+      "grader": "private/order-pricing.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "scope"
+      ]
     }
   ]
 }

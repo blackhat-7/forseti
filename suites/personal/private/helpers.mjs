@@ -72,7 +72,7 @@ export function observeCases(python, input) {
 runpy.run_path('observe.py')['observe'](${JSON.stringify(JSON.stringify(input))})`);
 }
 // Parse text only: the candidate module is never imported by this probe.
-export async function pythonHygiene(python, files, path) {
+export async function pythonHygiene(python, files, path, local = []) {
   const r = await observe(python, `import sys
 # Drop the runner's first (workspace) import path before loading analysis modules.
 sys.path = [entry for entry in sys.path if entry not in ('', '.', sys.path[0])]
@@ -99,13 +99,28 @@ print(json.dumps(result))`);
   const parsed = r.ok && r.value?.parsed === true;
   const imports = r.value?.imports ?? [];
   const stdlib = new Set(r.value?.stdlib ?? []);
-  const disallowed = imports.filter(item => item.level !== 0 || !stdlib.has(item.module));
+  const disallowed = imports.filter(item => item.level !== 0 || !(stdlib.has(item.module) || local.includes(item.module)));
   const dynamic = r.value?.dynamic ?? [];
   return [
     check('python-ast-parses','hygiene',parsed, `${path}: actual=${bounded(r.value?.error ?? {parsed:r.value?.parsed})}; expected=valid Python AST; ${r.ok ? '' : r.diagnostic}`),
-    check('python-stdlib-imports','hygiene',parsed && disallowed.length === 0, `${path}: imports=${bounded(imports)}; disallowed=${bounded(disallowed)}; expected=only absolute stdlib imports in the edited module`),
+    check('python-stdlib-imports','hygiene',parsed && disallowed.length === 0, `${path}: imports=${bounded(imports)}; disallowed=${bounded(disallowed)}; expected=only absolute stdlib${local.length ? ' or workspace-module' : ''} imports in the edited module`),
     check('python-no-eval-exec','hygiene',parsed && dynamic.length === 0, `${path}: named dynamic-evaluation references=${bounded(dynamic)}; expected=[]`)
   ];
+}
+/**
+ * A fix that may touch several modules is held to the same floor in each one it changed.
+ * Modules left as shipped are the fixture's own and are not re-examined. Imports of the
+ * service's own modules are allowed, since the service is several files importing each other.
+ */
+export async function pythonHygieneChanged(python, files, original, paths) {
+  const local = Object.keys(original).filter(path => path.endsWith('.py')).map(path => path.slice(0, -3));
+  const changed = paths.filter(path => files[path] !== original[path]);
+  const results = [];
+  for (const path of changed) results.push(await pythonHygiene(python, files, path, local));
+  return ['python-ast-parses', 'python-stdlib-imports', 'python-no-eval-exec'].map((id, i) => {
+    const failed = results.map(r => r[i]).filter(c => !c.passed);
+    return check(id, 'hygiene', !failed.length, failed.length ? failed.map(c => c.evidence).join(' | ') : `changed modules=${bounded(changed)}; every one passes`);
+  });
 }
 export function toolChecks(trace = [], requiredReads = [], publicCheck = null, readOnly = false, {lane = 'tools', control = false, agent = 'pi'} = {}) {
   // This rubric names the Forseti tool harness. Another agent's file tools cannot satisfy it.
