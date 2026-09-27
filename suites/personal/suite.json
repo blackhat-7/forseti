@@ -618,6 +618,54 @@
       ],
       "turns": 40,
       "timeout": 900
+    },
+    {
+      "id": "lock-refresh",
+      "title": "Refresh a lockfile to the newest set that fits",
+      "tier": "hard",
+      "turns": 40,
+      "timeout": 900,
+      "tags": [
+        "python",
+        "search",
+        "dependencies"
+      ],
+      "prompt": "Fix resolve(manifest, index) in resolver.py. It refreshes a lockfile. manifest lists every package in the lockfile, highest priority first. index maps each of those packages to its published releases as {version: {dependency: requirement}}. A version is dotted integers compared part by part, so 1.10.0 is newer than 1.9.0. A requirement is comma-separated clauses of >=X, <X, ==X and !=X, all of which must hold. Every dependency named is in the manifest, and no package depends on itself. A valid set picks exactly one release of every package in the manifest, such that every requirement of every picked release is met by the picked release of that dependency. Return the newest valid set by priority: compare two valid sets package by package in manifest order; the first package whose versions differ decides, and the newer version wins. Return it as a dict {package: version}, or None when no valid set exists. parse_version and satisfies are correct. Lockfiles have up to 50 packages with up to 30 releases each, and each call must return well within the grading sandbox's 3-second CPU limit. Use only Python stdlib. Change only resolver.py. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public examples are a subset: passing that check does not mean the code is right. If tools are unavailable, return only JSON {\"files\":{\"resolver.py\":\"complete replacement contents\"}}. Objective hygiene rubric for the edited Python module: valid Python AST; only absolute standard-library import statements; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. Exception handlers, including transaction rollback and rethrow, are allowed. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/lock-refresh",
+      "grader": "private/lock-refresh.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness"
+      ]
+    },
+    {
+      "id": "crew-schedule",
+      "title": "Plan a week of jobs across several crews",
+      "tier": "hard",
+      "turns": 40,
+      "timeout": 900,
+      "tags": [
+        "python",
+        "optimisation",
+        "scheduling"
+      ],
+      "prompt": "Fix assign_crews(jobs, crews, gap) in crews.py. It plans a week of maintenance. jobs is a list of requested jobs, each a dict with id (a unique string), start and end (integer minutes from Monday 00:00, start < end) and value (a positive integer); other keys may be present. crews is the number of identical field crews (at least 1), and gap is the travel time in minutes a crew needs between two of its jobs. Each job is done whole, at its fixed time, by one crew, or not at all. A crew can do job b after job a only when b starts at or after a's end plus gap. Return a list of exactly crews lists, one per crew, each holding the ids of the jobs that crew does; an idle crew gets an empty list. The plan must maximise the total value of the jobs done. When several plans reach the maximum, any one of them is accepted. A week has up to 1500 jobs and 20 crews, and each call must return well within the grading sandbox's 3-second CPU limit. Use only Python stdlib. Change only crews.py. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public examples are a subset: passing that check does not mean the code is right. If tools are unavailable, return only JSON {\"files\":{\"crews.py\":\"complete replacement contents\"}}. Objective hygiene rubric for the edited Python module: valid Python AST; only absolute standard-library import statements; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. Exception handlers, including transaction rollback and rethrow, are allowed. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/crew-schedule",
+      "grader": "private/crew-schedule.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness"
+      ]
     }
   ]
 }

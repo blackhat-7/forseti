@@ -1,0 +1,14 @@
+{
+  "crews": 2,
+  "travel_minutes": 30,
+  "jobs": [
+    {"id": "MW-101", "task": "replace intake filter, pump 3", "start": 480, "end": 600, "value": 8},
+    {"id": "MW-102", "task": "inspect boiler relief valves", "start": 540, "end": 780, "value": 12},
+    {"id": "MW-103", "task": "grease conveyor bearings, line B", "start": 630, "end": 690, "value": 2},
+    {"id": "MW-104", "task": "recalibrate flow meter FM-7", "start": 660, "end": 840, "value": 9},
+    {"id": "MW-105", "task": "swap UPS batteries, control room", "start": 720, "end": 780, "value": 3},
+    {"id": "MW-106", "task": "test fire damper actuators", "start": 810, "end": 960, "value": 7},
+    {"id": "MW-107", "task": "clean cooling tower basin", "start": 870, "end": 1080, "value": 10},
+    {"id": "MW-108", "task": "tighten busbar joints, panel 4", "start": 990, "end": 1050, "value": 5}
+  ]
+}
