@@ -31,3 +31,14 @@ export async function grade({files,python,trace, lane, control, agent}) {
   equal('threshold-as-written',runs.slice(18).map(r => r.value?.[0]),[18,19].map(snapshot)),
   preserved(files,original,['policy.py']),...toolChecks(trace,['policy.py'],'check_public.py',false,{lane,control,agent})];
 }
+
+export const review = {
+  anchor: {'policy.py': reference.files['policy.py']},
+  paths: ['policy.py'],
+  items: [
+    {id:'validation-duplicated', ask:'Is the metric validation — dict test, count an int not bool and at least 20, error a finite nonnegative number — spelled out separately for current and for baseline instead of once for both? One helper or one loop over both is not duplication.'},
+    {id:'unearned-abstraction', ask:'Does the submission add a class, registry, strategy table, config option, decorator or wrapper layer that has only one real use here and could be a plain function or a literal?'},
+    {id:'dead-code', ask:'Is there unused or unreachable code left behind: a function nothing calls, an unused constant or import, a value computed and then thrown away, or a commented-out block?'},
+    {id:'explanatory-noise', ask:'Are there comments or docstrings that only restate what the adjacent line already says, rather than recording a reason the code cannot express?'},
+  ],
+};

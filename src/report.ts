@@ -115,26 +115,54 @@ export const LABEL = { solved: 'Tasks fully solved', checks: 'Checks passed', in
 const tries = (n: number) => `${n} ${n === 1 ? 'try' : 'tries'}`;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /**
- * Rolls per-task correctness up over a set of tasks, weighting each task equally. `tasks` is how
- * many of them this card has a score on and `total` how many exist, so a number resting on one
- * task is visibly thin rather than silently confident.
+ * The same card restricted to some tasks, so `separated` can judge a gap on that slice with only
+ * that slice as evidence. "Better on hard tasks" has to clear the same bar as "better overall",
+ * or a one-task slice would hand out verdicts for free.
  */
-function rollup(card: Scorecard, ids: Set<string>) {
-  const scored = card.tasks.filter(t => ids.has(t.id) && t.rate !== null);
-  return { rate: scored.length ? scored.reduce((sum, t) => sum + t.rate!, 0) / scored.length : null, tasks: scored.length, total: ids.size };
+export function sliceCard<T extends Scorecard>(card: T, ids: Set<string>): T {
+  const tasks = card.tasks.filter(t => ids.has(t.id));
+  const scored = tasks.filter(t => t.rate !== null);
+  return { ...card, tasks, score: scored.length ? scored.reduce((sum, t) => sum + t.rate!, 0) / scored.length : null };
 }
 type RunTask = Run['tasks'][number];
 // Rows come from the task list, never from one card, so every card gets the same rows in the same order.
-export function byCapability(card: Scorecard, runTasks: RunTask[]): { capability: Capability; rate: number | null; tasks: number; total: number }[] {
-  return CAPABILITIES.map(capability => ({ capability, ...rollup(card, new Set(runTasks.filter(t => t.capabilities?.includes(capability)).map(t => t.id))) }))
-    .filter(row => row.total > 0);
+export function skillSlices(runTasks: RunTask[]): { capability: Capability; ids: Set<string> }[] {
+  return CAPABILITIES.map(capability => ({ capability, ids: new Set(runTasks.filter(t => t.capabilities?.includes(capability)).map(t => t.id)) }))
+    .filter(row => row.ids.size > 0);
 }
 /** Runs recorded before tiers existed have none; their tasks read Unrated rather than guessed. */
-export function byTier(card: Scorecard, runTasks: RunTask[]): { tier: Tier | 'unrated'; rate: number | null; tasks: number; total: number }[] {
+export function tierSlices(runTasks: RunTask[]): { tier: Tier | 'unrated'; ids: Set<string> }[] {
   if (!runTasks.some(t => t.tier)) return [];
-  return [...TIERS, 'unrated' as const].map(tier => ({ tier, ...rollup(card, new Set(runTasks.filter(t => (t.tier ?? 'unrated') === tier).map(t => t.id))) }))
-    .filter(row => row.total > 0);
+  return [...TIERS, 'unrated' as const].map(tier => ({ tier, ids: new Set(runTasks.filter(t => (t.tier ?? 'unrated') === tier).map(t => t.id)) }))
+    .filter(row => row.ids.size > 0);
 }
+/**
+ * Per-task correctness rolled up over a slice, weighting each task equally. `tasks` is how many of
+ * them this card has a score on and `total` how many exist, so a number resting on one task is
+ * visibly thin rather than silently confident.
+ */
+function rollup(card: Scorecard, ids: Set<string>) {
+  const part = sliceCard(card, ids);
+  return { rate: part.score, tasks: part.tasks.filter(t => t.rate !== null).length, total: ids.size };
+}
+export function byCapability(card: Scorecard, runTasks: RunTask[]) {
+  return skillSlices(runTasks).map(({ capability, ids }) => ({ capability, ...rollup(card, ids) }));
+}
+export function byTier(card: Scorecard, runTasks: RunTask[]) {
+  return tierSlices(runTasks).map(({ tier, ids }) => ({ tier, ...rollup(card, ids) }));
+}
+/**
+ * Each card's place on one slice of tasks, judged by the same rule as the overall rank but with
+ * only that slice as evidence, so a one-task slice cannot hand out a lead for free. Null where a
+ * card is a control, has nothing graded there, or there is no second model to be placed against.
+ */
+export function slicePlaces(cards: ModelCard[], ids: Set<string>): (number | null)[] {
+  const parts = cards.map(c => sliceCard(c, ids));
+  const ranked = ranking(parts);
+  if (ranked.filter(r => r.rank !== null).length < 2) return cards.map(() => null);
+  return parts.map(p => ranked.find(r => r.card === p)!.rank);
+}
+export const place = (n: number) => ['1st', '2nd', '3rd'][n - 1] ?? `${n}th`;
 /**
  * One number per model, weighting every task equally so a task with many checks cannot
  * dominate. The headline is correctness; instruction/tool rates stay separate so a
@@ -226,12 +254,14 @@ export function verdicts(ranked: { card: ModelCard; rank: number | null }[]): st
       ? `${a.label} beats ${b.label}: ${points(call.gap)} points apart, more than the ${points(call.bar)} needed.`
       : `${a.label} and ${b.label} are tied: ${points(call.gap)} points apart, and this run needs ${points(call.bar)} to tell them apart.`;
   };
-  return real.slice(1).flatMap(({ card, rank }, i) => {
+  const pairs = real.slice(1).flatMap(({ card, rank }, i) => {
     const above = real[i]!;
     if (separated(above.card, card)!.clear || rank === above.rank) return [say(above.card, card)];
     const winner = real.slice(0, i).findLast(o => o.card.score! > card.score! && separated(o.card, card)!.clear);
     return [say(above.card, card), ...(winner ? [say(winner.card, card)] : [])];
   });
+  // Everyone sharing first place is the one case where the listed order could still be read as a ranking.
+  return real.length > 1 && real.every(r => r.rank === 1) ? [...pairs, 'No model clearly beats another in this run, so the order above is not a ranking.'] : pairs;
 }
 /** Hardest tier first, and within a tier the task models found hardest first. */
 export function taskOrder(cards: Scorecard[], tasks: Run['tasks']): number[] {
@@ -282,16 +312,21 @@ function summaryMarkdown(runs: Run[]): string[] {
   if (calls.length) lines.push('', '**Can this run tell them apart?** A gap counts only when it is bigger than two standard errors of the difference.', '', ...calls.map(v => `- ${escape(v)}`));
   if (stalls.length) lines.push('', ...stalls.map(n => `- ${escape(n)}`));
   lines.push('', '## Where each model is strong or weak', '');
+  const cells = (rates: (number | null)[], ids: Set<string>) => {
+    const places = slicePlaces(cards, ids);
+    return rates.map((rate, i) => `${pct(rate)}${places[i] ? ` (${place(places[i])})` : ''}`).join(' | ');
+  };
+  const PLACES = 'The place in brackets is judged on those tasks alone, by the same rule as the rank; a shared place means this run cannot tell them apart there.';
   const tiers = cards.map(c => byTier(c, tasks));
   if (tiers[0]?.length) {
-    lines.push('**By difficulty** — share of tasks fully solved at each level. Basic tasks tell small models apart; hard tasks tell the strongest apart.', '', ...table('Difficulty'));
-    for (const [i, row] of tiers[0].entries()) lines.push(`| ${TIER_NAME[row.tier]} (${row.total} tasks) | ${tiers.map(rows => pct(rows[i]!.rate)).join(' | ')} |`);
+    lines.push(`**By difficulty** — share of tasks fully solved at each level. Basic tasks tell small models apart; hard tasks tell the strongest apart. ${PLACES}`, '', ...table('Difficulty'));
+    for (const [i, { tier, ids }] of tierSlices(tasks).entries()) lines.push(`| ${TIER_NAME[tier]} (${ids.size} tasks) | ${cells(tiers.map(rows => rows[i]!.rate), ids)} |`);
     lines.push('');
   }
   const skills = cards.map(c => byCapability(c, tasks));
   if (skills[0]?.length) {
-    lines.push('**By skill** — share of tasks fully solved among the tasks that test each skill.', '', ...table('Skill'));
-    for (const [i, row] of skills[0].entries()) lines.push(`| ${SKILL_NAME[row.capability]} (${row.total} tasks) | ${skills.map(rows => pct(rows[i]!.rate)).join(' | ')} |`);
+    lines.push(`**By skill** — share of tasks fully solved among the tasks that test each skill. ${PLACES}`, '', ...table('Skill'));
+    for (const [i, { capability, ids }] of skillSlices(tasks).entries()) lines.push(`| ${SKILL_NAME[capability]} (${ids.size} tasks) | ${cells(skills.map(rows => rows[i]!.rate), ids)} |`);
     lines.push('');
   }
   lines.push('**Per task**, hardest first — tries fully solved out of tries graded. ✓ every try solved, ✗ none, (80%) share of checks passed when not fully solved, · not graded.', '', ...table('Task'));
@@ -315,7 +350,7 @@ export function comparisonReport(runs: Run[]): string {
     const hasControls = candidates.some(c => c.model.provider === 'control');
     if (hasControls) lines.push('> **Synthetic controls are fixture checks, not LLMs.** Their answers are supplied by the trusted runner. Do not compare their latency/tokens with real models.', '');
     if (first.environment.agent === 'claude-code') {
-      lines.push(`> **Claude Code harness.** These trials ran through the first-party Claude Code CLI under your own plan login, not the Pi adapter. Claude Code brings its own system prompt, agent loop, context management and tools, so a result here measures *the model inside Claude Code*, never the model alone. Tool checks are N/A because the suite's tool rubric names Forseti's tools. Cost is a client-side estimate at list price and is not what a subscription is billed. Flags: \`${escape(first.environment.agentFlags ?? '')}\`.`, '');
+      lines.push(`> **Claude Code harness.** These trials ran through the first-party Claude Code CLI under your own plan login, not the Pi adapter. Both lanes can run code: Forseti serves this one the same sandboxed Python interpreter the Pi lane uses, so neither can verify itself against the public check while the other cannot. File access stays each client's own dialect, which is why tool checks are N/A here. What still differs is Claude Code's own system prompt, agent loop and context management, so a result here measures *the model inside Claude Code*, never the model alone. Cost is a client-side estimate at list price and is not what a subscription is billed. Flags: \`${escape(first.environment.agentFlags ?? '')}\`.`, '');
     }
     const cards = candidates.map(c => scorecard(c.label, c.trials, first.tasks, c.run.planned / c.run.models.length));
     if (first.judge?.enabled) {
@@ -363,7 +398,7 @@ export function comparisonReport(runs: Run[]): string {
       const count = c.trials.filter(t => t.tokens).length;
       const knownCost = c.trials.filter(t => t.estimatedCost !== null);
       const billing = [...new Set(c.trials.map(t => t.auth.billing))].join(', ') || 'not observed';
-      const cost = billing === 'subscription' ? 'plan quota; USD n/a' : billing === 'control' ? 'synthetic; USD n/a' : knownCost.length ? `$${knownCost.reduce((s, t) => s + t.estimatedCost!, 0).toFixed(5)} estimate (${knownCost.length}/${c.trials.length} trials)` : 'USD unknown';
+      const cost = billing === 'subscription' ? 'plan quota; USD n/a' : billing === 'control' ? 'synthetic; USD n/a' : billing === 'local' ? 'your own server; USD n/a' : knownCost.length ? `$${knownCost.reduce((s, t) => s + t.estimatedCost!, 0).toFixed(5)} estimate (${knownCost.length}/${c.trials.length} trials)` : 'USD unknown';
       lines.push(`| ${escape(c.label)} | ${live ? seconds(median(evaluated.map(t => t.wallMs))) : 'n/a'} | ${live ? seconds(median(evaluated.map(t => t.modelMs))) : 'n/a'} | ${seconds(median(evaluated.map(t => t.toolMs)))} | ${seconds(median(evaluated.map(t => t.gradeMs)))} | ${live ? seconds(median(evaluated.flatMap(t => t.firstTokenMs === null ? [] : [t.firstTokenMs]))) : 'n/a'} | ${count ? `${totals.join('/')} (${count}/${c.trials.length} observed)` : 'not reported'} | ${billing}; ${cost} |`);
     }
     lines.push('', 'Timing medians use evaluated trials only. Model wait includes auth, SDK and transport, not pure model inference. Wall includes setup/auth/model/tools/grading; stage medians need not add up. First delta includes reasoning/tool output, not necessarily first visible text. Error-attempt usage is retained when reported. Missing usage is never treated as zero. Estimates use Pi catalog rates, exclude plan fees, and are not invoices.', '', '#### Matched-case observations', '');

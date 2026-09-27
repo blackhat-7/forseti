@@ -44,6 +44,6 @@ The ids stay in suite JSON and saved runs; reports show only the plain names. Ea
 
 ### Current coverage
 
-`evidence` 12 tasks · `exactness` 11 · `scope` 8 · `restraint` 6 · `safety` 3.
+`exactness` 16 tasks · `evidence` 16 · `scope` 8 · `restraint` 6 · `safety` 4.
 
 Known gaps: nothing here tests architecture or system design, long-horizon planning, performance work, or large multi-file context. Those shapes appear in real work but are not in this suite; do not read a high score as covering them.

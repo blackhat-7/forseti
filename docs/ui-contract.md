@@ -11,6 +11,7 @@ Implement `src/tui.ts` exporting `Dashboard` (testable component) and `launchTui
 - `exportReport(runIds: string[]): string` saves same report under workspace `reports/` and returns workspace-relative path.
 - `addModel(provider: string, model: string, auth: 'pi'|'env'|'none'): void` verifies model/catalog and adds config entry with safe unique id.
 - `addTest(id: string, prompt: string, expectedJson: string): void` creates simple independent exact-JSON task/hidden grader in current suite and refreshes suite in memory.
+- `localModels?: CatalogEntry[]` what the local server listed; undefined until `probeLocal()` has run. `setLocalUrl(url): void` validates, saves `config.local.url` and forgets the listing. `probeLocal(): Promise<CatalogEntry[]>` asks `GET /v1/models` and puts the result at the front of `catalog`. The UI calls it when an address is saved and when the model picker opens with an unlisted address; never on startup.
 
 `CatalogEntry` from ./app.ts is `{provider:string,id:string,name:string,auth:AuthInfo}`. Full config and result types are in src/types.ts. Runs sorted newest first.
 

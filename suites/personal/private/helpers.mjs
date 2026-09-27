@@ -108,7 +108,7 @@ print(json.dumps(result))`);
   ];
 }
 export function toolChecks(trace = [], requiredReads = [], publicCheck = null, readOnly = false, {lane = 'tools', control = false, agent = 'pi'} = {}) {
-  // This rubric names the Forseti tool harness. Another agent's trace cannot satisfy it.
+  // This rubric names the Forseti tool harness. Another agent's file tools cannot satisfy it.
   if (lane === 'prompt' || control || agent !== 'pi') return [];
   const checks = [];
   if (readOnly) checks.push(equal('no-write-tool', trace.filter(e => e.tool === 'write_file').length, 0, 'tools'));

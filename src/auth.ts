@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import { claudeCodeBinary } from './claudecode.ts';
+import { LOCAL, localModels } from './local.ts';
 import type { Credential, CredentialStore } from '@earendil-works/pi-ai';
 import type { AuthInfo, ModelConfig } from './types.ts';
 
@@ -34,8 +35,14 @@ export function validateCredential(c: Credential | undefined): void {
     throw new Error('Command-based or missing credentials are not supported. Use a literal/environment API key.');
   }
 }
-export function authInfo(config: Pick<ModelConfig, 'provider' | 'auth'>): AuthInfo {
+/** `local` is the configured server address; it only matters for the local provider. */
+export function authInfo(config: Pick<ModelConfig, 'provider' | 'auth'>, local = ''): AuthInfo {
   if (config.provider === 'control') return { mode: 'synthetic control', billing: 'control', ready: true, note: 'Scripted fixture validation; not a model result.' };
+  if (config.provider === LOCAL) {
+    return local
+      ? { mode: 'local server', billing: 'local', ready: true, note: `OpenAI-compatible server at ${local}. No credential is sent and nothing is billed.` }
+      : { mode: 'local server', billing: 'local', ready: false, note: 'No local server address. Set one on Settings.' };
+  }
   if (config.provider === 'claude-code') {
     // The first-party client authenticates itself. Forseti reads no Claude credential and
     // strips API-key variables from the child, so this lane cannot fall back to metered billing.
@@ -62,7 +69,8 @@ export function authInfo(config: Pick<ModelConfig, 'provider' | 'auth'>): AuthIn
     return { mode: config.auth === 'pi' ? 'Pi credentials (read-only)' : 'environment API key', billing: 'unknown', ready: false, note: (e as Error).message };
   }
 }
-export function modelsFor(config: ModelConfig) {
+export function modelsFor(config: ModelConfig, local = '') {
+  if (config.provider === LOCAL) return localModels(local, [config.model]);
   // No refresh callback is ever invoked: token rotation would mutate the external login
   // even if the refreshed token were kept in memory rather than written to auth.json.
   const credentials: CredentialStore = {
@@ -87,6 +95,7 @@ export function modelsFor(config: ModelConfig) {
 export function defaultAuth(provider: string): ModelConfig['auth'] {
   if (provider === 'control') return 'none';
   if (provider === 'claude-code') return 'cli';
+  if (provider === LOCAL) return 'none';
   try { if (piCredential(provider)) return 'pi'; } catch { /* Show a diagnostic when selected. */ }
   return 'env';
 }

@@ -1,15 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
+import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { App } from '../src/app.ts';
 import { authInfo, catalogModels, validateCredential } from '../src/auth.ts';
 import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts';
+import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
+import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
 import { byTier, comparisonKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, stalled, checkShare, verdicts } from '../src/report.ts';
-import { agentOf, applicableDimensions, blankTrial, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
+import { agentOf, applicableDimensions, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
 import type { Config, Dimension, ModelConfig, Run, ToolEvent, Trial } from '../src/types.ts';
@@ -29,6 +33,12 @@ function workspace() {
 }
 const cfg = () => structuredClone(DEFAULT_CONFIG);
 const task = loadSuite(root, 'suites/personal/suite.json').suite.tasks[0];
+/** Which tool checks the suite's own rubric passes for a trace, without importing src into it. */
+async function toolChecksFor(trace: ToolEvent[]): Promise<string> {
+  const { toolChecks } = await import(new URL('../suites/personal/private/helpers.mjs', import.meta.url).href) as { toolChecks: (...a: unknown[]) => unknown };
+  return (toolChecks(trace, [], 'check_public.py', false, { lane: 'tools' }) as { id: string; passed: boolean }[])
+    .filter(c => c.passed).map(c => c.id).sort().join(',');
+}
 
 test('paths, links, special files and oversized outputs fail closed', () => {
   const dir = temp(); const outside = temp(); put(outside, 'secret', 'private');
@@ -250,7 +260,9 @@ test('ranks share a place when the run cannot tell models apart, and pool only l
   const report = comparisonReport([run('1', [[a!, 11], [b!, 10], [c!, 4]])]);
   assert.ok(report.indexOf('# Model comparison') < report.indexOf('## Details'), 'the one-page answer comes before the methodology');
   assert.match(report, /\| 1 \| a \|.*\n\| 1 \| b \|.*\n\| 3 \| c \|/, 'the report ranks exactly as the TUI does');
-  assert.match(report, /\| Basic \(6 tasks\) \| 100% \| 100% \| 67% \|/);
+  // Cells now carry the place on that slice alone, which is how the per-slice bar is shown.
+  assert.match(report, /\| Basic \(6 tasks\) \| 100% \(1st\) \| 100% \(1st\) \| 67% \(3rd\) \|/);
+  assert.match(report, /\| Hard \(6 tasks\) \| 83% \(1st\) \| 67% \(1st\) \| 0% \(3rd\) \|/, 'a one-task gap on a slice is not a lead there');
   assert.match(report, /\| Edge cases right \(6 tasks\) \|/, 'skills are named in plain words');
   assert.doesNotMatch(report, /\bexactness\b \|/, 'skill ids are never shown as names');
 });
@@ -405,13 +417,19 @@ test('Claude Code runs under the first-party login, never an API key, and never 
   assert.match(auth.note, /no API key is used/);
 
   // Every credential variable that could divert billing to a metered key is stripped.
-  const args = claudeCodeArgs('sonnet', 7).join(' ');
-  for (const flag of ['--safe-mode', '--permission-mode dontAsk', '--permission-prompts none', '--max-turns 7', '--model sonnet']) assert.ok(args.includes(flag), flag);
+  const args = claudeCodeArgs('sonnet', 7, '/tmp/mcp.json').join(' ');
+  for (const flag of ['--restricted', '--permission-mode dontAsk', '--permission-prompts none', '--max-turns 7', '--model sonnet']) assert.ok(args.includes(flag), flag);
   // --allowedTools only pre-approves; only --disallowedTools removes a tool from the session.
   assert.ok(args.includes(`--disallowedTools ${CLAUDE_CODE_DENIED}`), 'tools must be denied, not merely left un-approved');
   for (const denied of ['Bash', 'Task', 'WebFetch', 'WebSearch']) assert.ok(CLAUDE_CODE_DENIED.split(',').includes(denied), denied);
   assert.ok(!args.includes('--bare'), '--bare would drop the subscription login and demand an API key');
-  assert.ok(!CLAUDE_CODE_ALLOWED.split(',').includes('Bash'), 'this lane runs outside the sandbox, so it gets no shell');
+  assert.ok(!args.includes('--safe-mode'), 'safe mode disables every MCP server, so this lane could not be given a Python tool');
+  assert.ok(args.includes('--strict-mcp-config') && args.includes('--mcp-config /tmp/mcp.json'), 'only Forseti supplies MCP servers here');
+  // Each lane keeps its own file dialect; what had to be equalised is the ability to run code.
+  for (const native of ['Read', 'Write', 'Edit', 'Glob', 'Grep']) assert.ok(CLAUDE_CODE_ALLOWED.split(',').includes(native), `${native} is this lane's own dialect and stays`);
+  assert.ok(CLAUDE_CODE_ALLOWED.split(',').includes('mcp__forseti__python'), 'the Pi lane can run arbitrary Python, so this lane must too');
+  assert.ok(!CLAUDE_CODE_ALLOWED.split(',').includes('Bash'), 'Bash is unsandboxed and networked; the sandboxed interpreter is the fair equivalent');
+  assert.ok(CLAUDE_CODE_DENIED.split(',').includes('Bash'));
 
   // The CLI streams the session as an array; the answer is the last result entry, not the first.
   const stream = JSON.stringify([{ type: 'system' }, { type: 'assistant' }, { type: 'result', result: 'done', num_turns: 3 }]);
@@ -426,7 +444,7 @@ test('Claude Code runs under the first-party login, never an API key, and never 
   assert.equal(agentOf([cc('sonnet'), cc('haiku'), cfg().models[0]]), 'claude-code');
   assert.throws(() => agentOf([cc('sonnet'), pi]), /different harnesses/);
 
-  // Claude Code's trace cannot satisfy a rubric written for Forseti's tool names.
+  // The tool rubric names Forseti's own file tools, which the CLI lane does not use.
   const withTools = { ...task, dimensions: ['correctness', 'tools'] as Dimension[] };
   assert.deepEqual(applicableDimensions(withTools, 'tools', false, 'pi'), ['correctness', 'tools']);
   assert.deepEqual(applicableDimensions(withTools, 'tools', false, 'claude-code'), ['correctness']);
@@ -522,4 +540,132 @@ test('read-only OAuth preflight agrees with Pi five-minute validity window', () 
   assert.throws(() => validateCredential(token), /near expiry/);
   assert.doesNotThrow(() => validateCredential({ ...token, expires: Date.now() + 6 * 60_000 }));
   assert.throws(() => validateCredential({ type: 'api_key', key: '!some-command' }), /Command/);
+});
+
+test('a rendering-only change does not split comparison groups', () => {
+  const dir = workspace();
+  const before = harnessFiles(dir);
+  assert.ok(!('report.ts' in before) && !('tui.ts' in before) && 'runner.ts' in before);
+  writeFileSync(join(dir, 'src/report.ts'), '// reworded\n', { flag: 'a' });
+  assert.deepEqual(harnessFiles(dir), before, 'a report wording fix must not strand earlier runs');
+  writeFileSync(join(dir, 'src/sandbox.ts'), '// changed\n', { flag: 'a' });
+  assert.notDeepEqual(harnessFiles(dir), before, 'anything that touches a trial still starts a new experiment');
+});
+
+/** The standard OpenAI-compatible surface and nothing else: `GET /v1/models`, streamed `POST /v1/chat/completions`. */
+async function fakeLocalServer() {
+  const requests: { path: string; body?: Record<string, unknown>; auth?: string }[] = [];
+  const server = createServer((req, res) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      const body = raw ? JSON.parse(raw) as Record<string, unknown> : undefined;
+      requests.push({ path: req.url!, body, auth: req.headers.authorization });
+      if (req.url === '/v1/models') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ object: 'list', data: [{ id: '/models/tiny-q4.gguf', object: 'model' }, { id: '/models/tiny-q4.gguf' }] })); return; }
+      if (req.url === '/v1/chat/completions') {
+        res.setHeader('content-type', 'text/event-stream');
+        const chunk = (delta: object, finish: string | null, usage?: object) => `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: body!.model, choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`;
+        res.end(chunk({ role: 'assistant', content: 'Done' }, null) + chunk({}, 'stop', { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 }) + 'data: [DONE]\n\n');
+        return;
+      }
+      res.statusCode = 404; res.end();
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests, close: () => server.close() };
+}
+
+test('a local OpenAI-compatible server runs through the Pi adapter with no credential and no charge', async () => {
+  assert.equal(localUrl(' http://127.0.0.1:1234/v1/ '), 'http://127.0.0.1:1234', 'a pasted /v1 base is accepted');
+  assert.equal(localUrl(''), '');
+  for (const bad of ['localhost:1234', 'ftp://h', 'http://u:p@h:1', 'http://h:1?x=1']) assert.throws(() => localUrl(bad), `${bad} is not a local server address`);
+  assert.equal(shortName('/home/me/models/JonathanColetti%2FQwen-GGUF/qwen-27b-Q4_K_M.gguf'), 'qwen-27b-Q4_K_M');
+  assert.equal(shortName('llama3.2:latest'), 'llama3.2:latest', 'an Ollama tag is already a name');
+
+  const local: ModelConfig = { id: 'local-tiny-q4', label: 'tiny-q4 · local', provider: LOCAL, model: '/models/tiny-q4.gguf', auth: 'none', enabled: true, thinking: 'off' };
+  const withLocal = (over: Partial<ModelConfig>, url = 'http://127.0.0.1:1') => validateConfig(root, { ...cfg(), local: { url }, models: [{ ...local, ...over }] });
+  assert.doesNotThrow(() => withLocal({}));
+  assert.doesNotThrow(() => withLocal({}, ''), 'a saved model outlives the address; it is simply not ready');
+  assert.throws(() => withLocal({ auth: 'pi' }), /auth "none"/);
+  assert.throws(() => withLocal({ provider: 'openai' }), /explicit Pi or environment auth/, 'keyless stays reserved for the local server and controls');
+  assert.throws(() => validateConfig(root, { ...cfg(), local: { url: 'nope' } }), /full address/);
+  assert.throws(() => validateJudge({ ...DEFAULT_JUDGE, provider: LOCAL, auth: 'pi' }), /cannot be a local server/);
+  assert.equal(authInfo(local).ready, false, 'no address, not ready');
+  assert.deepEqual([authInfo(local, 'http://127.0.0.1:1').ready, authInfo(local, 'http://127.0.0.1:1').billing], [true, 'local']);
+  await assert.rejects(listLocalModels('http://127.0.0.1:9'), /No answer from http:\/\/127\.0\.0\.1:9/);
+
+  const server = await fakeLocalServer();
+  try {
+    assert.deepEqual(await listLocalModels(server.url), [{ id: '/models/tiny-q4.gguf', name: 'tiny-q4' }], 'ids come from data[] and are deduplicated');
+
+    const dir = temp(); put(dir, 'input.txt', 'public');
+    const t = blankTrial('local', local, task, 1, server.url);
+    await runAgent(dir, local, task, DEFAULT_OPTIONS, t, new AbortController().signal, () => {}, () => {}, localModels(server.url, [local.model]));
+    assert.equal(t.status, 'passed'); assert.equal(t.answer, 'Done'); assert.equal(t.tokens!.output, 1); assert.equal(t.estimatedCost, null);
+    const chat = server.requests.find(r => r.path === '/v1/chat/completions')!;
+    assert.equal(chat.body!.model, '/models/tiny-q4.gguf');
+    assert.ok('max_tokens' in chat.body! && !('store' in chat.body!), 'plain chat-completions dialect, as llama.cpp, Ollama and LM Studio speak it');
+    assert.equal((chat.body!.messages as { role: string }[])[0]!.role, 'system', 'system role, not the OpenAI-only developer role');
+    assert.equal((chat.body!.chat_template_kwargs as { enable_thinking: boolean }).enable_thinking, false, 'thinking off is sent, not assumed: a hybrid model thinks unless told otherwise');
+    assert.ok(!('reasoning_effort' in chat.body!));
+    assert.deepEqual(getSupportedThinkingLevels(localModels(server.url, [local.model]).getModel(LOCAL, local.model)!), ['off', 'high'], 'on or off; a local template has no effort dial');
+    await runAgent(dir, { ...local, thinking: 'high' }, task, DEFAULT_OPTIONS, blankTrial('think', local, task, 1, server.url), new AbortController().signal, () => {}, () => {}, localModels(server.url, [local.model]));
+    assert.equal((server.requests.at(-1)!.body!.chat_template_kwargs as { enable_thinking: boolean }).enable_thinking, true);
+    assert.doesNotMatch(chat.auth ?? '', /sk-|eyJ/, 'no real credential ever goes to a local server');
+
+    // The whole path from Settings to a graded trial, as the app runs it.
+    const ws = workspace(); const app = new App(ws); await app.refresh();
+    assert.equal(app.localModels, undefined, 'startup never asks the server anything');
+    assert.throws(() => app.setLocalUrl('nonsense'), /full address/);
+    app.setLocalUrl(server.url);
+    assert.equal(app.config.local.url, server.url);
+    assert.throws(() => app.addModel(LOCAL, local.model, 'none'), /Unknown provider\/model/, 'unlisted until the server has been asked');
+    const found = await app.probeLocal();
+    assert.equal(found[0]!.name, 'tiny-q4 · local');
+    assert.equal(app.catalog[0]!.provider, LOCAL, 'the local server is listed first');
+    app.addModel(LOCAL, local.model, 'pi');
+    const added = app.config.models.at(-1)!;
+    assert.deepEqual([added.id, added.label, added.auth, added.thinking], ['local-tiny-q4', 'tiny-q4 · local', 'none', 'off'], 'the id is the file name, never the path, and auth is forced to none');
+    const run = await app.run({ ...DEFAULT_OPTIONS, repeat: 1, models: [added.id], tests: [task.id] }, () => {}, new AbortController().signal);
+    const trial = run.trials[0]!;
+    assert.ok(['passed', 'failed'].includes(trial.status), `graded, not a provider failure: ${trial.status} ${trial.error ?? ''}`);
+    assert.equal(trial.auth.billing, 'local');
+    assert.match(run.environment.catalog!, new RegExp(server.url), 'the run records which server answered');
+    assert.match(comparisonReport([run]), /your own server; USD n\/a/);
+    assert.equal(run.environment.agent, 'pi', 'a local model is a Pi-adapter model and pools with the others');
+    assert.throws(() => agentOf([added, { ...added, id: 'cc', provider: 'claude-code' }]), /different harnesses/);
+  } finally { server.close(); }
+});
+
+test('the CLI lane gets the Pi lane\'s interpreter, sandboxed and budgeted the same way', async () => {
+  const dir = temp();
+  put(dir, 'module.py', 'print("public")\n');
+  put(dir, 'check_public.py', 'print("ok")\n');
+  const events: ToolEvent[] = [];
+  const handle = createHandler(dir, e => events.push(e), 2);
+  const call = async (name: string, args: Record<string, unknown> = {}) =>
+    await handle({ id: 1, method: 'tools/call', params: { name, arguments: args } }) as { result: { content: { text: string }[]; isError?: boolean } };
+
+  // The handshake the CLI performs, and the tool list it is given.
+  const init = await handle({ id: 0, method: 'initialize' }) as { result: { serverInfo: { name: string } } };
+  assert.equal(init.result.serverInfo.name, 'forseti');
+  const listed = await handle({ id: 0, method: 'tools/list' }) as { result: { tools: { name: string; description: string }[] } };
+  // Only the interpreter is served; files stay each lane's own dialect. The description matches
+  // the Pi lane's word for word, so neither lane is told more about the same capability.
+  const pythonTool = taskTools(dir, [], new AbortController().signal, () => {}).find(t => t.name === 'python')!;
+  assert.deepEqual(listed.result.tools.map(t => t.name), ['python']);
+  assert.equal(listed.result.tools[0]!.description, pythonTool.description);
+  assert.deepEqual(MCP_ALLOWED.split(','), ['mcp__forseti__python']);
+
+  // The same interpreter and the same confinement as the Pi lane, independent of the CLI's rules.
+  const ran = await call('python', { source: "import runpy; runpy.run_path('check_public.py', run_name='__main__')" });
+  assert.equal(JSON.parse(ran.result.content[0]!.text).code, 0, 'the sandboxed interpreter really executed the public check');
+  assert.notEqual((await call('python', { source: "open('../../../etc/passwd').read()" })).result.isError, true, 'the sandbox reports the denial through the result, not a tool error');
+  assert.match(events.at(-1)!.output, /Errno|denied|No such file/, 'reaching outside the trial directory fails inside the sandbox');
+  assert.equal((await call('python', { source: 'print(1)' })).result.isError, true, 'the call budget is enforced, as in the Pi lane');
+  assert.deepEqual(events.map(e => e.tool), ['python', 'python', 'python']);
+  // A recorded event is the Pi lane's shape, so the same rubric could read it; it is kept as
+  // evidence of how much a model verifies, which is how the Qwen stalling was diagnosed.
+  assert.equal(events[0]!.ok, true);
+  assert.equal(await toolChecksFor([events[0]!]), 'public-python-check');
 });

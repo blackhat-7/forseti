@@ -5,15 +5,16 @@ import {
   type Component, type Focusable,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { HARNESS_WARNING, LABEL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, stallNote, taskCell, taskOrder, triesLabel, verdicts } from './report.ts';
+import { HARNESS_WARNING, LABEL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, place, skillSlices, slicePlaces, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
-import type { AuthInfo, ModelConfig, Progress, Run, RunOptions } from './types.ts';
+import { LOCAL } from './local.ts';
+import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
 
 // Strip whole terminal strings first, then remaining controls (including bidi).
 export function terminalText(value: unknown): string {
   return stripVTControlCharacters(String(value)
     .replace(/(?:\x1b[P_^X]|[\x90\x98\x9e\x9f])[\s\S]*?(?:\x1b\\|\x9c|$)/g, ''))
-    .replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, '');
+    .replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, '');
 }
 const plain = (value: unknown) => terminalText(value).replace(/\n/g, ' ');
 export function terminalReport(markdown: string): string {
@@ -40,14 +41,21 @@ const faint = ink(115, 124, 115); // dragonAsh
 const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
 const theme = { selectedPrefix: accent, selectedText: accent, description: muted, scrollInfo: faint, noMatch: amber };
 const tabs = ['Home', 'Models', 'Tests', 'Runs', 'Settings'];
+/** Plain names for what a test is graded on; the dimension ids are rubric vocabulary. */
+const GRADED_ON: Record<Task['dimensions'][number], string> = { correctness: 'correct answer', instructions: 'output format', tools: 'tool use', design: 'code design', hygiene: 'safe-code gate' };
 const THINKING: ModelConfig['thinking'][] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const JUDGE_FIELDS = ['Reviewer', 'Model', 'Thinking', 'Rounds'];
+/** Settings rows: the reviewer fields, then the local server address. */
+const LOCAL_ROW = JUDGE_FIELDS.length;
 /** Per-trial time limit. A ladder rather than free entry: these are the values worth choosing. */
 const TIMEOUTS = [30, 60, 90, 120, 180, 300, 600];
 /** Tool-call turns per trial. Too low censors outcomes; too high spends plan quota on stragglers. */
 const TURNS = [6, 12, 20, 30, 50];
 const dot = (on: boolean) => (on ? green('●') : faint('○'));
-const shortRun = (id: string) => (/^\d{4}-\d{2}-\d{2}T/.test(id) ? `${id.slice(11, 19)} · ${id.slice(-8)}` : id);
+/** "2026-09-20T14-31-08-443Z-6d55ccee" reads as "09-20 14:31"; anything else is shown as it is. */
+const runWhen = (id: string) => (/^\d{4}-\d{2}-\d{2}T/.test(id) ? `${id.slice(5, 10)} ${id.slice(11, 13)}:${id.slice(14, 16)}` : id);
+/** "Claude sonnet · via Claude Code / 14-31-08" is provenance; a column needs "Claude sonnet". */
+const nick = (label: string) => plain(label).split(' / ')[0]!.split(' · ')[0]!.trim();
 function statusInk(status: string): (s: string) => string {
   if (['passed', 'completed'].includes(status)) return green;
   if (['failed', 'cancelled', 'interrupted'].includes(status)) return amber;
@@ -57,6 +65,7 @@ function statusInk(status: string): (s: string) => string {
 function billingInk(billing: AuthInfo['billing']): string {
   if (billing === 'subscription') return teal('subscription');
   if (billing === 'control') return faint('synthetic control');
+  if (billing === 'local') return teal('no charge');
   return amber(billing);
 }
 /** Controls already say "synthetic control" in their mode; never print it twice. */
@@ -67,7 +76,7 @@ function authLine(auth: AuthInfo): string {
 /** Fixed label/value/hint columns so settings read as a table instead of ad-hoc spacing. */
 function field(label: string, value: string, hint: string): string {
   const pad = (n: number) => ' '.repeat(Math.max(2, n));
-  return `${muted(label)}${pad(14 - label.length)}${value}${pad(14 - visibleWidth(stripVTControlCharacters(value)))}${faint(hint)}`;
+  return `${muted(label)}${pad(14 - label.length)}${value}${pad(14 - width_(value))}${faint(hint)}`;
 }
 /**
  * States in one line which credential every call will use. An API key is never implied: if one
@@ -78,7 +87,11 @@ function creditLine(entries: { label: string; auth: AuthInfo }[]): string {
   const live = entries.filter(e => e.auth.billing !== 'control');
   if (!live.length) return faint('Synthetic controls only. No model is called and no credential is used.');
   const keyed = live.filter(e => ['metered', 'unknown'].includes(e.auth.billing));
-  if (!keyed.length) return teal(`Subscription logins only (${count(live.length, 'call site')}). No API key will be used.`);
+  if (!keyed.length) {
+    const local = live.filter(e => e.auth.billing === 'local').length;
+    const who = local === live.length ? 'Your own local server only' : local ? 'Subscription logins and your own local server' : 'Subscription logins only';
+    return teal(`${who} (${count(live.length, 'call site')}). No API key will be used.`);
+  }
   return amber(`${count(keyed.length, 'call site')} would use a metered API key: ${keyed.map(e => e.label).join(', ')}`);
 }
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -98,8 +111,148 @@ function twoColumn(left: string[], right: string[], inner: number, leftWidth: nu
     return `${cell}${' '.repeat(Math.max(2, leftWidth - width_(cell)))}${right[i] ?? ''}`;
   });
 }
-type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'addModel' | 'addTest' | 'authFor'>;
-type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help';
+/**
+ * Every table in the UI: a left-aligned name column, then right-aligned figures. Numbers in one
+ * column line up under their heading, which is what makes three models readable at a glance.
+ */
+function table(rows: string[][], widths: number[]): string[] {
+  return rows.map(cells => cells.map((cell, i) => {
+    const text = truncateToWidth(cell, widths[i]!);
+    const pad = ' '.repeat(Math.max(0, widths[i]! - width_(text)));
+    return i === 0 ? text + pad : pad + text;
+  }).join('  ').trimEnd());
+}
+/**
+ * The comparison page. One page that answers, top to bottom: who is best, which gaps are real, and
+ * where each model is strong or weak. Every table has the models as columns in rank order, so a
+ * model is read down one column and a task or skill across one row.
+ */
+function comparisonPage(runs: Run[], width: number, everyTask: boolean): string[] {
+  const { cards: all, tasks, mixed } = scorecards(runs);
+  const ranked = ranking(all), cards = ranked.map(r => r.card);
+  const rivals = ranked.filter(r => r.rank !== null).map(r => r.card);
+  const tagged = harnesses(cards).length > 1;
+  const names = cards.map(c => plain(c.label));
+  const out: string[] = [];
+  const row = (text = '') => out.push(text);
+  const prose = (text: string, paint: (s: string) => string = s => s) =>
+    out.push(...new Text(terminalText(text), 0, 0).render(Math.max(12, Math.min(width, MAX_TEXT))).map(paint));
+  const pad = (text: string, w: number) => { const t = truncateToWidth(text, Math.max(1, w - 1)); return t + ' '.repeat(Math.max(0, w - width_(t))); };
+
+  row(muted(`${rivals.length ? count(rivals.length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}${tagged || !cards.length || cards.every(c => c.synthetic) ? '' : ` · ${cards[0]!.harness}`}`));
+  row();
+  // The harness line says everything the generic one does, and names the likeliest cause.
+  if (tagged) { prose(HARNESS_WARNING, amber); row(); }
+  else if (mixed) { prose('Different suite, harness, lane or settings — these are not one controlled comparison.', amber); row(); }
+
+  row(bold(LABEL.solved) + faint('   every task counts equally'));
+  const nameW = Math.max(8, Math.min(22, Math.max(...names.map(width_)) + 2));
+  const tagW = tagged || cards.some(c => c.synthetic) ? Math.max(...cards.map(c => c.harness.length)) + 2 : 0;
+  // A bar too short to read is dropped, so the percentage itself stays on screen on a narrow terminal.
+  const room = Math.min(30, width - 4 - nameW - 12 - tagW - 10), barW = room < 6 ? 0 : room;
+  for (const { card, rank } of ranked) {
+    // A control's answers are fixed, so a rerun spread would be a number about nothing.
+    const error = card.synthetic ? null : scoreError(card);
+    const tag = tagW ? faint(pad(tagged || card.synthetic ? card.harness : '', tagW)) : '';
+    row(muted(String(rank ?? '–').padStart(2)) + '  ' + pad(plain(card.label), nameW) + (barW ? rateInk(card.score)(bar(card.score, barW)) + ' ' : '') + bold(pct(card.score).padStart(4))
+      + faint(pad(error === null ? '' : ` ±${Math.round(error * 100)}`, 6)) + tag + (card.notRun ? amber(`${card.notRun} not run`) : ''));
+  }
+  row();
+  prose('Rank = 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart. ± = how far the number could move on a rerun.', faint);
+  if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
+  if (cards.some(c => c.notRun)) prose('Not run = lost to login, quota, crash or cancellation. It never counts against a model.', faint);
+  const calls = verdicts(ranked), stalls = cards.map(stallNote).filter(n => n !== null);
+  if (calls.length || stalls.length) {
+    row();
+    row(bold('Verdict') + faint('   a gap counts only when it beats two standard errors'));
+    for (const call of calls) prose(call);
+    for (const note of stalls) prose(note, amber);
+  }
+  row();
+
+  // One column per model, wide enough for "0/3 ✗ (33%)"; a long model name wraps in its heading.
+  // When there is no room for a label beside the columns, every label gets its own line above its
+  // cells, so the figures keep their alignment at any width.
+  const colW = Math.max(6, Math.min(11, Math.floor((width - 2) / Math.max(1, cards.length)) - 2));
+  const labelW = Math.max(0, Math.min(48, width - cards.length * (colW + 2)));
+  const narrow = labelW < 14;
+  const widths = [narrow ? 0 : labelW, ...cards.map(() => colW)];
+  const heads = names.map(n => wrapTextWithAnsi(n, colW));
+  const columns = () => out.push(...table(Array.from({ length: Math.max(...heads.map(h => h.length)) }, (_, i) => ['', ...heads.map(h => muted(h[i] ?? ''))]), widths));
+  const line = (label: string, cells: string[], paint: (s: string) => string = s => s) => {
+    if (narrow || width_(label) > labelW) { row(paint(label)); out.push(...table([['', ...cells]], widths)); }
+    else out.push(...table([[paint(label), ...cells]], widths));
+  };
+  const rates = (values: (number | null)[]) => values.map(v => rateInk(v)(pct(v)));
+  // A slice row carries each model's place on those tasks alone, so a lead in one row is only
+  // claimed where the run can see it there.
+  const placed = (values: (number | null)[], ids: Set<string>) => {
+    const places = slicePlaces(cards, ids);
+    // "100% 1st" needs eight columns; below that every cell drops its place, never only some.
+    return values.map((v, i) => rateInk(v)(pct(v)) + (places[i] && colW >= 8 ? faint(` ${place(places[i])}`) : ''));
+  };
+  const PLACES = 'Place = rank on those tasks alone, by the same rule; a shared place means this run cannot tell them apart there.';
+  const tiers = cards.map(c => byTier(c, tasks));
+  if (tiers[0]?.length) {
+    row(bold('By difficulty') + faint('   share of tasks fully solved, and place · (n) tasks'));
+    columns();
+    for (const [i, { tier, ids }] of tierSlices(tasks).entries()) line(`${TIER_NAME[tier]} (${ids.size})`, placed(tiers.map(rows => rows[i]!.rate), ids));
+    prose(`Basic tasks tell small models apart; hard tasks tell the strongest apart.${rivals.length > 1 && colW >= 8 ? ` ${PLACES}` : ''}`, faint);
+    row();
+  }
+  const skills = cards.map(c => byCapability(c, tasks));
+  if (skills[0]?.length) {
+    row(bold('By skill') + faint('   share of tasks fully solved, and place · (n) tasks'));
+    columns();
+    for (const [i, { capability, ids }] of skillSlices(tasks).entries()) line(`${SKILL_NAME[capability]} (${ids.size})`, placed(skills.map(rows => rows[i]!.rate), ids));
+    row();
+  }
+  row(bold('Per task') + faint('   hardest first'));
+  prose('Tries fully solved out of tries graded. ✓ every try solved, ✗ none, (80%) share of checks passed when not fully solved, · not graded. Rows where models differ are bright.', faint);
+  columns();
+  const paint = { solved: green, partly: amber, unsolved: rose, none: faint };
+  const order = taskOrder(cards, tasks);
+  for (const tier of [...new Set(order.map(i => tasks[i]!.tier ?? 'unrated'))]) {
+    const group = order.filter(i => (tasks[i]!.tier ?? 'unrated') === tier);
+    if (tasks.some(t => t.tier)) row(muted(TIER_NAME[tier]));
+    // Rows every model fully solved say nothing about the difference, so they fold into one line.
+    const everyone = everyTask ? [] : group.filter(i => cards.every(c => c.tasks[i]!.rate === 1));
+    for (const i of group.filter(i => !everyone.includes(i))) {
+      const cells = cards.map(c => taskCell(c.tasks[i]!));
+      const same = cells.every(x => x.text === cells[0]!.text);
+      line(plain(tasks[i]!.title), cells.map(x => paint[x.kind](width_(x.text) <= colW ? x.text : x.text.replace(/ \(\d+%\)$/, ''))), same ? faint : s => s);
+    }
+    if (everyone.length) prose(`${count(everyone.length, 'task')} every model solved: ${everyone.map(i => plain(tasks[i]!.title)).join(', ')} · a shows them`, faint);
+  }
+  row();
+
+  // Signals that describe how a model worked, never part of the rank.
+  const partial = cards.some(c => c.checkScore !== null && c.checkScore !== c.score);
+  const signals = (['instructions', 'tools', 'design'] as const).filter(d => cards.some(c => c.dimensions[d] !== null));
+  const gated = cards.some(c => c.hygiene.total);
+  if (partial || signals.length || gated) {
+    row(bold('Other signals') + faint('   never part of the rank'));
+    columns();
+    if (partial) line(LABEL.checks, rates(cards.map(c => c.checkScore)));
+    for (const d of signals) line(LABEL[d], rates(cards.map(c => c.dimensions[d])));
+    // A gate, never a bar or a percentage: its checks have never failed in any recorded run,
+    // so a 100% beside the score would read as praise for an unmeasured thing.
+    if (gated) {
+      line(LABEL.hygiene, cards.map(c => (!c.hygiene.total ? faint : c.hygiene.passed === c.hygiene.total ? green : rose)(gate(c.hygiene))));
+      prose('Safe-code gate: valid Python, standard library only, no eval — a floor, not a score.', faint);
+    }
+  }
+  return out;
+}
+/** One line per run, wherever runs are listed: when, how each model did, and the run's shape. */
+function runLine(run: Run): string {
+  const live = ['running', 'interrupted', 'cancelled'].includes(run.status);
+  const scores = scorecards([run]).cards.map(c => `${nick(c.label)} ${rateInk(c.score)(pct(c.score))}`).join(faint(' · '));
+  const state = run.status === 'completed' ? '' : `  ${statusInk(run.status)(plain(run.status))}${live ? faint(` ${run.trials.length}/${run.planned}`) : ''}`;
+  return `${faint(runWhen(run.id))}  ${scores}  ${faint(`${run.tasks.length}×${run.options.repeat}`)}${state}`;
+}
+type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'localModels' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'addModel' | 'addTest' | 'authFor' | 'setLocalUrl' | 'probeLocal'>;
+type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help' | 'local';
 
 export class Dashboard implements Component, Focusable {
   private app: UIApp;
@@ -125,6 +278,7 @@ export class Dashboard implements Component, Focusable {
   private reportRuns: Run[] = [];
   private reportLength = 0;
   private reportPage = 12;
+  private everyTask = false;
   private pendingG = false;
   private detailRun?: Run;
   private trialIndex = 0;
@@ -143,21 +297,21 @@ export class Dashboard implements Component, Focusable {
     this.exit = exit;
     this.rows = rows;
   }
-  /** Rows the body region actually gets: the window minus the 3-line header and 2-line footer. */
-  private bodyRows(): number { return Math.max(8, Math.min(200, Math.trunc(this.rows()) || 24) - 5); }
+  /** Rows the body region actually gets: the window minus the 3-line header and 3-line footer. */
+  private bodyRows(): number { return Math.max(8, Math.min(200, Math.trunc(this.rows()) || 24) - 6); }
   get focused(): boolean { return this.input.focused; }
   set focused(value: boolean) { this.input.focused = value; }
   invalidate(): void { this.input.invalidate(); this.list?.invalidate(); }
 
   private listLength(): number {
     return this.tab === 1 ? this.app.config.models.length : this.tab === 2 ? this.tasks().length
-      : this.tab === 4 ? JUDGE_FIELDS.length : this.app.runs.length;
+      : this.tab === 4 ? JUDGE_FIELDS.length + 1 : this.app.runs.length;
   }
   private tasks() { return this.app.suite.tasks.filter(t => !this.app.config.removedTests.includes(t.id)); }
   private enabledTasks() { return this.tasks().filter(t => !this.app.config.disabledTests.includes(t.id)); }
   private models() { return this.app.config.models.filter(m => m.enabled); }
   /** Dialogs that take typed text, where `q` is a letter and only escape can mean "leave". */
-  private typing(): boolean { return this.dialog === 'test' || this.dialog === 'billing' || this.dialog === 'picker'; }
+  private typing(): boolean { return this.dialog === 'test' || this.dialog === 'billing' || this.dialog === 'picker' || this.dialog === 'local'; }
   private close(): void { this.pendingG = false; this.dialog = undefined; this.list = undefined; this.input.setValue(''); this.pendingDelete = undefined; this.pendingOptions = undefined; }
   private attempt(action: () => void): void {
     try { action(); } catch (error) { this.message = `Error: ${plain(error instanceof Error ? error.message : error)}`; }
@@ -247,6 +401,7 @@ export class Dashboard implements Component, Focusable {
       if (index === 0) this.persist(() => { judge.enabled = !judge.enabled; });
       else if (index === 1) this.openPicker('judge');
       else if (index === 2) this.persist(() => { judge.thinking = THINKING[(THINKING.indexOf(judge.thinking) + 1) % THINKING.length]!; });
+      else if (index === LOCAL_ROW) { this.dialog = 'local'; this.input.setValue(this.app.config.local.url); }
       else this.persist(() => { judge.repeat = (judge.repeat % 5) + 1; });
     }
   }
@@ -264,12 +419,24 @@ export class Dashboard implements Component, Focusable {
     this.dialog = 'picker';
     this.input.setValue('');
     this.filterPicker();
+    // The server is asked what it serves the first time someone looks for a model, not at startup.
+    if (target === 'model' && this.app.config.local.url && !this.app.localModels) void this.probeLocal();
+  }
+  private async probeLocal(): Promise<void> {
+    const url = plain(this.app.config.local.url);
+    this.message = `Listing models at ${url}… no prompt is sent.`;
+    this.repaint();
+    try {
+      const found = await this.app.probeLocal();
+      this.message = `${url}: ${count(found.length, 'model')} listed. Press a on Models to add one.`;
+    } catch (error) { this.message = `Local server: ${plain(error instanceof Error ? error.message : error)}`; }
+    finally { if (this.dialog === 'picker') this.filterPicker(); this.repaint(); }
   }
   private filterPicker(): void {
     const filter = this.input.getValue().toLowerCase();
     // Do not offer what will be refused: a synthetic control has no model behind it to review with.
     const items = this.app.catalog.map((c, index) => ({ c, index }))
-      .filter(({ c }) => this.pickerTarget !== 'judge' || c.provider !== 'control')
+      .filter(({ c }) => this.pickerTarget !== 'judge' || (c.provider !== 'control' && c.provider !== LOCAL))
       .map(({ c, index }) => ({ value: String(index), label: plain(`${c.provider}/${c.id} · ${c.name}`) }));
     this.list = new SelectList(items.filter(item => item.label.toLowerCase().includes(filter)), 7, theme);
     this.list.onSelect = item => {
@@ -278,10 +445,12 @@ export class Dashboard implements Component, Focusable {
       const judge = this.pickerTarget === 'judge';
       if (judge && this.candidate.provider === 'control') throw new Error('A synthetic control has no model behind it and cannot review anything.');
       this.dialog = 'auth';
-      // Claude Code authenticates itself, so there is nothing to choose.
+      // Claude Code authenticates itself and a local server takes no credential, so there is nothing to choose.
       this.list = new SelectList(this.candidate.provider === 'claude-code'
         ? [{ value: 'cli', label: 'Claude Code CLI', description: 'Your own plan login; no API key is used' }]
-        : [
+        : this.candidate.provider === LOCAL
+          ? [{ value: 'none', label: 'Your own server', description: 'No credential, no charge' }]
+          : [
           { value: 'pi', label: 'Pi credentials', description: 'Existing credentials; no login here' },
           { value: 'env', label: 'Environment API key', description: 'Metered · confirm again before run' },
           ...(judge ? [] : [{ value: 'none', label: 'No credentials', description: 'Synthetic controls only' }]),
@@ -316,6 +485,13 @@ export class Dashboard implements Component, Focusable {
         this.message = `Added ${this.draft[0]}. Exact JSON grading, independent task.`;
         this.close();
       } else { this.draft.push(value); this.input.setValue(''); }
+    } else if (this.dialog === 'local') {
+      if (!key('enter')) { this.input.handleInput(data); this.cleanInput(); return; }
+      const value = this.input.getValue().trim();
+      this.app.setLocalUrl(value);
+      this.close();
+      if (value) void this.probeLocal();
+      else this.message = 'Local server removed. Models added from it stay listed until you remove them.';
     } else if (this.dialog === 'delete') {
       if (data === 'y') { this.pendingDelete?.(); this.close(); this.message = 'Removed from configuration. Existing run evidence is unchanged.'; }
       else if (data === 'n') this.close();
@@ -337,6 +513,7 @@ export class Dashboard implements Component, Focusable {
       else if (data === 'G') this.reportOffset = Math.max(0, this.reportLength - this.reportPage);
       else if (data === 'e') this.export();
       else if (data === 'm' && this.dialog === 'report') { this.reportMode = this.reportMode === 'summary' ? 'full' : 'summary'; this.reportOffset = 0; this.reportLength = 0; }
+      else if (data === 'a' && this.dialog === 'report') this.everyTask = !this.everyTask;
       else if (this.dialog === 'evidence' && (key('left') || key('right') || data === '[' || data === ']')) {
         this.trialIndex = Math.max(0, Math.min((this.detailRun?.trials.length ?? 1) - 1, this.trialIndex + (key('left') || data === '[' ? -1 : 1)));
         this.reportOffset = 0;
@@ -405,6 +582,20 @@ export class Dashboard implements Component, Focusable {
     }
     finally { this.controller = undefined; this.progress = undefined; this.repaint(); }
   }
+  /** The keys that do something where the user is right now. Dialogs with a prompt carry their own. */
+  private keys(): string {
+    if (this.dialog === 'report') return this.reportMode === 'summary' ? `m full report   a ${this.everyTask ? 'fold' : 'show'} solved tasks   e export   ↑↓ space b scroll` : 'm summary   e export   ↑↓ space b scroll';
+    if (this.dialog === 'evidence') return '←→ trial   ↑↓ space b scroll   gg G ends   e export';
+    if (this.dialog) return '';
+    if (this.controller) return 'tabs and ↑↓ still work · edits wait for the run';
+    return [
+      'r run   − + tries   l lane   t limit   T turns   p cache',
+      'space toggle   a add   d remove',
+      'space toggle   a add   d remove   u restore',
+      'space select   c compare   ⏎ evidence   e export',
+      'space change   − + rounds',
+    ][this.tab]!;
+  }
 
   render(width: number, region: 'all' | 'header' | 'body' | 'footer' = 'all'): string[] {
     if (width <= 0) return [''];
@@ -418,7 +609,7 @@ export class Dashboard implements Component, Focusable {
     // Detail panes wrap to their own column when side by side, to the full width when stacked.
     const detailWidth = Math.min(inner >= LIST_WIDTH + 32 ? inner - LIST_WIDTH - 2 : inner, MAX_TEXT);
     const spread = (left: string, right: string) => {
-      const gap = inner - visibleWidth(stripVTControlCharacters(left)) - visibleWidth(stripVTControlCharacters(right));
+      const gap = inner - width_(left) - width_(right);
       return gap < 2 ? left : `${left}${' '.repeat(gap)}${right}`;
     };
     const head = (title: string, right = '') => row(spread(bold(title), right && muted(right)));
@@ -448,7 +639,7 @@ export class Dashboard implements Component, Focusable {
       if (p) { row(plain(`${p.model}  →  ${p.task}`)); row(muted(plain(p.phase))); }
       else row(muted('Preparing isolated trial workspaces…'));
       row();
-      if (p) row(faint(`saved as ${plain(shortRun(p.runId))} · visible on Runs while it works`));
+      if (p) row(faint(`saved as ${plain(runWhen(p.runId))} · visible on Runs while it works`));
       row();
       row(faint('esc cancels · completed trials are kept · 4 watches the run'));
     } else if (this.tab === 0) {
@@ -465,13 +656,12 @@ export class Dashboard implements Component, Focusable {
         field('Cache', this.options.cache ? teal('on') : amber('off'), 'p'),
         field('Limit', accent(`${this.options.timeout}s`), 't'),
         field('Turns', accent(String(this.options.maxTurns)), 'T'), '',
-        faint(`seed ${this.options.seed} · per trial`),
-        faint(`${this.options.maxTokens} tokens per turn`),
+        faint(`seed ${this.options.seed} · ${this.options.maxTokens} tokens per turn`),
       ], [
         muted(`Will run · ${count(enabled.length, 'model')} × ${count(this.enabledTasks().length, 'test')}`), '',
         ...(enabled.length
           ? enabled.slice(0, 8).map(m => {
-            const label = truncateToWidth(plain(m.label), 26);
+            const label = truncateToWidth(nick(m.label), 26);
             return `${dot(true)} ${label}${' '.repeat(Math.max(2, 28 - width_(label)))}${billingInk(this.app.authFor(m).billing)}`;
           })
           : [faint('No models enabled. Press 2 to choose some.')]),
@@ -483,7 +673,7 @@ export class Dashboard implements Component, Focusable {
         ...(this.app.config.judge.enabled ? [{ label: 'reviewer', auth: this.app.authFor({ ...this.app.config.judge, id: 'judge', label: 'judge', enabled: true }) }] : []),
       ]));
       row();
-      row(accent('r') + '  review preflight, then confirm');
+      row(accent('r') + '  run — preflight first, nothing is sent until you confirm');
       row();
       if (this.lastFailure) {
         row(rose('Last attempt produced no run'));
@@ -491,15 +681,9 @@ export class Dashboard implements Component, Focusable {
         prose('Nothing was recorded, so there is nothing on the Runs tab for it. Fix this and press r again.', faint);
         row();
       }
-      prose('Controls are synthetic, not model evidence. Metered or unknown billing needs separate PAY consent.', faint);
       if (this.app.runs.length) {
-        row();
-        row(muted('Recent runs'));
-        row();
-        for (const r of this.app.runs.slice(0, 6)) {
-          const passed = r.trials.filter(t => t.status === 'passed').length;
-          row(`${faint(plain(shortRun(r.id)))}   ${statusInk(r.status)(truncateToWidth(plain(r.status), 12))}${' '.repeat(Math.max(2, 13 - r.status.length))}${muted(`${passed} passed · ${r.trials.length} of ${r.planned} recorded`)}`);
-        }
+        row(muted('Recent runs') + faint('   4 for all of them'));
+        for (const r of this.app.runs.slice(0, 6)) row(runLine(r));
       }
     } else if (this.tab === 1) {
       const models = this.app.config.models;
@@ -516,23 +700,18 @@ export class Dashboard implements Component, Focusable {
       head('Models', `${this.models().length} of ${models.length} enabled`);
       row();
       twoColumn(this.listRows(models.map(m => `${dot(m.enabled)} ${plain(m.label)}`)), detail, inner, LIST_WIDTH).forEach(row);
-      row();
-      row(faint('space toggle   a add   d remove'));
     } else if (this.tab === 2) {
       const tasks = this.tasks();
       const task = tasks[this.selection[2]!];
-      const detail = task
-        ? [muted(plain(`${task.id} · ${task.tags.join(' · ')}`)), '', ...wrap(task.prompt, detailWidth, faint)]
-        : [muted('No tests yet. Press a to create an exact-JSON test.')];
       row();
       head('Tests', `${this.enabledTasks().length} of ${tasks.length} enabled`);
       row();
-      twoColumn(this.listRows(tasks.map(t => `${dot(!this.app.config.disabledTests.includes(t.id))} ${plain(t.title)}`)), detail, inner, LIST_WIDTH).forEach(row);
-      row();
-      row(faint('space toggle   a add   d remove   u restore'));
+      twoColumn(this.listRows(tasks.map(t => `${dot(!this.app.config.disabledTests.includes(t.id))} ${plain(t.title)}`)),
+        task ? this.taskDetail(task, detailWidth, wrap) : [muted('No tests yet. Press a to create an exact-JSON test.')], inner, LIST_WIDTH).forEach(row);
     } else if (this.tab === 4) {
       const judge = this.app.config.judge;
       const auth = this.app.authFor({ ...judge, id: 'judge', label: 'judge', enabled: true });
+      const local = this.app.config.local.url;
       const values = [
         judge.enabled ? green('on') : faint('off'),
         plain(`${judge.provider}/${judge.model}`),
@@ -548,12 +727,16 @@ export class Dashboard implements Component, Focusable {
           const marker = i === this.selection[4] ? accent('›') : ' ';
           return `${marker} ${muted(label)}${' '.repeat(Math.max(2, 12 - label.length))}${values[i]}`;
         }), '',
-        judge.enabled ? authLine(auth) : faint('Nothing is sent while the reviewer is off.'),
+        judge.enabled ? authLine(auth) : faint('Nothing is sent while the reviewer is off.'), '',
+        muted('Local server'), '',
+        `${this.selection[4] === LOCAL_ROW ? accent('›') : ' '} ${muted('Address')}${' '.repeat(Math.max(2, 12 - 'Address'.length))}${local ? accent(plain(local)) : faint('not set')}`,
+        faint(!local ? 'space to point at llama-server, Ollama, LM Studio…' : this.app.localModels ? `${count(this.app.localModels.length, 'model')} listed · a on Models adds one` : 'space to change · a on Models lists its models'),
       ], [
         muted('What this changes'), '',
         ...wrap('A reviewer model answers fixed yes/no questions about design on submissions that already passed every correctness check. It never touches the correctness score.', detailWidth, faint), '',
         ...wrap('Each defect must cite a line that exists in the submission. Uncitable ones are dropped, so an invented finding costs the candidate nothing.', detailWidth, faint), '',
-        ...wrap('Design is the only score here that is not reproducible from the saved artifacts. Changing the reviewer starts a new experiment: older runs will not pool with it.', detailWidth, faint),
+        ...wrap('Design is the only score here that is not reproducible from the saved artifacts. Changing the reviewer starts a new experiment: older runs will not pool with it.', detailWidth, faint), '',
+        ...wrap('A local server is any OpenAI-compatible endpoint on your own machine. Forseti only asks it which models it serves, sends no credential, and runs its trials through the same Pi adapter as every other API model, so they compare directly.', detailWidth, faint),
       ], inner, LIST_WIDTH).forEach(row);
       row();
       if (judge.enabled && /anthropic|claude/.test(judge.provider) && this.models().some(m => /anthropic|claude/.test(m.provider))) {
@@ -561,50 +744,39 @@ export class Dashboard implements Component, Focusable {
         row();
       }
       prose('Validate a reviewer before trusting it: npm run test:judge reports how often it agrees with your recorded standard.', faint);
-      row();
-      row(faint('space change   − + rounds'));
     } else {
       const run = this.app.runs[this.selection[3]!];
+      // The selected run sits under the list with its headline table, so a run is found by what
+      // it showed rather than by its hash.
       const detail: string[] = [];
       if (run) {
-        const passed = run.trials.filter(t => t.status === 'passed').length;
-        const failed = run.trials.filter(t => t.status === 'failed').length;
-        const other = run.trials.length - passed - failed;
-        detail.push(muted(plain(run.created)),
-          green(`${passed} passed`) + muted('   ') + amber(`${failed} failed`) + muted(`   ${other} other`),
-          faint(`${run.trials.length} of ${run.planned} recorded`),
-          faint(`${run.options.lane} lane · ${tries(run.options.repeat)} · cache ${run.options.cache ? 'on' : 'off'}`),
-          faint(`suite ${run.suiteHash.slice(0, 8)} · harness ${run.harnessHash.slice(0, 8)}`));
+        const { cards } = scorecards([run]);
+        detail.push(...wrap(`${plain(run.created).slice(0, 16).replace('T', ' ')}   ${plain(run.status)} · ${run.trials.length} of ${run.planned} recorded · ${run.options.lane} lane · ${tries(run.options.repeat)} · cache ${run.options.cache ? 'on' : 'off'} · suite ${run.suiteHash.slice(0, 8)} · harness ${run.harnessHash.slice(0, 8)}`, inner, muted), '');
+        const nameW = Math.max(8, Math.min(28, Math.max(...cards.map(c => width_(plain(c.label))))));
+        detail.push(...table([['', LABEL.solved, 'graded'].map(muted), ...cards.map(c => [
+          plain(c.label), rateInk(c.score)(bar(c.score, 12)) + ' ' + bold(pct(c.score).padStart(4)),
+          faint(`${c.evaluated}/${c.planned}`) + (c.notRun ? rose(` ${c.notRun} not run`) : ''),
+        ])], [nameW, 18, 18]));
         if (run.judge?.enabled) {
           const design = run.trials.flatMap(t => t.checks.filter(c => c.dimension === 'design'));
           if (design.length) detail.push(faint(`reviewer ${plain(run.judge.model)} · ${design.filter(c => !c.passed).length}/${design.length} design defects`));
-          else detail.push(rose(`reviewer ${plain(run.judge.model)} scored nothing`),
-            ...wrap(run.trials.find(t => t.judgeNote)?.judgeNote ?? 'No design checks were produced.', detailWidth, faint));
+          else detail.push(rose(`reviewer ${plain(run.judge.model)} scored nothing`) + faint(`: ${plain(run.trials.find(t => t.judgeNote)?.judgeNote ?? 'No design checks were produced.')}`));
         }
-        detail.push('',
-          ...run.models.slice(0, 6).map(m => muted(`${plain(m.label)}`)));
       } else detail.push(muted('No evidence yet. Press r to review a new run.'));
       row();
       head('Runs', `${this.selectedRuns.size} selected`);
       row();
-      // An unfinished run says how far it got, so a cancelled or interrupted one reads as
-      // partial evidence rather than as a run that never happened.
-      twoColumn(this.listRows(this.app.runs.map(r => {
-        const live = ['running', 'interrupted', 'cancelled'].includes(r.status);
-        const state = statusInk(r.status)(plain(r.status)) + (live ? faint(` ${r.trials.length}/${r.planned}`) : '');
-        return `${dot(this.selectedRuns.has(r.id))} ${plain(shortRun(r.id))}  ${state}`;
-      })), detail, inner, LIST_WIDTH).forEach(row);
+      this.listRows(this.app.runs.map(r => `${dot(this.selectedRuns.has(r.id))} ${runLine(r)}`), Math.max(4, this.bodyRows() - detail.length - 7)).forEach(row);
       row();
-      row(faint('space select   c compare   ⏎ evidence   e export'));
+      detail.forEach(row);
     }
     const footerStart = lines.length;
     row();
-    // Keep status compact; long provider errors remain terminal-safe.
-    // The same two keys do the same thing at every level, so the hint names both every time.
-    const hint = this.dialog ? (this.typing() ? 'esc back' : 'esc · q  back')
-      : this.controller ? 'esc cancel' : '? keys   esc · q  quit';
-    const message = truncateToWidth(plain(this.message), Math.max(1, inner - visibleWidth(hint) - 3));
-    row(spread(muted(message), faint(hint)));
+    // Long provider errors remain terminal-safe. The same two keys do the same thing at every
+    // level, so the hint names both every time.
+    row(muted(truncateToWidth(plain(this.message), inner)));
+    const leave = this.dialog ? (this.typing() ? 'esc back' : 'esc · q  back') : this.controller ? 'esc cancel' : '? keys   esc · q  quit';
+    row(spread(faint(truncateToWidth(this.keys(), Math.max(1, inner - leave.length - 3))), faint(leave)));
     const regionLines = region === 'header' ? lines.slice(0, 3) : region === 'body' ? lines.slice(3, footerStart) : region === 'footer' ? lines.slice(footerStart) : lines;
     return regionLines.map(line => {
       const content = truncateToWidth(line, inner);
@@ -612,14 +784,24 @@ export class Dashboard implements Component, Focusable {
       return `${BACKDROP}${truncateToWidth(padded, width, '')}\x1b[0m`;
     });
   }
-  private listRows(items: string[], visible = Math.max(6, this.bodyRows() - 9)): string[] {
+  /** What a test measures, then enough of the prompt to recognise it. The whole prompt is on disk. */
+  private taskDetail(task: Task, width: number, wrap: (text: string, w: number, paint?: (s: string) => string) => string[]): string[] {
+    const brief = wrap(task.prompt, width, faint);
+    return [
+      muted(plain(`${task.id}${task.tier ? ` · ${TIER_NAME[task.tier]}` : ''} · ${task.tags.join(' · ')}`)),
+      ...wrap(`Tests: ${(task.capabilities ?? []).map(c => SKILL_NAME[c]).join(' · ') || 'nothing declared'}`, width, faint),
+      ...wrap(`Graded on: ${task.dimensions.map(d => GRADED_ON[d]).join(' · ')}`, width, faint), '',
+      ...brief.slice(0, 8), ...(brief.length > 8 ? [faint('…')] : []),
+    ];
+  }
+  private listRows(items: string[], visible = Math.max(6, this.bodyRows() - 8)): string[] {
     const selected = Math.min(this.selection[this.tab]!, Math.max(0, items.length - 1));
     this.selection[this.tab] = selected;
     const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), items.length - visible));
     // A single accent bar marks the cursor; the dot inside each row carries enabled/selected state.
     const rows = items.slice(Math.max(0, start), Math.max(0, start) + visible)
       .map((item, i) => (i + Math.max(0, start) === selected ? `${accent('▌')} ${item}` : `  ${item}`));
-    return items.length > visible ? [...rows, '', faint(`${selected + 1} / ${items.length}   ↑↓`)] : rows;
+    return items.length > visible ? [...rows, faint(`  ${selected + 1} / ${items.length}   ↑↓`)] : rows;
   }
   private renderAuth(auth: AuthInfo, row: (text?: string) => void, prose: (text: string, paint?: (s: string) => string) => void): void {
     row(authLine(auth));
@@ -650,6 +832,13 @@ export class Dashboard implements Component, Focusable {
       this.input.render(width).forEach(row);
       row();
       row(faint('⏎ next / save   esc discard'));
+    } else if (this.dialog === 'local') {
+      head('Local server', 'address and port');
+      row();
+      prose('Base address of an OpenAI-compatible server: llama-server, Ollama (http://127.0.0.1:11434), LM Studio (http://127.0.0.1:1234) or similar. Leave it empty to remove.', muted);
+      this.input.render(width).forEach(row);
+      row();
+      row(faint('⏎ save and list its models   esc keep current'));
     } else if (this.dialog === 'delete') {
       head('Remove from configuration?');
       row();
@@ -686,164 +875,68 @@ export class Dashboard implements Component, Focusable {
         ['tab · 1–5', 'switch view'], ['↑↓ · j k', 'move'], ['space', 'toggle or select'],
         ['a', 'add model or test'], ['d', 'remove, with confirmation'], ['u', 'restore last removed test'],
         ['r', 'review preflight'], ['− +', 'tries per test, or reviewer rounds on Settings'], ['l', 'tools / prompt lane'],
-        ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer'], ['R', 'refresh metadata, sends nothing'],
-        ['c · ⏎ · e', 'runs: compare, evidence, export'], ['m', 'comparison: summary / full report'], ['←→', 'evidence: previous / next trial'],
+        ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer, local server'], ['R', 'refresh metadata, sends nothing'],
+        ['c · ⏎ · e', 'runs: compare, evidence, export'], ['m', 'comparison: summary / full report'], ['a', 'comparison: show / fold tasks every model solved'], ['←→', 'evidence: previous / next trial'],
         ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc · q', 'leave what you are looking at: close a panel, else quit'], ['esc during a run', 'cancel it safely, keeping completed evidence'], ['during a run', 'tabs and ↑↓ work; edits wait'], ['ctrl+c', 'quit'],
       ] as const) row(`${accent(keys)}${' '.repeat(Math.max(2, 14 - keys.length))}${muted(what)}`);
-    } else if (this.dialog === 'report' && this.reportMode === 'summary') {
-      // One page that answers, top to bottom: who is best, which gaps are real, and where each
-      // model is strong or weak. Every table has the models as columns, so a model is read down
-      // one column and a task or skill across one row.
-      const { cards: all, tasks, mixed } = scorecards(this.reportRuns);
-      // Columns follow the ranking, so the best model is always the first one read.
-      const ranked = ranking(all), cards = ranked.map(r => r.card);
-      const tagged = harnesses(cards).length > 1;
-      const names = cards.map(c => plain(c.label));
-      const pad = (text: string, w: number) => { const t = truncateToWidth(text, Math.max(1, w - 1)); return t + ' '.repeat(Math.max(0, w - visibleWidth(t))); };
-      head('Model comparison');
-      row(muted(`${ranked.some(r => r.rank !== null) ? count(ranked.filter(r => r.rank !== null).length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}${tagged || !cards.length || cards.every(c => c.synthetic) ? '' : ` · ${cards[0]!.harness}`}`));
-      row();
-      // The harness line says everything the generic one does, and names the likeliest cause.
-      if (tagged) prose(HARNESS_WARNING, amber);
-      else if (mixed) prose('Different suite, harness, lane or settings — these are not one controlled comparison.', amber);
-      if (mixed || tagged) row();
-
-      row(bold(LABEL.solved) + faint('   every task counts equally'));
-      const nameW = Math.max(8, Math.min(22, Math.max(...names.map(n => n.length)) + 2));
-      const tagW = tagged || cards.some(c => c.synthetic) ? Math.max(...cards.map(c => c.harness.length)) + 2 : 0;
-      const barW = Math.max(6, Math.min(30, width - 4 - nameW - 12 - tagW - 10));
-      for (const { card, rank } of ranked) {
-        // A control's answers are fixed, so a rerun spread would be a number about nothing.
-        const error = card.synthetic ? null : scoreError(card);
-        const tag = tagW ? faint(pad(tagged || card.synthetic ? card.harness : '', tagW)) : '';
-        row(muted(String(rank ?? '–').padStart(2)) + '  ' + pad(plain(card.label), nameW) + rateInk(card.score)(bar(card.score, barW)) + ' ' + bold(pct(card.score).padStart(4))
-          + faint(pad(error === null ? '' : ` ±${Math.round(error * 100)}`, 6)) + tag + (card.notRun ? amber(`${card.notRun} not run`) : ''));
-      }
-      row();
-      prose('Rank = 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart. ± = how far the number could move on a rerun.', faint);
-      if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
-      if (cards.some(c => c.notRun)) prose('Not run = lost to login, quota, crash or cancellation. It never counts against a model.', faint);
-      const calls = verdicts(ranked), stalls = cards.map(stallNote).filter(n => n !== null);
-      if (calls.length || stalls.length) {
-        row();
-        row(muted('Verdict'));
-        for (const call of calls) prose(call);
-        for (const note of stalls) prose(note, amber);
-      }
-      row();
-
-      // Where each model is strong or weak: one row per slice, one column per model.
-      const colW = Math.max(5, Math.min(16, Math.max(...names.map(n => n.length)) + 2, Math.floor((width - 10) / Math.max(1, cards.length))));
-      const labelW = Math.max(8, Math.min(38, width - colW * cards.length));
-      // In a narrow column "Claude opus" and "Claude sonnet" both truncate to "Cla…", so a first
-      // word several models share is dropped there, leaving the part that tells them apart.
-      const first = (n: string) => n.split(' ')[0];
-      const heads = names.map(n => (n.length < colW || names.filter(m => first(m) === first(n)).length < 2 ? n : n.split(' ').slice(1).join(' ') || n));
-      const columns = () => row(' '.repeat(labelW) + heads.map(n => muted(pad(n, colW))).join(''));
-      // A label too long for its column gets its own line, so cells never lose their alignment.
-      const line = (label: string, cells: string[], paint: (s: string) => string = s => s) => {
-        if (visibleWidth(label) >= labelW) { row(paint(label)); row(' '.repeat(labelW) + cells.join('')); }
-        else row(paint(pad(label, labelW)) + cells.join(''));
-      };
-      const rates = (values: (number | null)[]) => values.map(v => rateInk(v)(pad(pct(v), colW)));
-      const tiers = cards.map(c => byTier(c, tasks));
-      if (tiers[0]?.length) {
-        row(bold('By difficulty') + faint('   share of tasks fully solved · (n) tasks'));
-        columns();
-        for (const [i, r] of tiers[0].entries()) line(`${TIER_NAME[r.tier]} (${r.total})`, rates(tiers.map(rows => rows[i]!.rate)));
-        prose('Basic tasks tell small models apart; hard tasks tell the strongest apart.', faint);
-        row();
-      }
-      const skills = cards.map(c => byCapability(c, tasks));
-      if (skills[0]?.length) {
-        row(bold('By skill') + faint('   share of tasks fully solved · (n) tasks'));
-        columns();
-        for (const [i, r] of skills[0].entries()) line(`${SKILL_NAME[r.capability]} (${r.total})`, rates(skills.map(rows => rows[i]!.rate)));
-        row();
-      }
-      row(bold('Per task') + faint('   hardest first'));
-      prose('Tries fully solved out of tries graded. ✓ every try solved, ✗ none, (80%) share of checks passed when not fully solved, · not graded. Rows where models differ are bright.', faint);
-      columns();
-      const paint = { solved: green, partly: amber, unsolved: rose, none: faint };
-      const order = taskOrder(cards, tasks);
-      for (const tier of [...new Set(order.map(i => tasks[i]!.tier ?? 'unrated'))]) {
-        const group = order.filter(i => (tasks[i]!.tier ?? 'unrated') === tier);
-        if (tasks.some(t => t.tier)) row(muted(TIER_NAME[tier]));
-        // Rows every model fully solved say nothing about the difference, so they fold into one line.
-        const everyone = group.filter(i => cards.every(c => c.tasks[i]!.rate === 1));
-        for (const i of group.filter(i => !everyone.includes(i))) {
-          const cells = cards.map(c => taskCell(c.tasks[i]!));
-          const same = cells.every(x => x.text === cells[0]!.text);
-          line(plain(tasks[i]!.title), cells.map(x => paint[x.kind](pad(visibleWidth(x.text) < colW ? x.text : x.text.replace(/ \(\d+%\)$/, ''), colW))), same ? faint : s => s);
-        }
-        if (everyone.length) row(faint(`${count(everyone.length, 'task')} every model solved: ${everyone.map(i => plain(tasks[i]!.title)).join(', ')}`));
-      }
-      row();
-
-      // Signals that describe how a model worked, never part of the rank.
-      const partial = cards.some(c => c.checkScore !== null && c.checkScore !== c.score);
-      const signals = (['instructions', 'tools', 'design'] as const).filter(d => cards.some(c => c.dimensions[d] !== null));
-      const gated = cards.some(c => c.hygiene.total);
-      if (partial || signals.length || gated) {
-        row(bold('Other signals') + faint('   never part of the rank'));
-        columns();
-        if (partial) line(LABEL.checks, rates(cards.map(c => c.checkScore)));
-        for (const d of signals) line(LABEL[d], rates(cards.map(c => c.dimensions[d])));
-        // A gate, never a bar or a percentage: its checks have never failed in any recorded run,
-        // so a 100% beside the score would read as praise for an unmeasured thing.
-        if (gated) {
-          line(LABEL.hygiene, cards.map(c => (!c.hygiene.total ? faint : c.hygiene.passed === c.hygiene.total ? green : rose)(pad(gate(c.hygiene), colW))));
-          prose('Safe-code gate: valid Python, standard library only, no eval — a floor, not a score.', faint);
-        }
-        row();
-      }
-      row(faint('m full report   e export'));
     } else {
-      head(this.dialog === 'report' ? 'Comparison' : 'Evidence', this.dialog === 'report' ? 'selected runs' : 'observable checks');
+      const summary = this.dialog === 'report' && this.reportMode === 'summary';
+      const first = this.reportRuns[0];
+      head(this.dialog === 'evidence' ? 'Evidence' : summary ? 'Model comparison' : 'Full report',
+        this.dialog === 'evidence' ? 'observable checks' : summary ? count(this.reportRuns.length, 'run') : `${count(this.reportRuns.length, 'run')} · ${first?.tasks.length ?? 0} tests × ${tries(first?.options.repeat ?? 0)} · ${first?.options.lane ?? ''} lane`);
       row();
-      let content = this.report;
-      if (this.dialog === 'evidence') {
-        const run = this.detailRun!;
-        const trial = run.trials[this.trialIndex];
-        row(faint(`trial ${trial ? this.trialIndex + 1 : 0} / ${run.trials.length}   ←→`));
-        if (trial) {
-          const state = outcome(trial.status);
-          const chip = state.kind === 'pass' ? green('PASS') : state.kind === 'scored' ? amber('SCORED') : rose('NOT RUN');
-          row();
-          row(`${chip}  ${bold(plain(trial.model))}${muted(' / ')}${plain(trial.task)}${faint(`  try ${trial.repetition}`)}`);
-          // "not run" never means a wrong answer: those trials are excluded from correctness.
-          row(faint(state.kind === 'not-run' ? `${state.text} — excluded from scores, not counted against the model` : `${trial.checks.filter(c => c.passed).length} of ${trial.checks.length} checks passed`));
-          // A censored trial is recoverable, and the fix is one key away on Home.
-          if (trial.status === 'timeout') row(faint(`The model was still working at ${run.options.timeout}s. Raise the limit with t on Home and rerun to get a real outcome.`));
-          row();
-          for (const dimension of ['correctness', 'instructions', 'tools', 'design', 'hygiene'] as const) {
-            const checks = trial.checks.filter(c => c.dimension === dimension);
-            if (!checks.length) continue;
-            const rate = checks.filter(c => c.passed).length / checks.length;
-            row(`${muted(dimension.padEnd(14))}${rateInk(rate)(bar(rate))} ${muted(`${checks.filter(c => c.passed).length}/${checks.length}`)}`);
+      let body: string[];
+      let chrome = 5;
+      if (summary) body = comparisonPage(this.reportRuns, width, this.everyTask);
+      else {
+        let content = this.report;
+        if (this.dialog === 'evidence') {
+          const run = this.detailRun!;
+          const trial = run.trials[this.trialIndex];
+          row(faint(`trial ${trial ? this.trialIndex + 1 : 0} / ${run.trials.length}   ←→`));
+          chrome = 7;
+          if (trial) {
+            const state = outcome(trial.status);
+            const chip = state.kind === 'pass' ? green('PASS') : state.kind === 'scored' ? amber('SCORED') : rose('NOT RUN');
+            row();
+            row(`${chip}  ${bold(plain(trial.model))}${muted(' / ')}${plain(trial.task)}${faint(`  try ${trial.repetition}`)}`);
+            // "not run" never means a wrong answer: those trials are excluded from correctness.
+            row(faint(state.kind === 'not-run' ? `${state.text} — excluded from scores, not counted against the model` : `${trial.checks.filter(c => c.passed).length} of ${trial.checks.length} checks passed`));
+            // A censored trial is recoverable, and the fix is one key away on Home.
+            if (trial.status === 'timeout') row(faint(`The model was still working at ${run.options.timeout}s. Raise the limit with t on Home and rerun to get a real outcome.`));
+            row();
+            for (const dimension of ['correctness', 'instructions', 'tools', 'design', 'hygiene'] as const) {
+              const checks = trial.checks.filter(c => c.dimension === dimension);
+              if (!checks.length) continue;
+              const rate = checks.filter(c => c.passed).length / checks.length;
+              row(`${muted(dimension.padEnd(14))}${rateInk(rate)(bar(rate))} ${muted(`${checks.filter(c => c.passed).length}/${checks.length}`)}`);
+              chrome++;
+            }
+            row();
+            row(faint(`${(trial.wallMs / 1000).toFixed(1)}s wall · ${(trial.modelMs / 1000).toFixed(1)}s model · ${trial.tokens ? `${trial.tokens.input} in / ${trial.tokens.output} out` : 'tokens unavailable'} · ${plain(trial.auth.mode)}`));
+            row();
+            chrome += 7;
           }
-          row();
-          row(faint(`${(trial.wallMs / 1000).toFixed(1)}s wall · ${(trial.modelMs / 1000).toFixed(1)}s model · ${trial.tokens ? `${trial.tokens.input} in / ${trial.tokens.output} out` : 'tokens unavailable'} · ${plain(trial.auth.mode)}`));
-          row();
+          const failed = trial?.checks.filter(c => !c.passed) ?? [];
+          const passed = trial?.checks.filter(c => c.passed) ?? [];
+          content = trial ? [
+            ...(trial.error ? [`Error: ${trial.error}`, ''] : []),
+            ...(failed.length ? ['Why it did not pass', ...failed.map(c => `FAIL [${c.dimension}] ${c.id}\n${c.evidence}`), ''] : []),
+            ...(passed.length ? [`Passed ${passed.length}: ${passed.map(c => c.id).join(' · ')}`, ''] : []),
+            ...(trial.checks.length ? [] : ['No checks recorded. Not passing evidence.', '']),
+            'Answer', trial.answer || '(empty)',
+            ...(trial.trace.length ? ['', 'Tool trace', ...trial.trace.map(t => `${t.ok ? 'OK' : 'ERROR'} ${t.tool} · ${t.ms}ms\n${JSON.stringify(t.args)}\n${t.output}`)] : []),
+          ].join('\n') : 'No trials recorded.';
         }
-        const failed = trial?.checks.filter(c => !c.passed) ?? [];
-        content = trial ? [
-          ...(trial.error ? [`Error: ${trial.error}`, ''] : []),
-          ...(failed.length ? ['Why it did not pass', ...failed.map(c => `FAIL [${c.dimension}] ${c.id}\n${c.evidence}`), ''] : []),
-          ...(trial.checks.length ? ['Passed', ...trial.checks.filter(c => c.passed).map(c => `PASS [${c.dimension}] ${c.id}`), ''] : ['No checks recorded. Not passing evidence.', '']),
-          'Answer', trial.answer || '(empty)',
-          ...(trial.trace.length ? ['', 'Tool trace', ...trial.trace.map(t => `${t.ok ? 'OK' : 'ERROR'} ${t.tool} · ${t.ms}ms\n${JSON.stringify(t.args)}\n${t.output}`)] : []),
-        ].join('\n') : 'No trials recorded.';
+        body = wrapTextWithAnsi(terminalText(content), width);
       }
-      const wrapped = wrapTextWithAnsi(terminalText(content), width);
-      // Fill the window: the panel's own chrome is the head, the blanks and the status line.
-      const page = Math.max(6, this.bodyRows() - (this.dialog === 'evidence' ? 7 : 5));
-      this.reportLength = wrapped.length;
+      // Fill the window: the panel's own chrome is the head, the blanks and the position line.
+      const page = Math.max(6, this.bodyRows() - chrome);
+      this.reportLength = body.length;
       this.reportPage = page;
-      this.reportOffset = Math.min(this.reportOffset, Math.max(0, wrapped.length - page));
-      wrapped.slice(this.reportOffset, this.reportOffset + page).forEach(row);
-      row();
-      row(faint(`${this.reportOffset + 1}–${Math.min(wrapped.length, this.reportOffset + page)} of ${wrapped.length}   ↑↓ line · space/b page · gg/G ends · e export`));
+      this.reportOffset = Math.min(this.reportOffset, Math.max(0, body.length - page));
+      body.slice(this.reportOffset, this.reportOffset + page).forEach(row);
+      if (body.length > page) { row(); row(faint(`${this.reportOffset + 1}–${Math.min(body.length, this.reportOffset + page)} of ${body.length}`)); }
     }
   }
 }

@@ -1,25 +1,28 @@
 # Forseti terminal dashboard
 
-The dashboard uses the pinned Pi TUI package, not the global Pi runtime. It opens in the alternate screen in the Kanagawa Dragon palette: a warm near-black base, one blue-grey accent for anything interactive, and colour used only where it carries meaning: green for enabled and passing, yellow for warnings and metered billing, red for not-ready credentials, aqua for subscription billing. Navigation and status sit in fixed regions. The center panel scrolls with Page Up/Page Down or the mouse wheel. Layout and text work at 40, 80, and 120 columns. Above ~80 columns the list views and Home split into two panes; below that they stack.
+The dashboard uses the pinned Pi TUI package, not the global Pi runtime. It opens in the alternate screen in the Kanagawa Dragon palette: a warm near-black base, one blue-grey accent for anything interactive, and colour used only where it carries meaning: green for enabled and passing, yellow for warnings and metered billing, red for not-ready credentials, aqua for subscription billing and a local server. Navigation sits in a fixed header; the footer carries the status line and, on its last line, the keys that work where you are. The center panel scrolls with Page Up/Page Down or the mouse wheel. Layout and text work at 40, 80, and 120 columns. Above ~80 columns the list views and Home split into two panes; below that they stack.
+
+Tables have one shape: a left-aligned name column, then right-aligned figures. Runs are listed by when they ran, each model's score and the run's shape (tests × tries), with the selected run's scores under the list, so a run is found by what it showed rather than by its hash. Tests show their difficulty, the skills they test in plain words, what they are graded on and the start of the prompt.
 
 ## Keys
 
-- **Tab / Shift+Tab, 1–4, ←→:** Home, Models, Tests, Runs.
+- **Tab / Shift+Tab, 1–5, ←→:** Home, Models, Tests, Runs, Settings.
 - **↑↓ / j/k:** select a row. **Space:** toggle a model/test or select a run.
 - **a:** add a model or test. Model search accepts provider, ID, or name; use arrows and Enter to choose, then explicitly choose existing authentication. Test creation asks for a lowercase ID, one-line prompt, and valid expected JSON.
 - **d:** remove a model/test from configuration. Only **y** confirms. Test files and saved evidence remain intact.
 - **− / +:** tries per test, from 1 to 20. **l:** tools/prompt lane. **p:** prompt caching on/off.
 - **r:** preflight. Review enabled models/tests, authentication, billing, and limits before Enter. Metered/unknown billing then requires typing **PAY** and Enter. Consent applies to one run only; there is no dollar spending cap.
 - **Esc / Ctrl+C during a run:** cancel and retain partial results. Wait for cancellation to finish before quitting.
-- **Runs → c:** compare selected runs, or the highlighted run when none are selected. Opens one model-comparison page; **m** toggles the full markdown report. **Enter:** inspect individual trials and check-level evidence; **←→** changes trials; **↑↓** scrolls a line, **space/b** a page, **gg/G** jump to top/bottom. **e:** export selected/highlighted runs through the app to workspace reports.
+- **Runs → c:** compare selected runs, or the highlighted run when none are selected. Opens one model-comparison page (below). **a** shows or folds the tasks every model solved; **m** toggles the full markdown report. **Enter:** inspect individual trials and check-level evidence; **←→** changes trials; **↑↓** scrolls a line, **space/b** a page, **gg/G** jump to top/bottom. **e:** export selected/highlighted runs through the app to workspace reports.
+- **Settings → space on Address:** point at a local OpenAI-compatible server (llama-server, Ollama, LM Studio). Enter saves it and lists its models; the picker lists them under `local/` and asks for no credential. Opening the picker asks the server once if it has not been asked yet. Nothing is asked at startup.
 - **R:** refresh local metadata without sending prompts. **?:** help. **q / Ctrl+C:** quit when idle. **Esc:** close a form/dialog without saving.
 
 ## The comparison page
 
 One page, read top to bottom:
 
-1. **Tasks fully solved** — one line per model, best first, with a bar, the score and **±** (how far a rerun could move it). A rank is 1 + how many models clearly beat it, so models this run cannot tell apart share a rank. A short verdict says which gaps are real and which are ties.
-2. **By difficulty** and **By skill** — the same score split by task tier (Basic, Standard, Hard) and by skill, one column per model in rank order.
+1. **Tasks fully solved** — one line per model, best first, with a bar, the score and **±** (how far a rerun could move it). A rank is 1 + how many models clearly beat it, so models this run cannot tell apart share a rank. "Clearly" means the gap beats two standard errors of the difference. A short verdict says which gaps are real and which are ties, and names any model that ran out of turns or time.
+2. **By difficulty** and **By skill** — the same score split by task tier (Basic, Standard, Hard) and by skill, one column per model in rank order. Each cell also gives the model's place on those tasks alone, by the same rule as the rank, so "better on hard tasks" has to clear the same bar as "better overall" with only the hard tasks as evidence. The place is dropped when the columns are too narrow for it.
 3. **Per task** — hardest first. Each cell is tries fully solved out of tries graded; a task every model solved folds into one line.
 4. **Other signals** — checks passed, output format, tool use, reviewed design and the safe-code gate. None of them change the rank.
 

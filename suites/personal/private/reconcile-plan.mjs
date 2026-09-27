@@ -11,3 +11,14 @@ export async function grade({files,python,trace, lane, control, agent}) {
  ...[0,1].flatMap(i => [equal(`safe-plan-${i}`,r.value?.[i]?.output,expected),equal(`call-error-${i}`,r.value?.[i]?.error,null),equal(`no-input-mutation-${i}`,r.value?.[i]?.args,[s],'instructions'),equal(`no-data-write-${i}`,r.value?.[i]?.files,{'rows.json':original['rows.json']},'instructions')]),
  preserved(files,original,['reconcile.py']),...toolChecks(trace,['reconcile.py'],'check_public.py',false,{lane,control,agent})];
 }
+
+export const review = {
+  anchor: {'reconcile.py': reference.files['reconcile.py']},
+  paths: ['reconcile.py'],
+  items: [
+    {id:'helper-duplicates-stdlib', ask:'Does the submission hand-write something the standard library already does here, such as de-duplicating and sorting names by hand instead of sorted(set(...)), or re-implementing a str, set or re operation that exists?'},
+    {id:'unearned-abstraction', ask:'Does the submission add a class, registry, strategy table, config option, decorator or wrapper layer that has only one real use here and could be a plain function or a literal?'},
+    {id:'dead-code', ask:'Is there unused or unreachable code left behind: a function nothing calls, an unused constant or import, a value computed and then thrown away, or a commented-out block?'},
+    {id:'explanatory-noise', ask:'Are there comments or docstrings that only restate what the adjacent line already says, rather than recording a reason the code cannot express?'},
+  ],
+};

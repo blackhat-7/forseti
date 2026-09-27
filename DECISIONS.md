@@ -43,6 +43,16 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **Thinking level is part of the reviewer's identity.** (2026-09-18) A calibration at `thinking: off` says nothing about a reviewer running at `medium`. Re-validate after changing it; `judgeIdentity` already refuses to pool them.
 - **Generated `reports/comparison-*.md` are not tracked.** (2026-09-18) `exportReport` writes one per export and the PTY smoke test exports every run, so the repo grew by a few hundred lines on each routine verification. The two curated reports the README links are named by hand and stay tracked. Run artifacts already live in the gitignored `runs/`; publish a report by giving it a name.
 
+- **The harness hash leaves out `report.ts` and `tui.ts`.** (2026-09-20) They only read finished trials, and every run in a comparison group is rendered by the same current copy of them, so a wording fix there cannot make two runs incomparable. Hashing them stranded paid-for runs behind rendering changes. Anything that touches a trial still splits the group.
+
+- **Every rubric shares three questions and adds one of its own.** (2026-09-20) `unearned-abstraction`, `dead-code` and `explanatory-noise` are the same text in all four reviewed tasks, so a design score means the same thing across them; the fourth names the duplication that task invites. Each calibration set keeps two clean traps because a judge rewards length and punishes unfamiliar shapes.
+
+- **The scorecard sorts by headline and names every tied pair beside it.** (2026-09-20) A sorted table invites a ranking, so the verdict list under it says which pairs the run can separate, overall and per kind of task, and lists the pairs tied overall by name. A pair not named as apart is tied; the sort never claims more than that.
+- **"Better at Z" clears the same bar as "better overall".** (2026-09-20) `capabilityCard` restricts a card to one capability's tasks and `separated` judges that gap on that evidence alone, so a capability backed by one task cannot hand out a verdict a rerun would reverse.
+- **Only `report.ts` and `tui.ts` render, so the UI stays in those two files.** (2026-09-20) A new UI module would join the harness hash and split comparison groups on every wording change; a table helper inside `tui.ts` does not.
+
+- **A Python idiom trap does not survive a rewrite.** (2026-09-20) `zip-manifest` and `double-delivery` shipped the obvious wrong spellings and every candidate threw them away and wrote the stated rules directly (Opus 6/6, Sonnet 6/6, Haiku 5/6). The SQL traps discriminate because the *right* spelling is unobvious even with the rule in hand; in Python the rule is the code.
+
 ## Hard-won lessons
 
 - **Look at the instrument's output before changing the thing it measures.** (M18) A citation-check bug was silently discarding *correct* defects. Two full calibration runs were wasted guessing; one raw reviewer reply found it in a minute.
@@ -82,10 +92,33 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **The idiom trap works, and it is the first thing that has caught a strong candidate.** (2026-09-18) `retry-rollup` pairs two spellings everyone reaches for first — `NOT IN (SELECT ...)` against a column holding a NULL, and a `LEFT JOIN` whose test sits in `WHERE` — with public rows arranged so both are *right* on them. Over three repetitions: weakest 1/3, middle 2/3, strongest 3/3. Nothing else in the suite had ever separated the top two.
 - **Ship the wrong query as the starting point.** (2026-09-18) `query.sql` in the fixture is the obvious spelling, and it passes `check_public.py`. A candidate that reads the starting query, runs the public check and sees green has been given every reason to stop, which is the situation being measured.
 
+## Task media (2026-09-21)
+
+- **A stated rule beats a NULL trap at this tier; it does not beat engine arithmetic.** (2026-09-21) `all-green` says a NULL status is not a success and Sonnet spelled it right 2/2. `due-dates` says the due day clamps to the month's end and Sonnet wrote `'+1 month'` 2/3 times, which clamps in Postgres and not in SQLite. The next medium is behaviour that differs between engines, not a rule the prompt can state.
+- **The per-trial file cap does not bound the suite snapshot.** (2026-09-21) `files()` caps a workspace at 80 files so a model cannot flood one; `loadSuite` reads every fixture and grader at once and outgrew that at 18 tasks. It now reads under the 400-entry bound, and the workspace cap is untouched.
+- **A rate-limited measurement is reported with its holes, never re-run to fill them.** (2026-09-21) The plan limit hit at trial 16 of 18 and skipped the rest. The report shows `not-run` for those and the numbers above are quoted with their denominators.
+- **A trap works when the engine offers no spelling for the rule, not when the spelling is a lookup away.** (2026-09-21) `iso-weeks` states the ISO week rule and SQLite has `%G-W%V` for it; Sonnet found it 2/3. `due-dates` states the clamp rule and SQLite has nothing for it; Sonnet wrote `'+1 month'` 4 of 5 times. Build the next task on the first kind.
+
+## Local servers (2026-09-21)
+
+- **One server address, not one per model.** (2026-09-21) `config.local.url` is the only place the address lives; a local model config holds just the model ID. The run manifest records which server answered, so provenance is kept without every model carrying a URL it would silently go stale on.
+- **The local server is asked exactly one thing outside a run: `GET /v1/models`.** (2026-09-21) On saving the address and on opening the model picker with an unlisted address, never on startup or `R`. That keeps "no provider request on startup" true and still makes the picker show what is actually being served.
+- **Local is the standard OpenAI dialect and nothing else.** (2026-09-21) `max_tokens`, `system` role, no `store`, no `reasoning_effort`, thinking `off`. That is what llama.cpp, Ollama, LM Studio and vLLM all accept; anything richer would work on one of them and break on another.
+- **Thinking is sent to a local server, never assumed off.** (2026-09-21) The first full Qwen3 run censored its first trial: the manifest said thinking off, the template thought by default, and 4096 output tokens went to reasoning. `off`/`high` now map to `chat_template_kwargs.enable_thinking`; there is no effort dial because local templates have none.
+- **A local model cannot be the reviewer.** (2026-09-21) Nothing asked for it, and a judge is part of the experiment identity; adding a second keyless path there is surface without a use.
+
+## Lane uniformity (2026-09-21)
+
+- **Equalise capabilities, not tool signatures.** (2026-09-21) The Pi lane could execute arbitrary sandboxed Python and verify itself against `check_public.py`; the Claude Code lane could run nothing, so its lower stall count was a harness artifact, not better self-control. `src/mcpserver.ts` serves that one interpreter to the CLI over stdio MCP, same implementation, same sandbox, same 64-call budget.
+- **Each lane keeps its own file dialect.** (2026-09-21) `Read`/`Write`/`Edit`/`Glob`/`Grep` against `read_file`/`write_file`/`list_files` is one capability spelled twice. Denying the CLI's own tools was tried and reverted: on `shared-count` Haiku failed when forced through `write_file` and passed with its native tools, so the swap measured tool fit rather than the model.
+- **`Bash` is not the equivalent of the Pi lane's Python.** (2026-09-21) It is unsandboxed and networked, and this lane's CLI process is not inside Seatbelt. The sandboxed interpreter gives the same ability to run code with none of that, so `Bash` stays denied.
+- **`--restricted`, not `--safe-mode`.** (2026-09-21) Safe mode disables every customization including MCP servers, so a spike tool was invisible under it. Restricted mode ignores the host's settings, removes the built-in code runners and confines file tools, and a live check confirmed it does not pull this repo's `CLAUDE.md` into a trial. `--bare` stays rejected: it forces an API key over the plan login.
+- **The tool rubric stays Pi-only.** (2026-09-21) It names `read_file`/`write_file`, which the CLI lane does not use, and Forseti cannot observe that lane's native file calls. It is a process check, not a capability one, so correctness stays comparable without it. The Python calls are still recorded as evidence of how much a model verifies.
+
 ## Reporting and platforms (2026-09-27)
 
 - **Rank = 1 + how many models clearly beat it.** "Tie with the model above" chains: A~B, B~C gives everyone rank 1 even when A clearly beats C. Counting clear wins cannot chain, and the verdict states every clear pair.
-- **Tasks carry a difficulty tier, and reports score each tier alone.** A single average lets tasks everyone solves shrink the gap between strong models. Tiers come from recorded results, not guesses; re-tier when the data moves. `weekly-coverage` is `standard`: it separates Haiku from Sonnet, not Sonnet from Opus.
+- **Tasks carry a difficulty tier, and reports score each tier alone.** A single average lets tasks everyone solves shrink the gap between strong models. Tiers come from recorded results, not guesses; re-tier when the data moves. `weekly-coverage` is `standard`: it separates Haiku from Sonnet, not Sonnet from Opus. `hard` is only `retry-rollup` and `due-dates`, the two tasks with a recorded Sonnet/Opus split.
 - **Capability ids stay; only their display names changed.** `exactness` shows as "Edge cases right", and so on. Saved runs and `suite.json` keep the ids, so old runs stay readable.
 - **Linux confines the interpreter from inside, before candidate code.** Landlock matches the Seatbelt allow-list and raises the same `PermissionError`; seccomp covers what Landlock cannot. No `bwrap`: a mount namespace turns hidden files into "not found", not "denied".
-- **The suite has its own file cap (300); a trial folder keeps 80.** One limit served both, so adding tasks hit a safety limit meant for model-written files.
+- **`invoice-rounding`, `league-table` and `ticket-sla` are `basic`, though built as traps.** They are Python traps whose fix is a lookup away (`ROUND_HALF_UP`, aware datetimes, `total_seconds`), the kind `zip-manifest` and `double-delivery` showed every Claude model rewrites past. Kept for small local models; re-tier if a measurement disagrees.

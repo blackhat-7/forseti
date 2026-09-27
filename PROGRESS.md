@@ -7,31 +7,33 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## State
 
-- **Runs on Linux now, as well as macOS.** `src/sandbox-linux.py` confines the Python interpreter with Landlock + seccomp before candidate code runs. Needs kernel 6.12+ (Landlock ABI 6), x86_64 or arm64; anything else fails closed.
-- **17 tasks in three tiers.** `basic` 6 (every Claude model passes; separates small local models) · `standard` 7 (separates Haiku from Sonnet/Opus) · `hard` 4 (`retry-rollup` plus three new ones). Tier lives in `suite.json` and on every saved run.
-- **The three new hard tasks are unmeasured.** `invoice-rounding` (half-up money rounding, float error, "-0.00"), `league-table` (mutable default, `reverse=True` flips the name tie-break, shared ranks), `ticket-sla` (dropped UTC offsets, `timedelta.seconds`). Each ships the wrong code, and it passes the public check. Only `test:suite` has checked them.
-- **Recorded result, older suite:** Haiku 59% · Sonnet 80% · Opus 95% (n=19). Only `retry-rollup` has ever separated Sonnet from Opus.
-- Full battery on Linux: `npm run check` clean · `npm test` **57/57** · `npm run test:suite` **17 tasks / 34 controls** · `npm run demo` 68/68 trials through the real sandbox. `test:terminal` and `test:judge` **not run**: both spend plan quota.
+- **Runs on macOS and Linux.** On Linux, `src/sandbox-linux.py` confines the interpreter with Landlock + seccomp before candidate code. Needs kernel 6.12+, x86_64 or arm64; anything else fails closed.
+- **22 tasks in three difficulty tiers** (`tier` in `suite.json`, recorded on every run). `hard` 2: `retry-rollup`, `due-dates` — the only tasks with a recorded Sonnet/Opus split. `standard` 9: separate Haiku from Sonnet/Opus. `basic` 11: every Claude model passes; there for small local models.
+- **Two lanes, both can run sandboxed Python.** Pi (`src/adapter.ts`, API and local models) and Claude Code (`src/claudecode.ts`, plan login, Python over MCP from `src/mcpserver.ts`). Provider `local` is any OpenAI-compatible server; address on Settings.
+- **Results are one page.** Ranked models (a tie shares a rank), verdict sentences, then by difficulty and by skill with a place per cell judged on those tasks alone, then a per-task grid hardest first. Plain words throughout; the markdown report opens with the same page. Kanagawa Dragon palette.
+- Battery on Linux: `npm run check` clean · `npm test` **62/62** · `npm run test:suite` passes, 22 tasks. `test:terminal` and `test:judge` **not run**: both spend plan quota.
 
 ## Done this session
 
-- **Results page rebuilt as one comparison.** Ranked models with shared ranks for ties, verdict sentences, tables by difficulty and by skill, per-task grid hardest first, other signals last. The markdown report opens with the same page; the old detail sits under `## Details`.
-- **Plain words.** Skills: "Only claims what the files show", "No false alarms", "Edge cases right", "Stays within the task", "Safe under retries and failures". "Tasks fully solved", "Checks passed", "Followed output format", "Safe-code gate", "Ran out of turns or time", "tries". Ids in data are unchanged.
-- **Same model in several runs with the same `comparisonKey` pools into one line.** Different keys stay separate. Different harnesses share the page with a harness tag and an amber warning.
-- **Kanagawa Dragon palette** in `src/tui.ts`, `tools/screenshot.ts` and `docs/tui-home.svg`. The SVG was recoloured, not regenerated.
-- The suite got its own file cap (300); trial folders keep 80.
+- Linux sandbox, with a Linux-only test for exec, raw fork, signals, sockets and namespaces.
+- One-page comparison, merged with the 2026-09-21 TUI rebuild: kept its Runs and Tests tabs, footer keys, `table()` helper, local-server Settings row and strict per-kind verdicts (now `sliceCard`, shown as places). Dropped its per-candidate tables and "X over Y" lines, which said the same thing as the rank list.
+- Plain names for skills ("Edge cases right" for `exactness`, etc.) and signals ("Tasks fully solved", "tries"). Ids in data are unchanged.
+- Added `invoice-rounding`, `league-table`, `ticket-sla` (Python traps). **Tier `basic`, never run**: the same kind of task (`zip-manifest`, `double-delivery`) went Opus 6/6, Sonnet 6/6, Haiku 5/6.
 
 ## Next
 
-Measure the new hard tasks (`PLAN.md`). **Do not benchmark local models until the other session tuning them is finished.** Past runs will not pool with new ones: task hashes (tiers) and the harness hash both changed.
+`PLAN.md`: one more task that separates Opus from Sonnet, built like `due-dates` (engine behaviour with no spelling for the rule), not a Python trap. **Do not benchmark local models while another session is tuning them.**
 
 ## Gotchas
 
-- **Running `python3` against a fixture directory writes `__pycache__` into it**, and `fixture()` then dies with `EISDIR`. Always `python3 -B`, and check `ls -a` afterwards.
-- **A float trap cannot travel through the observation driver.** JavaScript has one number type, so `20.0` arrives as `20`. Only `$float`-tagged nonfinite values survive.
-- **`quality` is a substring of `equality`.** A blind `sed s/quality/hygiene/` corrupts `regression-boundary`'s title and prompt.
-- **`npm run test:terminal` spends Claude plan quota.** `forseti.json` has the reviewer enabled and the PTY test copies that config unchanged.
-- **A reviewer's thinking level is part of its identity.** Re-run `npm run test:judge` after any reviewer change.
+- **Any edit to `suite.json` changes the suite hash**, re-tiering included, so later runs form a new comparison group. Rendering edits to `report.ts`/`tui.ts` do not.
+- **The Linux sandbox denies `exec` of anything, even Python.** A grader that needs a subprocess fails there with `PermissionError`, by design.
 - **A copied `node_modules` has no `.bin`, so `tsc` is missing.** Run `TMPDIR="$PWD/.tmp" npm ci` after moving machines.
-- **The Linux sandbox denies `exec` of anything, even Python.** A grader that needs a subprocess will fail there with `PermissionError`, by design.
+- **`--safe-mode` disables every MCP server.** The Claude Code lane uses `--restricted`. Do not switch back.
+- **`forseti.json` holds the local server address; never commit it.**
+- **A hybrid local model thinks unless told not to.** Thinking `off` is sent as `enable_thinking: false`.
+- **The Claude plan rate limit stops the whole run for that provider.** Budget below it or expect `not-run` rows.
+- **Running `python3` against a fixture writes `__pycache__` into it**, and `fixture()` dies with `EISDIR`. Always `python3 -B`.
+- **`quality` is a substring of `equality`.** A blind `sed s/quality/hygiene/` corrupts `regression-boundary`.
+- **`npm run test:terminal` and `npm run test:judge` spend Claude plan quota.**
 - `TMPDIR="$PWD/.tmp"` is required for `npm ci` and `npm run test:terminal`. `CLAUDE.md` is a symlink to `AGENTS.md`; edit `AGENTS.md`.

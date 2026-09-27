@@ -5,6 +5,7 @@ import { authInfo, catalogModels, defaultAuth } from './auth.ts';
 import { CLAUDE_CODE_MODELS } from './claudecode.ts';
 import { loadConfig, loadSuite, saveConfig } from './config.ts';
 import { atomicJson, inside, localDir, put, slug } from './files.ts';
+import { listLocalModels, LOCAL, localUrl, shortName } from './local.ts';
 import { comparisonReport } from './report.ts';
 import { listRuns, readRun, runBenchmark } from './runner.ts';
 import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite } from './types.ts';
@@ -16,6 +17,8 @@ export class App {
   suite!: Suite;
   runs: Run[] = [];
   catalog: CatalogEntry[] = [];
+  /** Models the local server listed. Undefined until it has been asked, which never happens on startup. */
+  localModels?: CatalogEntry[];
   constructor(root: string) { this.root = root; }
   async refresh(): Promise<void> {
     this.config = loadConfig(this.root);
@@ -27,11 +30,30 @@ export class App {
       return { provider: m.provider, id: m.id, name: m.name, auth: auth.get(m.provider)! };
     }).sort((a, b) => Number(b.auth.ready) - Number(a.auth.ready) || a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id));
     this.catalog.unshift(
+      ...(this.localModels ?? []),
       ...CLAUDE_CODE_MODELS.map(id => ({ provider: 'claude-code', id, name: `Claude ${id} · via Claude Code`, auth: authInfo({ provider: 'claude-code', auth: 'cli' as const }) })),
       ...['reference', 'baseline'].map(id => ({ provider: 'control', id, name: `${id} · synthetic control`, auth: authInfo({ provider: 'control', auth: 'none' as const }) })),
     );
   }
-  authFor(model: ModelConfig): AuthInfo { return authInfo(model); }
+  authFor(model: ModelConfig): AuthInfo { return authInfo(model, this.config.local.url); }
+  /** Saves the server address and forgets the last listing, which belonged to the old address. */
+  setLocalUrl(url: string): void {
+    const value = localUrl(url);
+    const before = this.config.local.url;
+    this.config.local.url = value;
+    try { this.persist(); } catch (e) { this.config.local.url = before; throw e; }
+    this.localModels = undefined;
+    this.catalog = this.catalog.filter(c => c.provider !== LOCAL);
+  }
+  /** Asks the configured server what it serves. The one request made outside a run. */
+  async probeLocal(): Promise<CatalogEntry[]> {
+    const url = this.config.local.url;
+    if (!url) throw new Error('No local server address. Set one on Settings.');
+    const auth = authInfo({ provider: LOCAL, auth: 'none' }, url);
+    this.localModels = (await listLocalModels(url)).map(m => ({ provider: LOCAL, id: m.id, name: `${m.name} · local`, auth }));
+    this.catalog = [...this.localModels, ...this.catalog.filter(c => c.provider !== LOCAL)];
+    return this.localModels;
+  }
   persist(): void { saveConfig(this.root, this.config); }
   async run(options: RunOptions, progress: (p: Progress) => void, signal: AbortSignal): Promise<Run> {
     // The run appears in the list as soon as it has a manifest, and is kept current as trials
@@ -67,11 +89,11 @@ export class App {
   addModel(provider: string, model: string, auth: ModelConfig['auth']): void {
     const item = this.catalog.find(m => m.provider === provider && m.id === model);
     if (!item) throw new Error('Unknown provider/model. Select one from the pinned Pi catalog.');
-    const id = slug(`${provider}-${model}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80).replace(/-$/, ''));
+    const id = slug(`${provider}-${provider === LOCAL ? shortName(model) : model}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80).replace(/-$/, ''));
     if (this.config.models.some(m => m.id === id)) throw new Error('Model already added');
     const native = catalogModels.getModel(provider, model);
     const levels = native ? getSupportedThinkingLevels(native) : ['off' as const];
-    this.config.models.push({ id, label: item.name, provider, model, auth: provider === 'control' ? 'none' : auth, enabled: true, thinking: levels.includes('off') ? 'off' : levels[0] });
+    this.config.models.push({ id, label: item.name, provider, model, auth: provider === 'control' || provider === LOCAL ? 'none' : auth, enabled: true, thinking: levels.includes('off') ? 'off' : levels[0] });
     try { this.persist(); } catch (e) { this.config.models.pop(); throw e; }
   }
   addTest(id: string, prompt: string, expectedJson: string): void {

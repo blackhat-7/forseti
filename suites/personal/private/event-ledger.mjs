@@ -15,3 +15,14 @@ export async function grade({files,python,trace, lane, control, agent}) {
  ...[null,'ValueError','ValueError','ValueError',null].map(error => ({events,balances,error}))];
  return [...hygiene,check('runs','correctness',r.ok,r.diagnostic),equal('replay-rollback-validation',r.value,expected),preserved(files,original,['ledger.py']),...toolChecks(trace,['ledger.py'],'check_public.py',false,{lane,control,agent})];
 }
+
+export const review = {
+  anchor: {'ledger.py': reference.files['ledger.py']},
+  paths: ['ledger.py'],
+  items: [
+    {id:'validation-duplicated', ask:'Is the event validation — the tenant and event_id string tests and the int-not-bool amount test — spelled out in more than one place, so a rule change would mean editing it more than once? One helper called twice is not duplication.'},
+    {id:'unearned-abstraction', ask:'Does the submission add a class, registry, strategy table, config option, decorator or wrapper layer that has only one real use here and could be a plain function or a literal?'},
+    {id:'dead-code', ask:'Is there unused or unreachable code left behind: a function nothing calls, an unused constant or import, a value computed and then thrown away, or a commented-out block?'},
+    {id:'explanatory-noise', ask:'Are there comments or docstrings that only restate what the adjacent line already says, rather than recording a reason the code cannot express?'},
+  ],
+};

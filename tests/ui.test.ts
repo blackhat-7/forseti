@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { visibleWidth } from '@earendil-works/pi-tui';
 import { Dashboard, terminalText } from '../src/tui.ts';
 import { DEFAULT_JUDGE } from '../src/config.ts';
+import type { CatalogEntry } from '../src/app.ts';
 import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite } from '../src/types.ts';
 
 const enter = '\r';
@@ -30,15 +31,25 @@ function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
   };
   const app = {
     root: process.cwd(),
-    config: { schema: 1, suite: 'suite', models: [structuredClone(model)], disabledTests: [], removedTests: [], judge: { ...DEFAULT_JUDGE } } as Config,
+    config: { schema: 1, suite: 'suite', models: [structuredClone(model)], disabledTests: [], removedTests: [], judge: { ...DEFAULT_JUDGE }, local: { url: '' } } as Config,
     suite: { schema: 1, id: 'suite', title: 'Independent benchmark', tasks: [{ id: 'json', title: 'JSON test', tags: ['json'], dimensions: ['correctness', 'instructions'], prompt: 'Return 42.', fixture: 'fixtures/json', grader: 'private/json.mjs' }] } as Suite,
     catalog: [
       { provider: 'example', id: 'model-one', name: 'Example model', auth: { ...auth, billing } },
       { provider: 'other', id: 'model-two', name: 'Second model', auth: { ...auth, ready: false, note: 'Credentials missing', billing: 'unknown' as const } },
     ],
     runs: [run],
+    localModels: undefined as CatalogEntry[] | undefined,
+    probes: 0,
+    setLocalUrl(url: string) { if (url && !url.startsWith('http')) throw new Error('Use a full address'); this.config.local.url = url; this.localModels = undefined; this.catalog = this.catalog.filter(c => c.provider !== 'local'); saves++; },
+    async probeLocal() {
+      this.probes++;
+      if (this.config.local.url.includes('down')) throw new Error(`No answer from ${this.config.local.url}`);
+      this.localModels = [{ provider: 'local', id: '/models/tiny-q4.gguf', name: 'tiny-q4 · local', auth: { ...auth, mode: 'local server', billing: 'local' as const } }];
+      this.catalog = [...this.localModels, ...this.catalog.filter(c => c.provider !== 'local')];
+      return this.localModels;
+    },
     authFor(selected: ModelConfig): AuthInfo {
-      return { ...auth, mode: selected.auth, billing: selected.auth === 'env' ? 'metered' : billing };
+      return { ...auth, mode: selected.auth, billing: selected.provider === 'local' ? 'local' : selected.auth === 'env' ? 'metered' : billing };
     },
     persist() { saves++; },
     async refresh() { refreshes++; },
@@ -215,7 +226,8 @@ test('run selection, comparison, check-level evidence, scrolling and workspace e
   assert.match(f.text(), /[█░]{10}/);
   assert.match(f.text(), /every try solved/);
   f.key('m');
-  assert.match(f.text(), /Comparison/);
+  // Was /Comparison/, which the summary's own title also matches; the full report now has its own name.
+  assert.match(f.text(), /Full report/);
   f.key('m');
   assert.match(f.text(), /Model comparison/);
   f.key('m', down, 'e');
@@ -308,7 +320,8 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
 });
 
 test('hygiene reads as a gate, never as a score beside correctness', () => {
-  const f = fixture();
+  // The comparison page scrolls like the report, so a tall window is what shows it whole.
+  const f = fixture('subscription', 200);
   const hygiene = (passed: boolean) => ({ id: 'python-ast-parses', dimension: 'hygiene' as const, passed, evidence: 'parsed' });
   f.app.runs = [{ ...f.run, trials: [{ ...f.run.trials[0]!, checks: [...f.run.trials[0]!.checks, hygiene(true)] }] }];
   f.key('4', ' ', 'c');
@@ -364,7 +377,8 @@ test('esc and q both mean leave, at every level', () => {
 });
 
 test('a half-solved task shows how much was right, without a second headline', () => {
-  const f = fixture();
+  // The comparison page scrolls like the report, so a tall window is what shows it whole.
+  const f = fixture('subscription', 200);
   const good = f.run.trials[0]!;
   const half = {
     ...good, id: 'half', status: 'failed' as const,
@@ -387,7 +401,8 @@ test('a half-solved task shows how much was right, without a second headline', (
 });
 
 test('the comparison page ranks with ties, splits by difficulty and names each harness', () => {
-  const f = fixture();
+  // The comparison page scrolls like the report, so a tall window is what shows it whole.
+  const f = fixture('subscription', 200);
   const tasks = Array.from({ length: 12 }, (_, i) => ({ id: `t${i}`, title: `Task number ${i}`, hash: `h${i}`, tier: i < 8 ? 'basic' as const : 'hard' as const, capabilities: ['exactness' as const] }));
   const trials = (m: string, wins: number) => tasks.flatMap((t, i) => [1, 2, 3].map(r => ({
     ...f.run.trials[0]!, id: `${m}-${t.id}-${r}`, model: m, task: t.id, repetition: r, status: i < wins ? 'passed' as const : 'failed' as const,
@@ -416,8 +431,9 @@ test('the comparison page ranks with ties, splits by difficulty and names each h
   assert.match(text, /Claude opus and Claude sonnet are tied: 8 points apart/);
   assert.match(text, /different harnesses, so each gap is the\s+model plus its harness/);
   assert.match(text, /By difficulty/);
-  assert.match(text, /Basic \(8\)\s+100%\s+100%\s+50%\s+100%/);
-  assert.match(text, /Hard \(4\)\s+75%\s+50%\s+0%\s+100%/);
+  // Each cell now carries the place on that difficulty alone; the control is never placed.
+  assert.match(text, /Basic \(8\)\s+100% 1st\s+100% 1st\s+50% 3rd\s+100%\s*$/m);
+  assert.match(text, /Hard \(4\)\s+75% 1st\s+50% 1st\s+0% 3rd\s+100%\s*$/m);
   assert.match(text, /Edge cases right \(12\)/);
   assert.match(text, /Task number 11\s+0\/3 ✗\s+0\/6 ✗\s+0\/3 ✗\s+3\/3 ✓/, 'hardest first, one column per model');
   assert.match(text, /4 tasks every model solved/, 'rows with no difference fold away');
@@ -432,7 +448,8 @@ test('the comparison page ranks with ties, splits by difficulty and names each h
 });
 
 test('a model that ran out of turns says so beside its score', () => {
-  const f = fixture();
+  // The comparison page scrolls like the report, so a tall window is what shows it whole.
+  const f = fixture('subscription', 200);
   const good = f.run.trials[0]!;
   // The exact shape that misled: every graded trial correct, and a second trial that never
   // finished. Correctness alone reads 100% for a model that only completed half its work.
@@ -620,4 +637,118 @@ test('headless screen artifacts use only workspace-local mock data', () => {
   f.key(enter); capture('billing');
   f.key('PAY', enter); capture('progress');
   f.key(esc); f.finish();
+});
+
+test('the comparison says who is better at what, and only where the run can tell', () => {
+  // A tall window, so the whole page is on one screen.
+  const f = fixture('subscription', 200);
+  const good = f.run.trials[0]!;
+  const tasks = [
+    { id: 'a', title: 'Task A', hash: 'a', capabilities: ['evidence' as const] },
+    { id: 'b', title: 'Task B', hash: 'b', capabilities: ['evidence' as const] },
+    { id: 'c', title: 'Task C', hash: 'c', capabilities: ['safety' as const] },
+  ];
+  // Distinct model names: the same provider/model under one comparison key is pooled into one card.
+  const strong: ModelConfig = { ...model, id: 'strong', model: 'strong', label: 'Strong model' };
+  const weak: ModelConfig = { ...model, id: 'weak', model: 'weak', label: 'Weak model' };
+  const trial = (m: string, task: string, repetition: number, passed: boolean) => ({
+    ...good, id: `${m}-${task}-${repetition}`, model: m, task, repetition, status: passed ? 'passed' as const : 'failed' as const,
+    checks: [{ id: 'exact', dimension: 'correctness' as const, passed, evidence: '' }],
+  });
+  // The weak model fails every evidence task and passes the safety task, four times over.
+  const record = (repeats: number, weakPasses: string[]) => tasks.flatMap(t => Array.from({ length: repeats }, (_, r) => [trial('strong', t.id, r + 1, true), trial('weak', t.id, r + 1, weakPasses.includes(t.id))]).flat());
+  f.app.runs = [{ ...f.run, models: [weak, strong], tasks, planned: 6 * 4, trials: record(4, ['c']) }];
+  f.key('4', ' ', 'c');
+  let text = f.text(120);
+  // Reworded from "overall  Strong model over Weak model  +67 pts" to the page's one verdict sentence.
+  assert.match(text, /Strong model beats Weak model: 67 points apart, more than the \d+ needed/, 'the overall gap is stated as a verdict');
+  // Reworded from "evidence  ... +100 pts": the skill's row gives each model its place on those tasks alone.
+  assert.match(text, /Only claims what the files show \(2\)\s+100% 1st\s+0% 2nd/, 'and so is the kind of task it comes from');
+  assert.match(text, /Safe under retries and failures \(1\)\s+100% 1st\s+100% 1st/, 'a kind of task with no gap earns no lead');
+  assert.ok(text.indexOf('Strong model') < text.indexOf('Weak model'), 'the stronger candidate is listed first');
+  // Reworded from "Where they differ / 1 task where every candidate agrees": the fold is rows every model solved.
+  assert.match(text, /Task A/);
+  assert.doesNotMatch(text, /Task C\s+\d/, 'a task every model solved is folded into a count');
+  assert.match(text, /1 task every model solved: Task C/);
+  f.key('a');
+  text = f.text(120);
+  assert.match(text, /Task C\s+4\/4 ✓\s+4\/4 ✓/, 'a shows every task');
+
+  // One try and a smaller gap is inside the noise, and the screen must say so.
+  f.key(esc);
+  f.app.runs = [{ ...f.run, models: [weak, strong], tasks, planned: 6, trials: record(1, ['a', 'c']) }];
+  f.key('c');
+  text = f.text(120);
+  // Reworded from "nothing clears the bar": a shared rank and a plain sentence say the same thing.
+  assert.match(text, /Strong model and Weak model are tied/);
+  assert.match(text, /not a ranking/);
+  assert.match(text, /^\s+1\s+Strong model.*\n\s+1\s+Weak model/m, 'a tie shares a rank');
+  assert.doesNotMatch(text, /Strong model beats/);
+  // Was "no verdict per kind": on one try neither skill slice can place one model ahead.
+  assert.doesNotMatch(text, /\d% 2nd/);
+
+  // A pair can be tied overall and still apart on one kind of task; both facts are stated.
+  f.key(esc);
+  f.app.runs = [{ ...f.run, models: [weak, strong], tasks, planned: 6, trials: record(1, ['c']) }];
+  f.key('c');
+  text = f.text(120);
+  // Reworded from "tied overall: Strong model ≈ Weak model".
+  assert.match(text, /Strong model and Weak model are tied/);
+  assert.match(text, /Only claims what the files show \(2\)\s+100% 1st\s+0% 2nd/);
+  assert.doesNotMatch(text, /Strong model beats Weak model:/);
+});
+
+test('a local server is set on Settings, listed in the picker and added with no credential', async () => {
+  const f = fixture();
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  f.key('5');
+  assert.match(f.text(), /Local server/);
+  assert.match(f.text(), /not set/);
+  f.key(down, down, down, down, ' ');
+  assert.match(f.text(), /address and port/);
+  f.key('q', esc);
+  assert.equal(f.app.config.local.url, '', 'q is a letter in the address field, and esc keeps what was saved');
+  f.key(' ', 'garbage', enter);
+  assert.match(f.text(), /Error: Use a full address/);
+  assert.match(f.text(), /address and port/, 'a rejected address leaves the field open');
+  f.key(esc, ' ', 'http://127.0.0.1:8080', enter);
+  assert.equal(f.app.config.local.url, 'http://127.0.0.1:8080');
+  await settle();
+  assert.equal(f.app.probes, 1, 'saving the address lists its models');
+  assert.match(f.text(), /1 model listed/);
+  assert.match(f.text(), /http:\/\/127\.0\.0\.1:8080/);
+
+  f.key('2', 'a');
+  await settle();
+  assert.equal(f.app.probes, 1, 'already listed; opening the picker does not ask again');
+  assert.match(f.text(), /local\/\/models\/tiny-q4\.gguf · tiny-q4 · local/);
+  f.key('tiny', enter);
+  assert.match(f.text(), /Your own server/);
+  assert.match(f.text(), /No credential, no charge/);
+  f.key(enter);
+  const added = f.app.config.models.at(-1)!;
+  assert.deepEqual([added.provider, added.model, added.auth], ['local', '/models/tiny-q4.gguf', 'none']);
+  f.key('1');
+  assert.match(f.text(), /Subscription logins and your own local server \(2 call sites\)/);
+  f.app.config.models[0]!.enabled = false;
+  assert.match(f.text(), /Your own local server only \(1 call site\)/);
+  f.key('r');
+  assert.match(f.text(), /local server/);
+  assert.match(f.text(), /start run/, 'no billing confirmation for a server that bills nothing');
+  f.key(esc);
+
+  // The reviewer picker never offers it.
+  f.key('5', up, up, up, enter);
+  assert.match(f.text(), /example\/model-one/);
+  assert.doesNotMatch(f.text(), /local\/\/models/);
+  f.key(esc);
+
+  // A server that does not answer is reported, and the rest of the catalog still opens.
+  f.app.setLocalUrl('http://down:1');
+  f.key('2', 'a');
+  await settle();
+  assert.equal(f.app.probes, 2);
+  assert.match(f.text(), /Local server: No answer from http:\/\/down:1/);
+  assert.match(f.text(), /example\/model-one/);
+  assert.doesNotMatch(f.text(), /local\/\/models/);
 });

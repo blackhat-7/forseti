@@ -49,13 +49,15 @@ npm start -- run --models claude-code-sonnet,claude-code-haiku --tests shared-co
 
 No API key, no `--allow-metered`. Forseti spawns the first-party client (`claude -p`) in the trial directory and lets it authenticate itself — it never reads, copies or refreshes a Claude credential, and it deletes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and `ANTHROPIC_PROFILE` from the child so this path can never silently bill a metered key. Usage draws on your plan's limits; hitting one stops that provider for the run with no retry.
 
-Flags per trial: `--safe-mode --disable-slash-commands` (so your hooks, plugins, skills, MCP servers and `CLAUDE.md` don't leak into a benchmark), `--permission-mode dontAsk --permission-prompts none` (anything that would prompt is denied, not queued), `--allowedTools Read,Write,Edit,Glob,Grep`, `--max-turns`. They are recorded in each run manifest.
+Flags per trial: `--restricted --disable-slash-commands` (your settings, hooks, plugins, skills and `CLAUDE.md` don't leak into a benchmark, and the built-in shell and code runners are removed), `--strict-mcp-config --mcp-config` (only Forseti's own tool server is loaded, never the host's), `--permission-mode dontAsk --permission-prompts none` (anything that would prompt is denied, not queued), `--allowedTools Read,Write,Edit,Glob,Grep,mcp__forseti__python`, `--disallowedTools` removing `Bash` and the rest, and `--max-turns`. They are recorded in each run manifest.
+
+**Both lanes can run code, and each keeps its own file tools.** The Pi lane executes arbitrary sandboxed Python, so Claude Code is given that same interpreter over MCP — otherwise one lane could verify itself against `check_public.py` and iterate while the other could not, and a cross-lane score would compare capabilities rather than models. File access stays each client's own dialect: `Read`/`Write`/`Edit`/`Glob`/`Grep` here, `read_file`/`write_file`/`list_files` in the Pi lane. Those are one capability spelled twice, and swapping them measured which tools a client is tuned for. `Bash` stays denied: it is unsandboxed and networked, and the sandboxed interpreter is the fair equivalent.
 
 **This measures the model inside Claude Code, not the model.** Claude Code brings its own system prompt, agent loop, context management and tools. So:
 - A run may not mix `claude-code` models with Pi-adapter models — Forseti refuses, because the table would compare harnesses.
 - Reports tag the harness and never pool the two.
-- Tool checks are **N/A** here: the suite's tool rubric names Forseti's `read_file`/`write_file`/`python`, which Claude Code doesn't have.
-- This lane runs **outside** the Python sandbox, so it gets no `Bash` tool — file access to its trial directory and nothing else. The Pi lane's sandboxed Python has no equivalent here; that is a capability difference, not a model difference.
+- Tool checks are **N/A** here: the rubric names Forseti's `read_file`/`write_file`, which this lane does not use, and its native file calls are not observable. That is a process check, not a capability one — both lanes can run code, so correctness remains comparable.
+- The CLI process runs outside the sandbox, but its Python runs inside it, through the same sandbox as the Pi lane, and `--restricted` confines its file tools to the trial directory.
 - Reported cost is Claude Code's client-side list-price estimate, not what a subscription is billed.
 
 API keys are also supported:
@@ -76,6 +78,18 @@ Authentication and billing are separate:
 - Quota/auth failure stops that provider for the run. Other provider errors stop that model. Missing usage stays unknown; API costs are catalog estimates, never invoices.
 
 **Prompt caching is on by default** (`--no-cache`, or `p` in the TUI, turns it off). Without it the system prompt, tool schemas and transcript are re-sent uncached on every turn, which is where a third-party harness quietly costs 2x+ more than the vendor's own client. Caching reuses the prefix KV state and does not change sampling, so correctness is unaffected — but it does change repeated input cost and first-delta latency, so cached and uncached runs are never pooled in one comparison.
+
+## Use a local model
+
+Any OpenAI-compatible server on your own machine works: llama-server, Ollama, LM Studio, vLLM. Set the base address once, on **Settings** (`5`, then the Address row) or from the shell:
+
+```sh
+npm start -- local http://127.0.0.1:8080        # llama-server; Ollama is :11434, LM Studio :1234
+npm start -- models add local/MODEL_ID          # one of the IDs the line above printed
+npm start -- run --models local-MODEL --tests shared-count --repeat 2
+```
+
+Forseti asks the server only `GET /v1/models`, and only when you set the address or open the model picker, never on startup. Trials go to `POST /v1/chat/completions` in the plain dialect every such server speaks (`max_tokens`, `system` role, no `store`). No credential is sent, and the report shows billing as `local`. A local model runs through the same Pi adapter as every other API model, so it pools with them and never with Claude Code. The address is not part of a model's identity: the run manifest records which server answered, and changing the address changes where every local model is looked up. llama-server names a model by its file path unless you start it with `--alias`; Forseti shortens that to the file name for IDs and labels. A local model's `thinking` is `off` (the default) or `high`, sent as `chat_template_kwargs.enable_thinking`; llama.cpp, vLLM and SGLang honour it, Ollama and LM Studio ignore it and use their own default. Leave it off unless you also raise `--tokens`: a hybrid model like Qwen3 can spend the whole 4096-token turn thinking, which censors the trial.
 
 ## Inspect results
 
