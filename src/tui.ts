@@ -5,7 +5,7 @@ import {
   type Component, type Focusable,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { HARNESS_WARNING, LABEL, NO_PLACE, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, place, skillSlices, sliceGap, slicePlaces, stallNote, taskCell, taskOrder, thin, tierSlices, triesLabel, ungradedNote, verdicts, weighting, type SliceRow } from './report.ts';
+import { HARNESS_WARNING, comparisonReport, leaderboard, LABEL, NO_PLACE, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, place, skillSlices, sliceGap, slicePlaces, stallNote, taskCell, taskOrder, thin, tierSlices, triesLabel, ungradedNote, verdicts, weighting, type SliceRow } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
@@ -419,6 +419,11 @@ export class Dashboard implements Component, Focusable {
       const run = this.app.runs[index];
       if (key('space') && run) { if (this.selectedRuns.has(run.id)) this.selectedRuns.delete(run.id); else this.selectedRuns.add(run.id); }
       if (key('enter') && run) { this.detailRun = run; this.trialIndex = 0; this.reportOffset = 0; this.dialog = 'evidence'; }
+      if (data === 'L') {
+        const board = leaderboard(this.app.runs, this.app.suite.tasks);
+        if (!board) throw new Error('No finished tries yet. Start with r.');
+        this.report = terminalReport(comparisonReport([board])); this.reportRuns = [board]; this.reportOffset = 0; this.reportMode = 'summary'; this.dialog = 'report';
+      }
       if (data === 'c') { const ids = this.runIds(); this.report = terminalReport(this.app.compare(ids)); this.reportRuns = this.app.runs.filter(r => ids.includes(r.id)); this.reportOffset = 0; this.reportMode = 'summary'; this.dialog = 'report'; }
       if (data === 'e') this.export();
     } else if (this.tab === 4 && (key('space') || key('enter'))) {
@@ -617,7 +622,7 @@ export class Dashboard implements Component, Focusable {
       'r run   − + tries   l lane   t limit   T turns   p cache',
       'space toggle   a add   d remove',
       'space toggle   a add   d remove   u restore',
-      'space select   c compare   ⏎ evidence   e export',
+      'space select   c compare   L leaderboard   ⏎ evidence   e export',
       'space change   − + rounds',
     ][this.tab]!;
   }
@@ -901,7 +906,7 @@ export class Dashboard implements Component, Focusable {
         ['a', 'add model or test'], ['d', 'remove, with confirmation'], ['u', 'restore last removed test'],
         ['r', 'review preflight'], ['− +', 'tries per test, or reviewer rounds on Settings'], ['l', 'tools / prompt lane'],
         ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer, local server'], ['R', 'refresh metadata, sends nothing'],
-        ['c · ⏎ · e', 'runs: compare, evidence, export'], ['m', 'comparison: summary / full report'], ['a', 'comparison: show / fold tasks every model solved'], ['←→', 'evidence: previous / next trial'],
+        ['c · ⏎ · e', 'runs: compare, evidence, export'], ['L', 'runs: leaderboard of every comparable try'], ['m', 'comparison: summary / full report'], ['a', 'comparison: show / fold tasks every model solved'], ['←→', 'evidence: previous / next trial'],
         ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc · q', 'leave what you are looking at: close a panel, else quit'], ['esc during a run', 'cancel it safely, keeping completed evidence'], ['during a run', 'tabs and ↑↓ work; edits wait'], ['ctrl+c', 'quit'],
       ] as const) row(`${accent(keys)}${' '.repeat(Math.max(2, 14 - keys.length))}${muted(what)}`);
     } else {

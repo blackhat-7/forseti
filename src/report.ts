@@ -1,7 +1,7 @@
 import { clean, hash } from './files.ts';
 import { CAPABILITIES, DIMENSIONS, TIERS } from './config.ts';
 import { judgeIdentity } from './judge.ts';
-import type { Capability, Dimension, Run, Tier, Trial } from './types.ts';
+import type { Capability, Dimension, ModelConfig, Run, Task, Tier, Trial } from './types.ts';
 
 const usable = (t: Trial) => ['passed', 'failed'].includes(t.status);
 /**
@@ -239,6 +239,59 @@ export function scorecard(label: string, trials: Trial[], tasks: { id: string; t
 }
 function seconds(v: number | null) { return v === null ? 'n/a' : `${(v / 1000).toFixed(2)}s`; }
 function escape(s: string) { return clean(s).replaceAll('|', '\\|').replaceAll('\n', ' ').replace(/[<>]/g, ''); }
+/** A try that finished: solved, wrong, or out of its budget. Only these are worth not repeating. */
+export const FINISHED: Trial['status'][] = ['passed', 'failed', ...STALL];
+/**
+ * Everything that can change one try's outcome except which model made it. Suite-wide facts (the
+ * other tasks, the shuffle seed, how many tries) are left out, so a task's tries pool across runs
+ * and a new run only makes the tries that are missing. The kernel release is left out too: it
+ * changes with every system update and cannot change an answer; the platform stays.
+ */
+export function conditionsKey(run: Pick<Run, 'tasks' | 'options' | 'environment' | 'harnessHash' | 'judge'>, taskId: string): string {
+  const task = run.tasks.find(t => t.id === taskId)!, o = run.options, e = run.environment;
+  return hash({ task: task.hash, harness: run.harnessHash, lane: o.lane, maxTokens: o.maxTokens, cache: o.cache,
+    turns: Math.max(o.maxTurns, task.turns ?? 0), timeout: Math.max(o.timeout, task.timeout ?? 0), judge: judgeIdentity(run.judge ?? null),
+    platform: (e.os ?? '').split(' ').filter((_, i) => i !== 1).join(' '), python: e.python, pythonVersion: e.pythonVersion, proxy: e.proxyConfigured });
+}
+/** The model as it ran: which model, how hard it thought, and the exact client flags that drove it. */
+export function modelKey(run: Pick<Run, 'environment'>, model: ModelConfig): string {
+  return `${model.provider}/${model.model}/${model.thinking}/${hash(run.environment.agentFlags ?? '').slice(0, 12)}`;
+}
+export function trialKey(run: Run, trial: Trial): string {
+  return `${modelKey(run, run.models.find(m => m.id === trial.model)!)} ${conditionsKey(run, trial.task)}`;
+}
+/**
+ * Every finished try that is still comparable, from every run, as one virtual run the comparison
+ * page renders unchanged. Per task, the conditions of its newest try decide, and only tries made
+ * under exactly those conditions count, so every model on a task is judged on the same footing.
+ * Controls are left out: they check the grader, not a model. The current suite decides which
+ * tasks count and at which difficulty, because tiers are relabelled as evidence arrives.
+ */
+export function leaderboard(runs: Run[], suite: Pick<Task, 'id' | 'title' | 'tier' | 'capabilities'>[]): Run | null {
+  const live = new Map(suite.map(t => [t.id, t]));
+  const newestFirst = runs.toSorted((a, b) => b.created.localeCompare(a.created));
+  const current = new Map<string, { key: string; task: Run['tasks'][number] }>();
+  const model = (run: Run, t: Trial) => run.models.find(m => m.id === t.model)!;
+  for (const run of newestFirst) for (const t of run.trials) {
+    if (current.has(t.task) || !live.has(t.task) || !FINISHED.includes(t.status) || model(run, t).provider === 'control') continue;
+    const { title, tier, capabilities } = live.get(t.task)!;
+    current.set(t.task, { key: conditionsKey(run, t.task), task: { ...run.tasks.find(x => x.id === t.task)!, title, tier, capabilities } });
+  }
+  const models = new Map<string, ModelConfig>(), tries = new Map<string, number>(), trials: Trial[] = [];
+  for (const run of newestFirst) for (const t of run.trials) {
+    const m = model(run, t);
+    if (m.provider === 'control' || !FINISHED.includes(t.status) || current.get(t.task)?.key !== conditionsKey(run, t.task)) continue;
+    const id = modelKey(run, m), n = (tries.get(`${id} ${t.task}`) ?? 0) + 1;
+    if (!models.has(id)) models.set(id, { ...m, id });
+    tries.set(`${id} ${t.task}`, n);
+    trials.push({ ...t, model: id, repetition: n });
+  }
+  const latest = newestFirst[0];
+  if (!latest || !trials.length) return null;
+  const { agent: _, ...environment } = latest.environment;
+  return { ...latest, id: 'leaderboard', status: 'completed', environment, options: { ...latest.options, repeat: Math.max(...tries.values()) },
+    models: [...models.values()], tasks: suite.flatMap(t => current.get(t.id)?.task ?? []), planned: trials.length, trials };
+}
 export function comparisonKey(run: Run): string {
   return hash({ suite: run.suiteHash, tasks: run.tasks.map(t => t.hash).sort(), harness: run.harnessHash, lane: run.options.lane, maxTurns: run.options.maxTurns, maxTokens: run.options.maxTokens, timeout: run.options.timeout, seed: run.options.seed, cache: run.options.cache, judge: judgeIdentity(run.judge ?? null), agent: run.environment.agent ?? 'pi', agentFlags: run.environment.agentFlags ?? '', os: run.environment.os, python: run.environment.python, pythonVersion: run.environment.pythonVersion, proxyConfigured: run.environment.proxyConfigured, node: run.environment.node });
 }
@@ -263,7 +316,7 @@ export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks
     const synthetic = model.provider === 'control';
     return { run, card: {
       ...scorecard(name(model.label), trials, tasks, planned),
-      harness: synthetic ? 'synthetic' : HARNESS[run.environment.agent ?? 'pi'] ?? run.environment.agent!,
+      harness: synthetic ? 'synthetic' : HARNESS[model.provider === 'claude-code' ? 'claude-code' : run.environment.agent ?? 'pi'] ?? run.environment.agent!,
       synthetic, tries: members.reduce((sum, m) => sum + m.run.options.repeat, 0), hygiene: dimensionScore(trials, 'hygiene'),
     } };
   });

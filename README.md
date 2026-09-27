@@ -97,6 +97,7 @@ Forseti asks the server only `GET /v1/models`, and only when you set the address
 npm start -- runs
 npm start -- compare RUN_ID                 # models within a run
 npm start -- compare RUN_A RUN_B
+npm start -- leaderboard                    # every comparable try from every run; a run only makes missing tries (--fresh to force)
 npm start -- run --models MODEL_CONFIG_ID --lane prompt --repeat 2
 ```
 

@@ -12,6 +12,7 @@ import { atomicJson, files, hash, inside, localDir, put } from './files.ts';
 import { makeJudgeCall, review as reviewSubmission, type JudgeCall, type Review } from './judge.ts';
 import { LOCAL } from './local.ts';
 import { SANDBOX, checkSandbox, pythonExecutable, runPython } from './sandbox.ts';
+import { FINISHED, conditionsKey, modelKey, trialKey } from './report.ts';
 import type { Check, Config, Dimension, GradeContext, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
 
 export function schedule(models: ModelConfig[], tasks: Task[], repeat: number, seed: number) {
@@ -106,24 +107,37 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
   catch { throw new Error('Run lock exists. Another run may be active. If it crashed, inspect .state/run.lock and its PID before removing that local file.'); }
   try {
     const pythonVersion = await checkSandbox(root);
+    const harness = { src: harnessFiles(root), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8'), system: SYSTEM_PROMPT };
+    // A task's hash covers its own grader and the helpers every grader imports, not every grader:
+    // editing one task's grader must not make every other task's recorded tries unusable.
+    const graders = (t: Task) => Object.entries(contents).filter(([p]) => p === t.grader || p === 'private/helpers.mjs');
+    const taskEntries = tasks.map(t => ({ id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, turns: t.turns, timeout: t.timeout, hash: hash({ task: t, fixture: files(inside(dir, t.fixture)), private: graders(t) }) }));
+    const environment = { node: process.version, python: pythonExecutable(), pythonVersion, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)), os: `${platform()} ${release()} ${arch()}`, sandbox: SANDBOX, pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url } : catalogModels.getModel(m.provider, m.model))) };
+    // Only the tries not already on record under these exact conditions are run; see trialKey.
+    const draft = { options, models, tasks: taskEntries, harnessHash: hash(harness), environment, judge };
+    const done = new Map<string, number>();
+    if (!options.fresh) for (const past of listRuns(root)) for (const t of past.trials) {
+      if (!FINISHED.includes(t.status) || !past.tasks.some(x => x.id === t.task) || !past.models.some(m => m.id === t.model)) continue;
+      const key = trialKey(past, t);
+      done.set(key, (done.get(key) ?? 0) + 1);
+    }
+    const jobs = schedule(models, tasks, options.repeat, options.seed)
+      .filter(j => j.model.provider === 'control' || j.repetition > (done.get(`${modelKey(draft, j.model)} ${conditionsKey(draft, j.task.id)}`) ?? 0));
+    if (!jobs.length) throw new Error(`Nothing to run: every selected model already has ${options.repeat} finished tries of every selected task under these exact conditions. See the leaderboard, or pass --fresh to run them again.`);
     const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`;
     writeFileSync(lock, JSON.stringify({ pid: process.pid, runId: id }));
     const runDir = localDir(root, `runs/${id}`);
     const snapshot = localDir(runDir, 'suite');
     for (const [path, text] of Object.entries(contents)) put(snapshot, path, text);
     for (const task of suite.tasks) localDir(snapshot, task.fixture);
-    const jobs = schedule(models, tasks, options.repeat, options.seed);
-    const harness = { src: harnessFiles(root), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8'), system: SYSTEM_PROMPT };
     const harnessDir = localDir(runDir, 'harness');
     for (const [path, text] of Object.entries(harness.src)) put(harnessDir, `src/${path}`, text);
     put(harnessDir, 'package-lock.json', harness.lock);
     put(harnessDir, 'package.json', readFileSync(inside(root, 'package.json'), 'utf8'));
     const run: Run = {
       schema: 1, id, created: new Date().toISOString(), status: 'running', suite: suite.id,
-      suiteHash: hash(contents), harnessHash: hash(harness),
-      environment: { node: process.version, python: pythonExecutable(), pythonVersion, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)), os: `${platform()} ${release()} ${arch()}`, sandbox: SANDBOX, pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url } : catalogModels.getModel(m.provider, m.model))) },
-      judge,
-      options, models, tasks: tasks.map(t => ({ id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, hash: hash({ task: t, fixture: files(inside(dir, t.fixture)), private: Object.entries(contents).filter(([p]) => p.startsWith('private/')) }) })), planned: jobs.length, trials: [],
+      suiteHash: hash(contents), harnessHash: draft.harnessHash, environment, judge,
+      options, models, tasks: taskEntries, planned: jobs.length, trials: [],
     };
     atomicJson(runDir, 'run.json', run);
     atomicJson(runDir, 'experiment.json', { system: SYSTEM_PROMPT, config, options, schedule: jobs.map(j => ({ model: j.model.id, task: j.task.id, repetition: j.repetition })), harnessHash: run.harnessHash, suiteHash: run.suiteHash });

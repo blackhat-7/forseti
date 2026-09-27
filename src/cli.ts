@@ -7,6 +7,7 @@ import { authInfo, defaultAuth, ENV_KEYS } from './auth.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { clean } from './files.ts';
 import { LOCAL } from './local.ts';
+import { comparisonReport, leaderboard } from './report.ts';
 import { checkSandbox, pythonExecutable } from './sandbox.ts';
 import type { ModelConfig, RunOptions } from './types.ts';
 
@@ -28,7 +29,8 @@ const help = `FORSETI  ·  evidence-first LLM benchmarks
   npm start -- tests enable|disable|remove|restore ID
   npm start -- run [--models ID,ID] [--tests ID,ID] [--repeat 2] [--seed 42]
                   [--lane tools|prompt] [--timeout 180] [--turns 12] [--tokens 4096]
-                  [--allow-metered] [--no-cache]
+                  [--allow-metered] [--no-cache] [--fresh]
+  npm start -- leaderboard                    Every comparable finished try, all runs
   npm start -- runs
   npm start -- compare RUN_ID [RUN_ID ...]
 
@@ -42,7 +44,7 @@ async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, strict: true, options: {
     help: { type: 'boolean', short: 'h' }, models: { type: 'string' }, tests: { type: 'string' }, repeat: { type: 'string' }, seed: { type: 'string' },
     lane: { type: 'string' }, timeout: { type: 'string' }, turns: { type: 'string' }, tokens: { type: 'string' },
-    'allow-metered': { type: 'boolean' }, 'no-cache': { type: 'boolean' }, auth: { type: 'string' }, prompt: { type: 'string' }, expect: { type: 'string' },
+    'allow-metered': { type: 'boolean' }, 'no-cache': { type: 'boolean' }, fresh: { type: 'boolean' }, auth: { type: 'string' }, prompt: { type: 'string' }, expect: { type: 'string' },
   } });
   if (values.help) { console.log(help); return; }
   const root = realpathSync(process.cwd());
@@ -116,6 +118,11 @@ async function main() {
     return;
   }
   if (command === 'runs') { for (const r of app.runs) console.log(`${r.id}  ${r.status}  ${r.trials.length}/${r.planned}  ${r.options.lane}`); return; }
+  if (command === 'leaderboard') {
+    const board = leaderboard(app.runs, app.suite.tasks);
+    if (!board) throw new Error('No finished tries yet. Start with `npm start -- run`.');
+    console.log(comparisonReport([board])); return;
+  }
   if (command === 'compare') {
     const ids = positionals.slice(1);
     if (!ids.length) throw new Error('Select run IDs from `npm start -- runs`');
@@ -125,7 +132,7 @@ async function main() {
     const options: RunOptions = { ...DEFAULT_OPTIONS, models: values.models?.split(','), tests: values.tests?.split(','),
       repeat: values.repeat === undefined ? DEFAULT_OPTIONS.repeat : Number(values.repeat), seed: values.seed === undefined ? DEFAULT_OPTIONS.seed : Number(values.seed),
       lane: (values.lane ?? DEFAULT_OPTIONS.lane) as RunOptions['lane'], timeout: values.timeout === undefined ? DEFAULT_OPTIONS.timeout : Number(values.timeout),
-      maxTurns: values.turns === undefined ? DEFAULT_OPTIONS.maxTurns : Number(values.turns), maxTokens: values.tokens === undefined ? DEFAULT_OPTIONS.maxTokens : Number(values.tokens), allowMetered: values['allow-metered'] ?? false, cache: !values['no-cache'] };
+      maxTurns: values.turns === undefined ? DEFAULT_OPTIONS.maxTurns : Number(values.turns), maxTokens: values.tokens === undefined ? DEFAULT_OPTIONS.maxTokens : Number(values.tokens), allowMetered: values['allow-metered'] ?? false, cache: !values['no-cache'], fresh: values.fresh ?? false };
     const controller = new AbortController();
     const cancel = () => { if (!controller.signal.aborted) console.error('Cancelling; saving partial results…'); controller.abort(); };
     process.on('SIGINT', cancel); process.on('SIGTERM', cancel);

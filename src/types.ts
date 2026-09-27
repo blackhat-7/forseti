@@ -58,7 +58,7 @@ export type JudgeConfig = { enabled: boolean; provider: string; model: string; a
 export type LocalConfig = { url: string };
 export type Config = { schema: 1; suite: string; models: ModelConfig[]; disabledTests: string[]; removedTests: string[]; judge: JudgeConfig; local: LocalConfig };
 export type AuthInfo = { mode: string; billing: 'subscription' | 'metered' | 'unknown' | 'control' | 'local'; ready: boolean; note: string };
-export type RunOptions = { models?: string[]; tests?: string[]; repeat: number; seed: number; lane: 'tools' | 'prompt'; timeout: number; maxTurns: number; maxTokens: number; allowMetered: boolean; cache: boolean };
+export type RunOptions = { models?: string[]; tests?: string[]; repeat: number; seed: number; lane: 'tools' | 'prompt'; timeout: number; maxTurns: number; maxTokens: number; allowMetered: boolean; cache: boolean; fresh?: boolean };
 export type Trial = {
   id: string; model: string; task: string; repetition: number;
   status: 'passed' | 'failed' | 'auth_error' | 'rate_limited' | 'provider_error' | 'harness_error' | 'timeout' | 'budget' | 'cancelled' | 'skipped';
@@ -74,7 +74,7 @@ export type Run = {
   schema: 1; id: string; created: string; finished?: string; status: 'running' | 'completed' | 'cancelled' | 'interrupted';
   suite: string; suiteHash: string; harnessHash: string; environment: Record<string, string>;
   judge: JudgeConfig | null;
-  options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; capabilities?: Capability[]; tier?: Tier }[];
+  options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; capabilities?: Capability[]; tier?: Tier; turns?: number; timeout?: number }[];
   planned: number; trials: Trial[];
 };
 export type Progress = { completed: number; total: number; model: string; task: string; phase: string; runId: string };

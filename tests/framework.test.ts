@@ -12,7 +12,7 @@ import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
-import { byTier, comparisonKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
+import { byTier, comparisonKey, conditionsKey, leaderboard, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
 import { agentOf, applicableDimensions, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -736,4 +736,57 @@ test('the CLI lane gets the Pi lane\'s interpreter, sandboxed and budgeted the s
   // evidence of how much a model verifies, which is how the Qwen stalling was diagnosed.
   assert.equal(events[0]!.ok, true);
   assert.equal(await toolChecksFor([events[0]!]), 'public-python-check');
+});
+
+test('a try already on record under the same conditions is never run again', async () => {
+  const saved = process.env.CEREBRAS_API_KEY;
+  delete process.env.CEREBRAS_API_KEY;
+  try {
+    const dir = workspace(), config = cfg();
+    const native = catalogModels.getModels('cerebras')[0]; assert.ok(native);
+    config.models = [{ id: 'one', label: 'one', provider: 'cerebras', model: native.id, auth: 'env', enabled: true, thinking: 'off' }];
+    const opts = { ...DEFAULT_OPTIONS, repeat: 1, tests: [task.id] };
+    const first = await runBenchmark(dir, config, opts);
+    assert.equal(first.trials[0]!.status, 'auth_error', 'not finished, so it would be run again');
+    // Record it as a finished, wrong answer: now it is a try worth keeping.
+    const path = join(dir, 'runs', first.id, 'run.json'), recorded: Run = JSON.parse(readFileSync(path, 'utf8'));
+    recorded.trials[0] = { ...recorded.trials[0]!, status: 'failed', checks: [{ id: 'c', dimension: 'correctness', passed: false, evidence: '' }] };
+    writeFileSync(path, JSON.stringify(recorded));
+    await assert.rejects(runBenchmark(dir, config, opts), /Nothing to run/);
+    // Another task's grader is not this task's condition, so editing it strands nothing.
+    const other = loadSuite(dir, 'suites/personal/suite.json').suite.tasks.find(t => t.id !== task.id)!;
+    writeFileSync(join(dir, 'suites/personal', other.grader), readFileSync(join(dir, 'suites/personal', other.grader), 'utf8') + '\n// edited\n');
+    await assert.rejects(runBenchmark(dir, config, opts), /Nothing to run/);
+    assert.equal((await runBenchmark(dir, config, { ...opts, repeat: 2 })).planned, 1, 'only the missing second try');
+    assert.equal((await runBenchmark(dir, config, { ...opts, fresh: true })).planned, 1, '--fresh runs it anyway');
+    // A different condition is a different try: a larger turn budget is not the same experiment.
+    assert.equal((await runBenchmark(dir, config, { ...opts, maxTurns: opts.maxTurns + 1 })).planned, 1);
+  } finally { if (saved === undefined) delete process.env.CEREBRAS_API_KEY; else process.env.CEREBRAS_API_KEY = saved; }
+});
+
+test('the leaderboard pools every run under the newest conditions and nothing else', () => {
+  const base = (id: string, created: string, harnessHash: string, models: ModelConfig[], trials: [string, string, Trial['status']][]): Run => ({
+    schema: 1, id, created, status: 'completed', suite: 's', suiteHash: id, harnessHash, environment: { os: 'linux 7.2.6 x64' }, judge: null,
+    options: { ...DEFAULT_OPTIONS }, models, tasks: [{ id: 'a', title: 'A', hash: 'ha', tier: 'hard' }, { id: 'b', title: 'B', hash: 'hb', tier: 'basic' }], planned: trials.length,
+    trials: trials.map(([model, taskId, status], i) => ({ ...blankTrial(`${id}-${i}`, models.find(m => m.id === model)!, { id: taskId } as never, 1), status,
+      checks: status === 'passed' || status === 'failed' ? [{ id: 'c', dimension: 'correctness' as const, passed: status === 'passed', evidence: '' }] : [] })),
+  });
+  const m = (id: string, provider = 'claude-code'): ModelConfig => ({ id, label: id, provider, model: id, auth: provider === 'control' ? 'none' : 'cli', enabled: true, thinking: 'off' });
+  const opus = m('opus'), haiku = m('haiku'), ref = m('reference', 'control');
+  const older = base('r1', '2026-01-01', 'H', [opus, ref], [['opus', 'a', 'passed'], ['opus', 'b', 'passed'], ['reference', 'a', 'passed']]);
+  const newer = base('r2', '2026-02-01', 'H', [haiku], [['haiku', 'a', 'failed'], ['haiku', 'b', 'auth_error']]);
+  const suite = [{ id: 'a', title: 'A', tier: 'hard' as const, capabilities: [] }, { id: 'b', title: 'B', tier: 'basic' as const, capabilities: [] }];
+  const board = leaderboard([older, newer], suite)!;
+  assert.deepEqual(board.models.map(x => x.model).sort(), ['haiku', 'opus'], 'models from different runs, controls left out');
+  assert.equal(board.trials.length, 3, 'the not-run try is not a try');
+  // A newer harness on task a leaves only its tries on the board for a; b keeps its own newest.
+  const rebuilt = base('r3', '2026-03-01', 'H2', [haiku], [['haiku', 'a', 'passed']]);
+  const moved = leaderboard([older, newer, rebuilt], suite)!;
+  assert.deepEqual(moved.trials.filter(t => t.task === 'a').map(t => t.status), ['passed']);
+  assert.equal(moved.trials.filter(t => t.task === 'b').length, 1);
+  assert.equal(conditionsKey(older, 'a'), conditionsKey({ ...older, environment: { os: 'linux 7.3.0 x64' } }, 'a'), 'a kernel update is not a new condition');
+  assert.notEqual(modelKey(older, opus), modelKey(older, { ...opus, thinking: 'high' }), 'thinking is part of the model');
+  // The suite decides tiers and membership: a relabelled task moves, a removed one leaves.
+  const now = leaderboard([older, newer], [{ ...suite[0]!, tier: 'standard' }])!;
+  assert.deepEqual(now.tasks.map(t => [t.id, t.tier]), [['a', 'standard']]);
 });
