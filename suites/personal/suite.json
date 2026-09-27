@@ -568,6 +568,56 @@
         "exactness",
         "scope"
       ]
+    },
+    {
+      "id": "sheet-eval",
+      "title": "Build a spreadsheet evaluator from a written spec",
+      "tier": "hard",
+      "tags": [
+        "python",
+        "parser",
+        "spec",
+        "spreadsheet"
+      ],
+      "prompt": "Implement evaluate(sheets) in sheet.py so that it follows every numbered rule in SPEC.md: cell values, formula grammar, references and ranges across sheets, functions, conversions, errors, cycles and display. The rules apply together, so read the whole specification before writing code. Use only the Python standard library. Change only sheet.py. Read SPEC.md and sheet.py before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public check covers only a few easy cases: passing it does not mean the implementation is right. If tools are unavailable, return only JSON {\"files\":{\"sheet.py\":\"complete replacement contents\"}}. Objective hygiene rubric for the edited Python module: valid Python AST; only absolute standard-library import statements; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. Exception handlers, including transaction rollback and rethrow, are allowed. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/sheet-eval",
+      "grader": "private/sheet-eval.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness"
+      ],
+      "turns": 40,
+      "timeout": 900
+    },
+    {
+      "id": "log-query",
+      "title": "Build a log filter query language from a written spec",
+      "tier": "hard",
+      "tags": [
+        "python",
+        "parser",
+        "spec",
+        "query-language"
+      ],
+      "prompt": "Implement run_query(query, records) in query.py so that it follows every numbered rule in SPEC.md: tokens, units, strings, grammar and precedence, error codes with positions, and matching over missing, null and mixed-kind fields. The rules apply together, so read the whole specification before writing code. Use only the Python standard library. Change only query.py. Read SPEC.md and query.py before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public check covers only a few easy cases: passing it does not mean the implementation is right. If tools are unavailable, return only JSON {\"files\":{\"query.py\":\"complete replacement contents\"}}. Objective hygiene rubric for the edited Python module: valid Python AST; only absolute standard-library import statements; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. Exception handlers, including transaction rollback and rethrow, are allowed. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/log-query",
+      "grader": "private/log-query.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness"
+      ],
+      "turns": 40,
+      "timeout": 900
     }
   ]
 }

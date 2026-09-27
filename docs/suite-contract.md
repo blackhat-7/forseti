@@ -44,8 +44,8 @@ The ids stay in suite JSON and saved runs; reports show only the plain names. Ea
 
 ### Current coverage
 
-`exactness` 18 tasks · `evidence` 16 · `scope` 10 · `restraint` 6 · `safety` 4.
+`exactness` 20 tasks · `evidence` 16 · `scope` 10 · `restraint` 6 · `safety` 4.
 
-Two tasks (`room-bookings`, `order-pricing`) are multi-file bug hunts: a 15-module service, one reported symptom, and three defects in different layers that mask each other. That is small multi-file context, not large.
+Two tasks (`room-bookings`, `order-pricing`) are multi-file bug hunts: a 15-module service, one reported symptom, and three defects in different layers that mask each other. That is small multi-file context, not large. Two more (`sheet-eval`, `log-query`) implement a component from a 30-rule written spec, graded on hundreds of hidden cases.
 
 Known gaps: nothing here tests architecture or system design, long-horizon planning, performance work, or large multi-file context. Those shapes appear in real work but are not in this suite; do not read a high score as covering them.
