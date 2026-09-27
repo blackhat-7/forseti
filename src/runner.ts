@@ -69,6 +69,10 @@ export function blankTrial(id: string, model: ModelConfig, task: Task, repetitio
  * make two runs incomparable. Hashing them once stranded paid-for runs behind a wording fix.
  */
 const RENDER_ONLY = new Set(['report.ts', 'tui.ts']);
+/** A task's own budget only ever raises the run's, so a big task is not censored by a default sized for small ones. */
+export function taskBudget(options: RunOptions, task: Task): RunOptions {
+  return { ...options, maxTurns: Math.max(options.maxTurns, task.turns ?? 0), timeout: Math.max(options.timeout, task.timeout ?? 0) };
+}
 export function harnessFiles(root: string): Record<string, string> {
   return Object.fromEntries(Object.entries(files(inside(root, 'src'))).filter(([path]) => !RENDER_ONLY.has(path)));
 }
@@ -137,6 +141,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
       const cancel = () => controller.abort();
       signal.addEventListener('abort', cancel, { once: true });
       try {
+        const budget = taskBudget(options, job.task);
         notify('preparing'); record({ type: 'started', model: job.model.id, task: job.task.id, repetition: job.repetition });
         for (const [path, text] of Object.entries(files(inside(snapshot, job.task.fixture)))) put(work, path, text);
         if (signal.aborted) { trial.status = 'cancelled'; trial.error = 'Run cancelled before this trial'; }
@@ -150,18 +155,18 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
             baseline?: { files?: Record<string, string>; answer?: string };
             review?: Review;
           };
-          deadline = setTimeout(() => controller.abort(), options.timeout * 1000);
+          deadline = setTimeout(() => controller.abort(), budget.timeout * 1000);
           if (job.model.provider === 'control') {
             notify('applying synthetic control');
             const control = job.model.model === 'reference' ? grader.reference : grader.baseline;
             if (!control) throw new Error(`Missing ${job.model.model} control for ${job.task.id}`);
             for (const [path, content] of Object.entries(control.files ?? {})) put(work, path, content);
             trial.answer = control.answer ?? '';
-          } else if (job.model.provider === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, options, trial, controller.signal, notify, record);
-          else await runAgent(work, job.model, job.task, options, trial, controller.signal, notify, record, modelsFor(job.model, config.local.url));
+          } else if (job.model.provider === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, budget, trial, controller.signal, notify, record);
+          else await runAgent(work, job.model, job.task, budget, trial, controller.signal, notify, record, modelsFor(job.model, config.local.url));
           if (controller.signal.aborted) {
             trial.status = signal.aborted ? 'cancelled' : 'timeout';
-            trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${options.timeout}s exceeded; outcome censored`;
+            trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${budget.timeout}s exceeded; outcome censored`;
           }
           if (trial.status === 'failed') rejectArtifacts(trial, job.task, options.lane, job.model.provider === 'control', trial.checks.map(c => c.evidence).join('; '), agent);
           try { trial.files = files(work); }

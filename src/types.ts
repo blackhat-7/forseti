@@ -38,7 +38,9 @@ export type Capability = 'evidence' | 'restraint' | 'exactness' | 'scope' | 'saf
  * the number that separates small ones.
  */
 export type Tier = 'basic' | 'standard' | 'hard';
-export type Task = { id: string; title: string; tags: string[]; dimensions: Dimension[]; capabilities: Capability[]; tier: Tier; prompt: string; fixture: string; grader: string };
+export type Task = { id: string; title: string; tags: string[]; dimensions: Dimension[]; capabilities: Capability[]; tier: Tier;
+  /** A larger task may raise the run's turn and time budget for itself, never lower it. */
+  turns?: number; timeout?: number; prompt: string; fixture: string; grader: string };
 export type Suite = { schema: 1; id: string; title: string; tasks: Task[] };
 export type ModelConfig = {
   id: string; label: string; provider: string; model: string;
