@@ -1,6 +1,6 @@
 # Forseti terminal dashboard
 
-The dashboard uses the pinned Pi TUI package, not the global Pi runtime. It opens in the alternate screen with a near-black base, one indigo accent for anything interactive, and colour used only where it carries meaning: green for enabled and passing, amber for warnings and metered billing, rose for not-ready credentials, teal for subscription billing. Navigation and status sit in fixed regions. The center panel scrolls with Page Up/Page Down or the mouse wheel. Layout and text work at 40, 80, and 120 columns. Above ~80 columns the list views and Home split into two panes; below that they stack.
+The dashboard uses the pinned Pi TUI package, not the global Pi runtime. It opens in the alternate screen in the Kanagawa Dragon palette: a warm near-black base, one blue-grey accent for anything interactive, and colour used only where it carries meaning: green for enabled and passing, yellow for warnings and metered billing, red for not-ready credentials, aqua for subscription billing. Navigation and status sit in fixed regions. The center panel scrolls with Page Up/Page Down or the mouse wheel. Layout and text work at 40, 80, and 120 columns. Above ~80 columns the list views and Home split into two panes; below that they stack.
 
 ## Keys
 
@@ -8,11 +8,22 @@ The dashboard uses the pinned Pi TUI package, not the global Pi runtime. It open
 - **↑↓ / j/k:** select a row. **Space:** toggle a model/test or select a run.
 - **a:** add a model or test. Model search accepts provider, ID, or name; use arrows and Enter to choose, then explicitly choose existing authentication. Test creation asks for a lowercase ID, one-line prompt, and valid expected JSON.
 - **d:** remove a model/test from configuration. Only **y** confirms. Test files and saved evidence remain intact.
-- **− / +:** repetitions, from 1 to 20. **l:** tools/prompt lane. **p:** prompt caching on/off.
+- **− / +:** tries per test, from 1 to 20. **l:** tools/prompt lane. **p:** prompt caching on/off.
 - **r:** preflight. Review enabled models/tests, authentication, billing, and limits before Enter. Metered/unknown billing then requires typing **PAY** and Enter. Consent applies to one run only; there is no dollar spending cap.
 - **Esc / Ctrl+C during a run:** cancel and retain partial results. Wait for cancellation to finish before quitting.
-- **Runs → c:** compare selected runs — opens a visual scorecard (per-model bars, per-task grid); **m** toggles the full markdown report, or the highlighted run when none are selected. **Enter:** inspect individual trials and check-level evidence; **←→** changes trials; **↑↓** scrolls a line, **space/b** a page, **gg/G** jump to top/bottom. **e:** export selected/highlighted runs through the app to workspace reports.
+- **Runs → c:** compare selected runs, or the highlighted run when none are selected. Opens one model-comparison page; **m** toggles the full markdown report. **Enter:** inspect individual trials and check-level evidence; **←→** changes trials; **↑↓** scrolls a line, **space/b** a page, **gg/G** jump to top/bottom. **e:** export selected/highlighted runs through the app to workspace reports.
 - **R:** refresh local metadata without sending prompts. **?:** help. **q / Ctrl+C:** quit when idle. **Esc:** close a form/dialog without saving.
+
+## The comparison page
+
+One page, read top to bottom:
+
+1. **Tasks fully solved** — one line per model, best first, with a bar, the score and **±** (how far a rerun could move it). A rank is 1 + how many models clearly beat it, so models this run cannot tell apart share a rank. A short verdict says which gaps are real and which are ties.
+2. **By difficulty** and **By skill** — the same score split by task tier (Basic, Standard, Hard) and by skill, one column per model in rank order.
+3. **Per task** — hardest first. Each cell is tries fully solved out of tries graded; a task every model solved folds into one line.
+4. **Other signals** — checks passed, output format, tool use, reviewed design and the safe-code gate. None of them change the rank.
+
+The same model from several selected runs pools into one column only when the runs share a comparison key. Models from different harnesses (Claude Code, Forseti's own agent) still share the page, each tagged with its harness, under one warning that the gap includes the harness. Synthetic controls are listed, never ranked. The markdown report opens with the same page and keeps the methodology and evidence under **Details**.
 
 Synthetic controls are explicitly labeled. Unavailable authentication is visible, not silently replaced with a different credential source. Preflight uses `App.authFor(model)` for the explicitly selected authentication mode, not catalog defaults. The runner independently validates effective authentication and enforces billing consent.
 

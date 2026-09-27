@@ -5,7 +5,7 @@
 - The CLI refuses a working directory other than its own workspace before creating files. Application files, caches, snapshots, execution directories and reports stay in that workspace.
 - A benchmark model receives only the task prompt and public fixtures. No transcript archive, global Pi context, extension, skill, hidden reference, grader or credential is loaded into its conversation.
 - File tools resolve against the **individual trial's public directory**, reject traversal, symlinks, hard links and special files, and bound file size/tree size/depth. No general shell, MCP, browser, package installer or external CLI tool is exposed.
-- Python starts with an allowlisted environment and a macOS Seatbelt deny-default profile. It can read the public trial and specified system runtime directories. It cannot read sibling grading/results/credential files, use the network or create child processes. It can write only inside its trial while the model is working.
+- Python starts with an allowlisted environment and a deny-default sandbox: a Seatbelt profile on macOS, or Landlock plus a seccomp filter on Linux (`src/sandbox-linux.py`), both installed before candidate code runs. It can read the public trial and specified system runtime directories. It cannot read sibling grading/results/credential files, use the network or create child processes. It can write only inside its trial while the model is working.
 - **Grading Python is read-only.** Import-time candidate code cannot alter protected fixtures or make the saved artifact snapshot stale. Python execution is bounded by a deadline, CPU hard limit, per-file size limit, file-descriptor limit and output cap. Descendant process groups are killed on exit/cancellation.
 - Every run first performs actual negative sandbox probes. If isolation or the supported interpreter is unavailable, execution stops. Unsupported operating systems have no permissive fallback.
 
@@ -31,7 +31,8 @@ No secrets are intentionally logged. Provider errors are bounded and obvious cre
 
 ## Limits and recovery
 
-- Seatbelt is platform-specific and is not a full VM. Memory use and aggregate disk consumption are not hard-quotad; CPU/time/output/per-file limits reduce but do not eliminate denial-of-service risk. Do not run hostile contest submissions on a sensitive host.
+- On Linux, Landlock enforces the same path allow-list as the Seatbelt profile and also scopes signals and TCP; seccomp denies new processes, `exec`, every socket, hard links, `ptrace`, `io_uring` and namespace changes. It requires Landlock ABI 6 (kernel 6.12+) and fails closed below it. Unlike Seatbelt it also denies `exec` of the interpreter itself, which nothing needs.
+- Seatbelt and Landlock are platform-specific and are not a full VM. Memory use and aggregate disk consumption are not hard-quotad; CPU/time/output/per-file limits reduce but do not eliminate denial-of-service risk. Do not run hostile contest submissions on a sensitive host.
 - System libraries/interpreter are not vendored. Their versions/paths and host details are recorded, not claimed hermetically reproducible. OS/harness-owned diagnostic logging is outside application-managed artifact storage.
 - A run holds `.state/run.lock`. After a crash, inspect its PID before removing that **local** lock. Existing results remain; unclosed manifests display as interrupted. Rerun into a fresh directory rather than silently retrying or double-counting attempts.
 - Each completed trial and manifest is replaced atomically; event records are appended during execution. Abrupt power loss is not claimed transactionally fsync-durable. Saved counts distinguish planned, recorded, evaluated and censored trials.

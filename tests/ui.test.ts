@@ -51,7 +51,7 @@ function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
     compare(ids: string[]) { return `# Comparison\n${ids.join(', ')}\n${'Evidence row\n'.repeat(20)}`; },
     exportReport(ids: string[]) { exported = ids; return 'reports/comparison.md'; },
     addModel(provider: string, id: string, mode: ModelConfig['auth']) { this.config.models.push({ ...model, id: 'added', provider, model: id, auth: mode }); },
-    addTest(id: string, prompt: string, expected: string) { JSON.parse(expected); this.suite.tasks.push({ id, title: id, prompt, fixture: `fixtures/${id}`, grader: `private/${id}.mjs`, tags: [], dimensions: ['correctness', 'instructions'], capabilities: ['exactness'] }); },
+    addTest(id: string, prompt: string, expected: string) { JSON.parse(expected); this.suite.tasks.push({ id, title: id, prompt, fixture: `fixtures/${id}`, grader: `private/${id}.mjs`, tags: [], dimensions: ['correctness', 'instructions'], capabilities: ['exactness'], tier: 'basic' }); },
   };
   let renders = 0;
   let exits = 0;
@@ -111,7 +111,7 @@ test('keyboard navigation, toggles, confirmed removal, settings and empty states
   assert.equal(f.calls.length, 0);
   assert.match(f.text(), /Enable at least one/);
   f.key('1', '+', 'l');
-  assert.match(f.text(), /3 repeats/);
+  assert.match(f.text(), /3 tries/);
   assert.match(f.text(), /prompt lane/);
   assert.ok(f.saves >= 5);
   f.key('q'); assert.equal(f.exits, 1);
@@ -210,14 +210,14 @@ test('preflight uses effective selected auth, not catalog auth or UI heuristics'
 test('run selection, comparison, check-level evidence, scrolling and workspace export', () => {
   const f = fixture();
   f.key('4', ' ', 'c');
-  // The summary opens first: bars and a per-task grid, not a wall of markdown.
-  assert.match(f.text(), /Scorecard/);
+  // The summary opens first: one comparison page, not a wall of markdown.
+  assert.match(f.text(), /Model comparison/);
   assert.match(f.text(), /[█░]{10}/);
-  assert.match(f.text(), /all correct/);
+  assert.match(f.text(), /every try solved/);
   f.key('m');
   assert.match(f.text(), /Comparison/);
   f.key('m');
-  assert.match(f.text(), /Scorecard/);
+  assert.match(f.text(), /Model comparison/);
   f.key('m', down, 'e');
   assert.deepEqual(f.exported, ['run-001']);
   assert.match(f.text(), /reports\/comparison.md/);
@@ -272,9 +272,9 @@ test('run rejection clears busy state, allows editing and preserves backend evid
 test('settings reach preflight and runtime, obey bounds and do not change while busy', () => {
   const f = fixture();
   f.key('1', '-', '-', '-');
-  assert.match(f.text(), /1 repeat\b/);
+  assert.match(f.text(), /1 try\b/);
   f.key(...Array<string>(105).fill('+'));
-  assert.match(f.text(), /20 repeats/);
+  assert.match(f.text(), /20 tries/);
   // The per-trial limit is reachable without the CLI: a censored trial is otherwise unfixable.
   assert.match(f.text(), /Limit\s+180s\s+t/);
   f.key('t');
@@ -313,16 +313,18 @@ test('hygiene reads as a gate, never as a score beside correctness', () => {
   f.app.runs = [{ ...f.run, trials: [{ ...f.run.trials[0]!, checks: [...f.run.trials[0]!.checks, hygiene(true)] }] }];
   f.key('4', ' ', 'c');
   const text = f.text(120);
-  assert.match(text, /Hygiene gate\s+all 1 passed/);
+  // Renamed from "Hygiene gate" to "Safe-code gate": a reader should not need the rubric to know what it guards.
+  assert.match(text, /Safe-code gate\s+ok \(1\)/);
   assert.match(text, /a floor, not a score/);
   // The thing this rename exists to prevent: a full-width bar at a percentage that cannot move.
-  assert.doesNotMatch(text, /Hygiene\s+[█░]/);
+  assert.doesNotMatch(text, /(Hygiene|Safe-code gate)\s+[█░]/);
+  assert.doesNotMatch(text, /Safe-code gate\s+100%/);
   assert.doesNotMatch(text, /Quality/);
 
   f.key(esc);
   f.app.runs = [{ ...f.run, trials: [{ ...f.run.trials[0]!, checks: [...f.run.trials[0]!.checks, hygiene(false)] }] }];
   f.key('c');
-  assert.match(f.text(120), /Hygiene gate\s+1 of 1 checks failed/, 'a real failure is still stated plainly');
+  assert.match(f.text(120), /Safe-code gate\s+1 failed/, 'a real failure is still stated plainly');
 });
 
 test('esc and q both mean leave, at every level', () => {
@@ -338,9 +340,9 @@ test('esc and q both mean leave, at every level', () => {
     assert.equal(f.exits, 0, 'and closing a panel never quits');
 
     f.key('4', ' ', 'c');
-    assert.match(f.text(), /Scorecard/, 'the comparison panel is open');
+    assert.match(f.text(), /Model comparison/, 'the comparison panel is open');
     f.key(leave);
-    assert.doesNotMatch(f.text(), /Scorecard/, 'the same key closes this one too');
+    assert.doesNotMatch(f.text(), /Model comparison/, 'the same key closes this one too');
     assert.equal(f.exits, 0);
 
     f.key(leave);
@@ -373,14 +375,60 @@ test('a half-solved task shows how much was right, without a second headline', (
   };
   f.app.runs = [{ ...f.run, trials: [half] }];
   f.key('4', ' ', 'c');
-  assert.match(f.text(120), /50% of checks/, 'half the checks passed, and it says so');
-  assert.doesNotMatch(f.text(120), /\b50%\s+\d+\/\d+ graded/, 'the headline is still the task, not the checks');
+  assert.match(f.text(120), /Checks passed\s+50%/, 'half the checks passed, and it says so');
+  assert.match(f.text(120), /0\/1 ✗ \(50%\)/, 'and the task row shows how close it came');
+  assert.match(f.text(120), /Example model\s+[█░]+\s+0%/, 'the headline is still the task, not the checks');
 
   // Nothing half-right means no second number, so the headline is never ambiguous.
   f.key(esc);
   f.app.runs = [{ ...f.run, trials: [good] }];
   f.key('c');
-  assert.doesNotMatch(f.text(120), /of checks/);
+  assert.doesNotMatch(f.text(120), /Checks passed/);
+});
+
+test('the comparison page ranks with ties, splits by difficulty and names each harness', () => {
+  const f = fixture();
+  const tasks = Array.from({ length: 12 }, (_, i) => ({ id: `t${i}`, title: `Task number ${i}`, hash: `h${i}`, tier: i < 8 ? 'basic' as const : 'hard' as const, capabilities: ['exactness' as const] }));
+  const trials = (m: string, wins: number) => tasks.flatMap((t, i) => [1, 2, 3].map(r => ({
+    ...f.run.trials[0]!, id: `${m}-${t.id}-${r}`, model: m, task: t.id, repetition: r, status: i < wins ? 'passed' as const : 'failed' as const,
+    checks: [{ id: 'c', dimension: 'correctness' as const, passed: i < wins, evidence: '' }, { id: 'h', dimension: 'hygiene' as const, passed: true, evidence: '' }],
+  })));
+  const m = (id: string, label: string, provider = 'claude-code'): ModelConfig => ({ ...model, id, label, provider, model: id });
+  const run = (id: string, agent: string, models: [ModelConfig, number][]): Run => ({
+    ...f.run, id, environment: { agent }, options: { ...options, repeat: 3 }, tasks, models: models.map(([x]) => x),
+    planned: models.length * 36, trials: models.flatMap(([x, wins]) => trials(x.id, wins)),
+  });
+  const opus = m('opus', 'Claude opus · via Claude Code'), sonnet = m('sonnet', 'Claude sonnet · via Claude Code');
+  f.app.runs = [
+    run('2026-09-20T10-00-00-a', 'claude-code', [[opus, 11], [sonnet, 10], [m('control', 'Reference · synthetic', 'control'), 12]]),
+    // The same model under the same settings is more evidence for one card, not a second card.
+    run('2026-09-21T10-00-00-b', 'claude-code', [[sonnet, 10]]),
+    run('2026-09-22T10-00-00-c', 'pi', [[m('local', 'qwen-local', 'ollama'), 4]]),
+  ];
+  f.key('4', ' ', down, ' ', down, ' ', 'c');
+  const text = f.text(120);
+  assert.match(text, /3 models · 12 tasks · 3–6 tries each/);
+  assert.match(text, /^\s+1\s+Claude opus\s+[█░]+\s+92%.*Claude Code/m);
+  assert.match(text, /^\s+1\s+Claude sonnet\s+[█░]+\s+83%.*Claude Code/m, 'inside the noise, so it shares first place');
+  assert.match(text, /^\s+3\s+qwen-local\s+[█░]+\s+33%.*Forseti agent/m);
+  assert.match(text, /^\s+–\s+Reference · synthetic\s+[█░]+\s+100%\s+synthetic/m, 'a control is shown, never ranked, and carries no ±');
+  assert.equal(text.match(/Claude sonnet\s+[█░]/g)?.length, 1, 'pooled into one card');
+  assert.match(text, /Claude opus and Claude sonnet are tied: 8 points apart/);
+  assert.match(text, /different harnesses, so each gap is the\s+model plus its harness/);
+  assert.match(text, /By difficulty/);
+  assert.match(text, /Basic \(8\)\s+100%\s+100%\s+50%\s+100%/);
+  assert.match(text, /Hard \(4\)\s+75%\s+50%\s+0%\s+100%/);
+  assert.match(text, /Edge cases right \(12\)/);
+  assert.match(text, /Task number 11\s+0\/3 ✗\s+0\/6 ✗\s+0\/3 ✗\s+3\/3 ✓/, 'hardest first, one column per model');
+  assert.match(text, /4 tasks every model solved/, 'rows with no difference fold away');
+  assert.doesNotMatch(text, /exactness|Correctness|Hygiene|repetition/, 'no rubric jargon on the page');
+  for (const width of [40, 80, 120]) f.ui.render(width).forEach(row => assert.ok(visibleWidth(row) <= width, `width ${width}: ${visibleWidth(row)}`));
+
+  // A run from before tiers existed has none, and none is guessed.
+  f.key(esc);
+  f.app.runs = [{ ...f.app.runs[0]!, tasks: tasks.map(({ tier, ...t }) => t) }];
+  f.key('c');
+  assert.doesNotMatch(f.text(120), /By difficulty/);
 });
 
 test('a model that ran out of turns says so beside its score', () => {
@@ -392,17 +440,17 @@ test('a model that ran out of turns says so beside its score', () => {
   f.app.runs = [{ ...f.run, trials: [solved, { ...good, id: 'stalled', status: 'budget', checks: [] }] }];
   f.key('4', ' ', 'c');
   const text = f.text(120);
-  assert.match(text, /Stalled/);
-  assert.match(text, /1 stalled/);
-  assert.match(text, /100% scored · 50% if counted/, 'the size of what the score omits, not just the count');
-  assert.match(text, /ran out of turns or time/);
-  assert.match(text, /excluded from correctness/);
+  // Reworded from a "Stalled" column to a sentence under the ranking, in plain words.
+  assert.match(text, /ran out of turns or time on 1 try/);
+  assert.match(text, /counted as unsolved it\s+would be 50% instead of 100%/, 'the size of what the score omits, not just the count');
+  assert.match(text, /Left out, not scored/);
+  assert.doesNotMatch(text, /1 not run/, 'a stall is the model, not the provider');
 
   // No stall, no line: this must not become standing noise that stops being read.
   f.key(esc);
   f.app.runs = [{ ...f.run, trials: [good] }];
   f.key('c');
-  assert.doesNotMatch(f.text(120), /Stalled/);
+  assert.doesNotMatch(f.text(120), /ran out of turns/);
 });
 
 test('every run states which credential it will use, reviewer included', () => {
@@ -514,7 +562,7 @@ test('the design reviewer is off by default and every setting persists', () => {
   // Repetitions belong to the run, not the reviewer, and must not move from this tab.
   assert.equal(f.calls.length, 0);
   f.key('1');
-  assert.match(f.text(), /2 repeats/);
+  assert.match(f.text(), /2 tries/);
 
   // Picking a reviewer goes through the same catalog and auth path as a candidate.
   f.key('5', up, up, enter);

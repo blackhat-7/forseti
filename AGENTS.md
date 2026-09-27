@@ -11,7 +11,7 @@ Two independent parts:
 - `src/` — runner, CLI, TUI, sandbox, accounting, reports.
 - `suites/personal/` — tasks, public fixtures, private verifiers. Imports nothing from `src/`.
 
-TypeScript on Node 24+, Python 3 for sandboxed grading, macOS only. Deeper detail lives in `README.md` and `docs/`.
+TypeScript on Node 24+, Python 3 for sandboxed grading, macOS or Linux (kernel 6.12+ for Landlock). Deeper detail lives in `README.md` and `docs/`.
 
 ## Commands
 

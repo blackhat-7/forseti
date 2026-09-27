@@ -81,3 +81,11 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **A public check that covers everything removes the difficulty.** (2026-09-18) `weekly-coverage` grades on rows `check_public.py` never sees, so passing it proves nothing. A candidate that iterates to green is still wrong. Any new task needs that gap on purpose.
 - **The idiom trap works, and it is the first thing that has caught a strong candidate.** (2026-09-18) `retry-rollup` pairs two spellings everyone reaches for first — `NOT IN (SELECT ...)` against a column holding a NULL, and a `LEFT JOIN` whose test sits in `WHERE` — with public rows arranged so both are *right* on them. Over three repetitions: weakest 1/3, middle 2/3, strongest 3/3. Nothing else in the suite had ever separated the top two.
 - **Ship the wrong query as the starting point.** (2026-09-18) `query.sql` in the fixture is the obvious spelling, and it passes `check_public.py`. A candidate that reads the starting query, runs the public check and sees green has been given every reason to stop, which is the situation being measured.
+
+## Reporting and platforms (2026-09-27)
+
+- **Rank = 1 + how many models clearly beat it.** "Tie with the model above" chains: A~B, B~C gives everyone rank 1 even when A clearly beats C. Counting clear wins cannot chain, and the verdict states every clear pair.
+- **Tasks carry a difficulty tier, and reports score each tier alone.** A single average lets tasks everyone solves shrink the gap between strong models. Tiers come from recorded results, not guesses; re-tier when the data moves. `weekly-coverage` is `standard`: it separates Haiku from Sonnet, not Sonnet from Opus.
+- **Capability ids stay; only their display names changed.** `exactness` shows as "Edge cases right", and so on. Saved runs and `suite.json` keep the ids, so old runs stay readable.
+- **Linux confines the interpreter from inside, before candidate code.** Landlock matches the Seatbelt allow-list and raises the same `PermissionError`; seccomp covers what Landlock cannot. No `bwrap`: a mount namespace turns hidden files into "not found", not "denied".
+- **The suite has its own file cap (300); a trial folder keeps 80.** One limit served both, so adding tasks hit a safety limit meant for model-written files.

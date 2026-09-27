@@ -12,7 +12,7 @@ export const CLAUDE_CODE_ALLOWED = 'Read,Write,Edit,Glob,Grep';
 /**
  * Actually removes tools. `--allowedTools` only pre-approves; without this the session still
  * carries Bash, web access and subagents, which this lane must not have: it runs outside the
- * Seatbelt sandbox, and network/subagent access would also make it a different benchmark.
+ * Python sandbox, and network/subagent access would also make it a different benchmark.
  */
 export const CLAUDE_CODE_DENIED = 'Bash,Task,WebFetch,WebSearch,NotebookEdit,Workflow,SendMessage,RemoteTrigger,CronCreate,CronDelete,CronList,ScheduleWakeup,EnterWorktree,ExitWorktree';
 

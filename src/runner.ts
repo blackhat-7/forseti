@@ -10,7 +10,7 @@ import { claudeCodeArgs, runClaudeCode } from './claudecode.ts';
 import { DIMENSIONS, loadSuite, selectedModels, validateOptions } from './config.ts';
 import { atomicJson, files, hash, inside, localDir, put } from './files.ts';
 import { makeJudgeCall, review as reviewSubmission, type JudgeCall, type Review } from './judge.ts';
-import { checkSandbox, pythonExecutable, runPython } from './sandbox.ts';
+import { SANDBOX, checkSandbox, pythonExecutable, runPython } from './sandbox.ts';
 import type { Check, Config, Dimension, GradeContext, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
 
 export function schedule(models: ModelConfig[], tasks: Task[], repeat: number, seed: number) {
@@ -106,9 +106,9 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     const run: Run = {
       schema: 1, id, created: new Date().toISOString(), status: 'running', suite: suite.id,
       suiteHash: hash(contents), harnessHash: hash(harness),
-      environment: { node: process.version, python: pythonExecutable(), pythonVersion, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)), os: `${platform()} ${release()} ${arch()}`, sandbox: 'macOS Seatbelt; deny default; no network/fork; public trial only', pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : catalogModels.getModel(m.provider, m.model))) },
+      environment: { node: process.version, python: pythonExecutable(), pythonVersion, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)), os: `${platform()} ${release()} ${arch()}`, sandbox: SANDBOX, pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : catalogModels.getModel(m.provider, m.model))) },
       judge,
-      options, models, tasks: tasks.map(t => ({ id: t.id, title: t.title, capabilities: t.capabilities, hash: hash({ task: t, fixture: files(inside(dir, t.fixture)), private: Object.entries(contents).filter(([p]) => p.startsWith('private/')) }) })), planned: jobs.length, trials: [],
+      options, models, tasks: tasks.map(t => ({ id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, hash: hash({ task: t, fixture: files(inside(dir, t.fixture)), private: Object.entries(contents).filter(([p]) => p.startsWith('private/')) }) })), planned: jobs.length, trials: [],
     };
     atomicJson(runDir, 'run.json', run);
     atomicJson(runDir, 'experiment.json', { system: SYSTEM_PROMPT, config, options, schedule: jobs.map(j => ({ model: j.model.id, task: j.task.id, repetition: j.repetition })), harnessHash: run.harnessHash, suiteHash: run.suiteHash });

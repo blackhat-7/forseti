@@ -64,7 +64,7 @@ Drives the real binary through a pseudo-terminal at 110×36: mount → model vie
 
 ## Sandbox evidence
 
-`npm run doctor` exercises the real macOS `sandbox-exec` profile rather than asserting a policy string. The framework test additionally confirms denials for: reading a sibling hidden file, writing outside the trial directory, opening a socket, `fork`, hard links and symlinks out of the trial, and reading host credential environment variables. Grading Python is mounted read-only, so a candidate cannot mutate its own artifacts at import time to make the saved snapshot lie.
+`npm run doctor` exercises the real sandbox — the macOS `sandbox-exec` profile, or Landlock + seccomp on Linux — rather than asserting a policy string. The framework test additionally confirms denials for: reading a sibling hidden file, writing outside the trial directory, opening a socket, `fork`, hard links and symlinks out of the trial, and reading host credential environment variables. Grading Python is mounted read-only, so a candidate cannot mutate its own artifacts at import time to make the saved snapshot lie.
 
 Boundaries and known limits: [security.md](security.md).
 

@@ -22,7 +22,7 @@ A suite is a directory with `suite.json`, public fixtures, and private grading m
 
 ## Observation limits
 
-The personal suite uses `observe.py` in six coding fixtures. Pure calls take module/function/args and optional repeat/files; tagged `{"$float":"nan"}` / `inf` / `-inf` values transport nonfinite numbers. Ledger scenarios take event batches and return rows/errors after each. SQL scenarios take data/parameter sets and return results plus both tables. Public smoke checks remain disclosed examples; their exit status measures requested tool use, not hidden correctness.
+The personal suite uses `observe.py` in twelve coding fixtures. Pure calls take module/function/args and optional repeat/files; tagged `{"$float":"nan"}` / `inf` / `-inf` values transport nonfinite numbers. Ledger scenarios take event batches and return rows/errors after each. SQL scenarios take data/parameter sets and return results plus both tables. Public smoke checks remain disclosed examples; their exit status measures requested tool use, not hidden correctness.
 
 Captured encoder/write references prevent ordinary `json.dumps` or stdout replacement from forging serialization. They do not make Python modules mutually isolated: hostile reflection, lower-level encoder tampering, deliberate stdout forgery or hardcoding finite cases remain possible. This is finite black-box evidence, not formal proof or immunity to gaming. Keep all oracles/reference solutions private; filesystem/network isolation is the framework’s responsibility.
 
@@ -30,20 +30,20 @@ Captured encoder/write references prevent ordinary `json.dumps` or stdout replac
 
 Every task declares `capabilities`, a non-empty set from a fixed list. This is separate from `dimensions`: a dimension is *what kind of check runs* (correctness, instructions, hygiene, tools), while a capability is *what skill the task demands*. Reports roll correctness up by capability so you can see what a model is good at, not just how much of the suite it passed.
 
-| Capability | Meaning | Typical failure |
-|---|---|---|
-| `evidence` | Only claims what the files actually show | Reports the roadmap as implemented; claims coverage that is not there; obeys an instruction planted in a data file |
-| `restraint` | Does not report problems that are not there | Flags a rule the code does not actually break; over-reports on an unfamiliar write |
-| `exactness` | Boundaries, missing values and duplicates handled exactly | Off by one on an inclusive bound; counts a duplicate twice; treats `30` as greater than `30` |
-| `scope` | Changes only what was asked, and stops when told | Edits a file in a read-only audit; finishes a change after being told to pause |
-| `safety` | Safe under retry, partial failure and dry run | Mutates after a failed backup; a dry run that writes; a non-idempotent replay |
+| Capability | Shown in reports as | Meaning | Typical failure |
+|---|---|---|---|
+| `evidence` | Only claims what the files show | Only claims what the files actually show | Reports the roadmap as implemented; claims coverage that is not there; obeys an instruction planted in a data file |
+| `restraint` | No false alarms | Does not report problems that are not there | Flags a rule the code does not actually break; over-reports on an unfamiliar write |
+| `exactness` | Edge cases right | Boundaries, missing values and duplicates handled exactly | Off by one on an inclusive bound; counts a duplicate twice; treats `30` as greater than `30` |
+| `scope` | Stays within the task | Changes only what was asked, and stops when told | Edits a file in a read-only audit; finishes a change after being told to pause |
+| `safety` | Safe under retries and failures | Safe under retry, partial failure and dry run | Mutates after a failed backup; a dry run that writes; a non-idempotent replay |
 
 Adding a capability outside this list fails validation. Keep the list small: a label nothing measures is worse than no label.
 
-Each run records the capabilities of the tasks it ran, so an old run stays readable after the suite changes. The rollup shows `Nt` — how many tasks back each number — because a capability resting on one task is weak evidence, not a confident score.
+The ids stay in suite JSON and saved runs; reports show only the plain names. Each run records the capabilities and tier of the tasks it ran, so an old run stays readable after the suite changes. The **By skill** table shows `(n)`, how many tasks back each number, because a skill resting on one task is weak evidence, not a confident score. The **By difficulty** table does the same per tier; tasks from runs recorded before tiers existed show as Unrated, never guessed.
 
 ### Current coverage
 
-`scope` 8 tasks · `evidence` 7 · `exactness` 6 · `restraint` 5 · `safety` 3.
+`evidence` 12 tasks · `exactness` 11 · `scope` 8 · `restraint` 6 · `safety` 3.
 
 Known gaps: nothing here tests architecture or system design, long-horizon planning, performance work, or large multi-file context. Those shapes appear in real work but are not in this suite; do not read a high score as covering them.

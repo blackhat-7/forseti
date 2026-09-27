@@ -1,10 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, relative } from 'node:path';
 import { CLAUDE_CODE_MODELS } from './claudecode.ts';
-import { atomicJson, files, inside, readText, slug } from './files.ts';
-import type { Capability, Config, Dimension, JudgeConfig, ModelConfig, RunOptions, Suite } from './types.ts';
+import { MAX_SUITE_FILES, atomicJson, files, inside, readText, slug } from './files.ts';
+import type { Capability, Config, Tier, Dimension, JudgeConfig, ModelConfig, RunOptions, Suite } from './types.ts';
 
 export const CAPABILITIES: Capability[] = ['evidence', 'restraint', 'exactness', 'scope', 'safety'];
+export const TIERS: Tier[] = ['basic', 'standard', 'hard'];
 export const DIMENSIONS: Dimension[] = ['correctness', 'instructions', 'hygiene', 'tools', 'design'];
 
 // 180s, not 90s: on the Claude Code harness a real 24-trial run had two trials finish at 84-86s
@@ -77,12 +78,13 @@ export function loadSuite(root: string, path: string): { suite: Suite; dir: stri
     text(task.title, 'task title', 200); text(task.prompt, 'task prompt');
     if (!Array.isArray(task.tags) || task.tags.some(t => typeof t !== 'string')) throw new Error(`Invalid tags: ${task.id}`);
     if (!Array.isArray(task.capabilities) || !task.capabilities.length || new Set(task.capabilities).size !== task.capabilities.length || task.capabilities.some(c => !CAPABILITIES.includes(c))) throw new Error(`Declare unique capabilities for ${task.id} from: ${CAPABILITIES.join(', ')}`);
+    if (!TIERS.includes(task.tier)) throw new Error(`Declare a tier for ${task.id}: ${TIERS.join(', ')}`);
     if (!Array.isArray(task.dimensions) || !task.dimensions.length || new Set(task.dimensions).size !== task.dimensions.length || task.dimensions.some(d => !DIMENSIONS.includes(d))) throw new Error(`Declare unique rubric dimensions for ${task.id}`);
     if (typeof task.fixture !== 'string' || !task.fixture.startsWith('fixtures/') || typeof task.grader !== 'string' || !task.grader.startsWith('private/') || !task.grader.endsWith('.mjs')) throw new Error('Use fixtures/ public paths and private/*.mjs graders');
     files(inside(dir, task.fixture));
     readText(dir, task.grader);
   }
-  return { suite, dir, contents: files(dir) };
+  return { suite, dir, contents: files(dir, MAX_SUITE_FILES) };
 }
 export function validateOptions(o: RunOptions): void {
   const inRange = (v: number, low: number, high: number) => Number.isInteger(v) && v >= low && v <= high;

@@ -12,7 +12,7 @@ This is a focused local benchmark application, not a replacement for those frame
 
 ## Safety and accounting decisions
 
-- Models access only fresh public fixtures through path-checked tools. Python execution requires macOS Seatbelt (`sandbox-exec`); unsupported hosts fail closed rather than running untrusted code without confinement. General shell and full external CLI agents are intentionally not supported.
+- Models access only fresh public fixtures through path-checked tools. Python execution requires macOS Seatbelt (`sandbox-exec`) or Linux Landlock + seccomp; unsupported hosts fail closed rather than running untrusted code without confinement. General shell and full external CLI agents are intentionally not supported.
 - Existing Pi credentials are read-only references. Resolve them in memory, refuse command-based credentials, and refuse refreshing an external OAuth token (rotation could break the original session). Expired auth asks for supported Pi re-login; no silent fallback to API keys. API keys can be read from environment explicitly.
 - Authentication is not billing. [Pi provider documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md) explicitly describes Claude third-party OAuth as **metered extra usage**, OpenAI Codex as subscription, and OpenRouter OAuth as credits. Unknown billing remains unknown and requires metered opt-in. Rate limits stop later trials for that provider; no account switching or automatic paid fallback.
 - Controls exercise grading and reporting but are labeled synthetic. Live results are separate. Deterministic checks explain observed differences; they cannot prove a model's internal reasoning or measure all code quality.

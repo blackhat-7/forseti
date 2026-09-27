@@ -32,7 +32,13 @@ export type GradeContext = {
  * safety    - safe under retry, partial failure and dry run
  */
 export type Capability = 'evidence' | 'restraint' | 'exactness' | 'scope' | 'safety';
-export type Task = { id: string; title: string; tags: string[]; dimensions: Dimension[]; capabilities: Capability[]; prompt: string; fixture: string; grader: string };
+/**
+ * How hard a task is for current models, set from recorded results. Scores are reported per tier
+ * so easy tasks cannot pad the number that separates strong models, and hard tasks cannot bury
+ * the number that separates small ones.
+ */
+export type Tier = 'basic' | 'standard' | 'hard';
+export type Task = { id: string; title: string; tags: string[]; dimensions: Dimension[]; capabilities: Capability[]; tier: Tier; prompt: string; fixture: string; grader: string };
 export type Suite = { schema: 1; id: string; title: string; tasks: Task[] };
 export type ModelConfig = {
   id: string; label: string; provider: string; model: string;
@@ -64,7 +70,7 @@ export type Run = {
   schema: 1; id: string; created: string; finished?: string; status: 'running' | 'completed' | 'cancelled' | 'interrupted';
   suite: string; suiteHash: string; harnessHash: string; environment: Record<string, string>;
   judge: JudgeConfig | null;
-  options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; capabilities?: Capability[] }[];
+  options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; capabilities?: Capability[]; tier?: Tier }[];
   planned: number; trials: Trial[];
 };
 export type Progress = { completed: number; total: number; model: string; task: string; phase: string; runId: string };

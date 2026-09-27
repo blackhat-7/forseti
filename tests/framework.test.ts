@@ -8,11 +8,11 @@ import { authInfo, catalogModels, validateCredential } from '../src/auth.ts';
 import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
-import { comparisonKey, comparisonReport, correctness, dimensionScore, median, scorecard, scoreError, separated, stalled, checkShare } from '../src/report.ts';
+import { byTier, comparisonKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, stalled, checkShare, verdicts } from '../src/report.ts';
 import { agentOf, applicableDimensions, blankTrial, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
-import type { Config, Dimension, ModelConfig, ToolEvent, Trial } from '../src/types.ts';
+import type { Config, Dimension, ModelConfig, Run, ToolEvent, Trial } from '../src/types.ts';
 import type { JudgeCall } from '../src/judge.ts';
 
 const root = process.cwd();
@@ -57,6 +57,17 @@ test('real OS sandbox denies hidden reads, escapes, network, fork, links and hos
   assert.equal(deadline.timedOut, true);
   const flood = await runPython(localDir(dir, 'flood'), "print('x'*400000)");
   assert.equal(flood.timedOut, true); assert.ok(flood.stdout.length <= 256 * 1024);
+});
+
+// Landlock and seccomp are separate mechanisms from Seatbelt, so the denials only the Linux policy
+// spells out itself are pinned here: raw syscalls cannot route around a libc wrapper.
+test('Linux sandbox also denies exec, raw fork, signals to the host, every socket and namespaces', { skip: process.platform !== 'linux' }, async () => {
+  const dir = temp();
+  const source = `import os,json,socket,ctypes\nlibc=ctypes.CDLL(None,use_errno=True)\ndef raw(nr,*a):\n if libc.syscall(nr,*a)<0: raise OSError(ctypes.get_errno(),'raw')\nx86=os.uname().machine=='x86_64'\nresult=[]\nfor action in [lambda:os.execv('/usr/bin/true',['true']),lambda:raw(57 if x86 else 220, 17, 0, 0, 0, 0),lambda:os.kill(os.getppid(),0),lambda:socket.socket(socket.AF_INET,socket.SOCK_DGRAM),lambda:socket.socket(socket.AF_UNIX),lambda:raw(272 if x86 else 97,0x10000000),lambda:open('/etc/passwd').read()]:\n try:action();result.append(False)\n except PermissionError:result.append(True)\nprint(json.dumps(result))`;
+  const r = await runPython(dir, source);
+  assert.equal(r.code, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout), Array(7).fill(true));
+  const readOnly = await runPython(dir, "try:\n open('x','w')\n print('wrote')\nexcept PermissionError: print('denied')", undefined, 5000, true);
+  assert.equal(readOnly.stdout.trim(), 'denied');
 });
 
 test('strict settings, explicit billing, instruction-only rubrics and seeded schedules', () => {
@@ -195,6 +206,55 @@ test('a gap inside the noise is reported as a tie, not a ranking', () => {
   assert.equal(scoreError(scorecard('empty', [], tasks, 0)), null);
 });
 
+test('ranks share a place when the run cannot tell models apart, and pool only like runs', () => {
+  const tasks = Array.from({ length: 12 }, (_, i) => ({ id: `t${i}`, title: `Task ${i}`, hash: `h${i}`, tier: i < 6 ? 'basic' as const : 'hard' as const, capabilities: [i % 2 ? 'exactness' as const : 'evidence' as const] }));
+  const model = (id: string, provider = 'example'): ModelConfig => ({ id, label: `${id} · via Example`, provider, model: id, auth: provider === 'control' ? 'none' : 'pi', enabled: true, thinking: 'off' });
+  // `wins` tasks solved on every try, the rest never.
+  const trials = (m: ModelConfig, wins: number, repeats = 3) => tasks.flatMap((t, i) => Array.from({ length: repeats }, (_, r): Trial => ({
+    ...blankTrial(`${m.id}-${t.id}-${r}`, m, { ...task, id: t.id }, r + 1),
+    status: i < wins ? 'passed' : 'failed', checks: [{ id: 'c', dimension: 'correctness', passed: i < wins, evidence: '' }],
+  })));
+  const run = (id: string, models: [ModelConfig, number][], agent = 'pi'): Run => ({
+    schema: 1, id: `2026-09-2${id}T10-00-00-${id}`, created: '', status: 'completed', suite: 's', suiteHash: 's', harnessHash: 'h', environment: { agent }, judge: null,
+    options: { ...DEFAULT_OPTIONS, repeat: 3 }, models: models.map(([m]) => m), tasks, planned: models.length * 36, trials: models.flatMap(([m, wins]) => trials(m, wins)),
+  });
+  const [a, b, c, d] = ['a', 'b', 'c', 'd'].map(id => model(id));
+  const { cards } = scorecards([run('1', [[a!, 11], [b!, 10], [c!, 4], [model('control-reference', 'control'), 12]])]);
+  const ranked = ranking(cards);
+  // One task apart is inside the noise, so a and b share first; c is clearly behind both.
+  assert.deepEqual(ranked.map(r => [r.card.label, r.rank]), [['a', 1], ['b', 1], ['c', 3], ['control-reference', null]], 'a synthetic control is listed, never ranked');
+  const said = verdicts(ranked);
+  assert.match(said[0]!, /^a and b are tied: 8 points apart/);
+  assert.match(said[1]!, /^b beats c: 50 points apart, more than the \d+ needed\.$/);
+
+  // Ties chain: b is tied with both a and c, but a clearly beats c, and the ranks must not hide that.
+  const chain = ranking(scorecards([run('1', [[a!, 10], [b!, 8], [d!, 6]])]).cards);
+  assert.deepEqual(chain.map(r => r.rank), [1, 1, 2], 'a model is ranked below every model that clearly beats it');
+  assert.ok(verdicts(chain).some(v => /^a beats d/.test(v)), 'and the model that beats it is named');
+
+  // The same model under the same comparison key is one candidate measured twice.
+  const pooled = scorecards([run('1', [[a!, 11]]), run('2', [[a!, 11]])]).cards;
+  assert.equal(pooled.length, 1);
+  assert.equal(pooled[0]!.tries, 6);
+  assert.equal(pooled[0]!.evaluated, 72);
+  // Under a different key it is a different measurement, so it stays apart and says which run.
+  const split = scorecards([run('1', [[a!, 11]]), run('2', [[a!, 11]], 'claude-code')]);
+  assert.deepEqual(split.cards.map(c => [c.label, c.harness]), [['a · 09-21 10:00', 'Forseti agent'], ['a · 09-22 10:00', 'Claude Code']]);
+  assert.equal(split.mixed, true);
+
+  // Difficulty rolls up per task; a run from before tiers existed has none, and none is guessed.
+  assert.deepEqual(byTier(cards[0]!, tasks).map(r => [r.tier, r.rate, r.total]), [['basic', 1, 6], ['hard', 5 / 6, 6]]);
+  assert.deepEqual(byTier(cards[0]!, tasks.map(({ tier, ...t }) => t)), []);
+  assert.deepEqual(byTier(cards[0]!, tasks.map((t, i) => (i ? t : { ...t, tier: undefined }))).map(r => [r.tier, r.total]), [['basic', 5], ['hard', 6], ['unrated', 1]]);
+
+  const report = comparisonReport([run('1', [[a!, 11], [b!, 10], [c!, 4]])]);
+  assert.ok(report.indexOf('# Model comparison') < report.indexOf('## Details'), 'the one-page answer comes before the methodology');
+  assert.match(report, /\| 1 \| a \|.*\n\| 1 \| b \|.*\n\| 3 \| c \|/, 'the report ranks exactly as the TUI does');
+  assert.match(report, /\| Basic \(6 tasks\) \| 100% \| 100% \| 67% \|/);
+  assert.match(report, /\| Edge cases right \(6 tasks\) \|/, 'skills are named in plain words');
+  assert.doesNotMatch(report, /\bexactness\b \|/, 'skill ids are never shown as names');
+});
+
 test('partial credit says how much of a task was right, without becoming the headline', () => {
   const tasks = [{ id: 'wide', title: 'Nine checks' }, { id: 'narrow', title: 'One check' }];
   const candidate = DEFAULT_CONFIG.models[0]!;
@@ -237,6 +297,7 @@ test('a stall stays out of correctness but never out of sight', () => {
   assert.equal(even.stalled, 0);
   assert.equal(stalling.stalled, 1, 'and it is counted');
   assert.equal(stalling.scoreCountingStalls, 0.5, 'with the size of what the score leaves out');
+  assert.equal(stalling.notRun, 0, 'a stall is the model, so it is not also listed as not run');
   assert.equal(even.scoreCountingStalls, 1);
   // Auth and quota are the provider refusing, not the model failing to converge. They must not
   // be swept into the same number, or the rule this benchmark exists to enforce is lost.

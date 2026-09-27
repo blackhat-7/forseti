@@ -5,7 +5,7 @@ import {
   type Component, type Focusable,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { bar, byCapability, outcome, scorecards, type Scorecard } from './report.ts';
+import { HARNESS_WARNING, LABEL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, stallNote, taskCell, taskOrder, triesLabel, verdicts } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions } from './types.ts';
 
@@ -26,16 +26,17 @@ export function terminalReport(markdown: string): string {
     return [cells[0], ...cells.slice(1).map((cell, i) => `  ${headers[i + 1]}: ${cell}`), ''];
   }).join('\n');
 }
-// One dark base, one accent for anything interactive, and colour only where it carries meaning.
+// Kanagawa Dragon: one dark base, one accent for anything interactive, and colour only where it
+// carries meaning. The variable names are the roles; the comments are the palette's own names.
 const ink = (r: number, g: number, b: number) => (s: string) => `\x1b[38;2;${r};${g};${b}m${s}\x1b[39m`;
-const BACKDROP = '\x1b[48;2;13;15;22m\x1b[38;2;226;230;238m';
-const accent = ink(129, 161, 255);
-const teal = ink(86, 214, 196);
-const green = ink(140, 214, 124);
-const amber = ink(230, 180, 105);
-const rose = ink(240, 125, 145);
-const muted = ink(138, 146, 167);
-const faint = ink(88, 95, 116);
+const BACKDROP = '\x1b[48;2;24;22;22m\x1b[38;2;197;201;197m'; // dragonBlack3 on dragonWhite
+const accent = ink(139, 164, 176); // dragonBlue2
+const teal = ink(142, 164, 162); // dragonAqua
+const green = ink(135, 169, 135); // dragonGreen2
+const amber = ink(196, 178, 138); // dragonYellow
+const rose = ink(196, 116, 110); // dragonRed
+const muted = ink(166, 166, 156); // dragonGray
+const faint = ink(115, 124, 115); // dragonAsh
 const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
 const theme = { selectedPrefix: accent, selectedText: accent, description: muted, scrollInfo: faint, noMatch: amber };
 const tabs = ['Home', 'Models', 'Tests', 'Runs', 'Settings'];
@@ -81,6 +82,7 @@ function creditLine(entries: { label: string; auth: AuthInfo }[]): string {
   return amber(`${count(keyed.length, 'call site')} would use a metered API key: ${keyed.map(e => e.label).join(', ')}`);
 }
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const tries = (n: number) => `${n} ${n === 1 ? 'try' : 'tries'}`;
 const width_ = (s: string) => visibleWidth(stripVTControlCharacters(s));
 const pct = (rate: number | null) => (rate === null ? 'n/a' : `${Math.round(rate * 100)}%`);
 const rateInk = (rate: number | null) => (rate === null ? faint : rate === 1 ? green : rate >= 0.5 ? amber : rose);
@@ -425,7 +427,7 @@ export class Dashboard implements Component, Focusable {
     const p = this.progress;
     const summary = this.controller
       ? `${this.controller.signal.aborted ? 'stopping' : 'running'} · ${p?.completed ?? 0}/${p?.total ?? '?'}`
-      : `${count(this.models().length, 'model')} · ${count(this.enabledTasks().length, 'test')} · ${count(this.options.repeat, 'repeat')}`;
+      : `${count(this.models().length, 'model')} · ${count(this.enabledTasks().length, 'test')} · ${tries(this.options.repeat)}`;
     row(spread(bold('forseti'), width >= 60 ? (this.controller ? accent(summary) : faint(summary)) : ''));
     // Tabs carry the only underline in the UI, so the active view is obvious without rules or boxes.
     const labels = tabs.map((t, i) => (i === this.tab ? bold(t) : muted(t)));
@@ -458,7 +460,7 @@ export class Dashboard implements Component, Focusable {
       // Home earns the whole window: what will run sits beside how it will run.
       twoColumn([
         muted('Run settings'), '',
-        field('Repetitions', accent(String(this.options.repeat)), '− +'),
+        field('Tries', accent(String(this.options.repeat)), '− +'),
         field('Lane', accent(this.options.lane), 'l'),
         field('Cache', this.options.cache ? teal('on') : amber('off'), 'p'),
         field('Limit', accent(`${this.options.timeout}s`), 't'),
@@ -571,7 +573,7 @@ export class Dashboard implements Component, Focusable {
         detail.push(muted(plain(run.created)),
           green(`${passed} passed`) + muted('   ') + amber(`${failed} failed`) + muted(`   ${other} other`),
           faint(`${run.trials.length} of ${run.planned} recorded`),
-          faint(`${run.options.lane} lane · ${count(run.options.repeat, 'repeat')} · cache ${run.options.cache ? 'on' : 'off'}`),
+          faint(`${run.options.lane} lane · ${tries(run.options.repeat)} · cache ${run.options.cache ? 'on' : 'off'}`),
           faint(`suite ${run.suiteHash.slice(0, 8)} · harness ${run.harnessHash.slice(0, 8)}`));
         if (run.judge?.enabled) {
           const design = run.trials.flatMap(t => t.checks.filter(c => c.dimension === 'design'));
@@ -683,95 +685,118 @@ export class Dashboard implements Component, Focusable {
       for (const [keys, what] of [
         ['tab · 1–5', 'switch view'], ['↑↓ · j k', 'move'], ['space', 'toggle or select'],
         ['a', 'add model or test'], ['d', 'remove, with confirmation'], ['u', 'restore last removed test'],
-        ['r', 'review preflight'], ['− +', 'repetitions, or reviewer rounds on Settings'], ['l', 'tools / prompt lane'],
+        ['r', 'review preflight'], ['− +', 'tries per test, or reviewer rounds on Settings'], ['l', 'tools / prompt lane'],
         ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer'], ['R', 'refresh metadata, sends nothing'],
-        ['c · ⏎ · e', 'runs: compare, evidence, export'], ['m', 'comparison: scorecard / full report'], ['←→', 'evidence: previous / next trial'],
+        ['c · ⏎ · e', 'runs: compare, evidence, export'], ['m', 'comparison: summary / full report'], ['←→', 'evidence: previous / next trial'],
         ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc · q', 'leave what you are looking at: close a panel, else quit'], ['esc during a run', 'cancel it safely, keeping completed evidence'], ['during a run', 'tabs and ↑↓ work; edits wait'], ['ctrl+c', 'quit'],
       ] as const) row(`${accent(keys)}${' '.repeat(Math.max(2, 14 - keys.length))}${muted(what)}`);
     } else if (this.dialog === 'report' && this.reportMode === 'summary') {
-      const { cards, tasks, mixed } = scorecards(this.reportRuns);
-      head('Scorecard', 'equal weight per task');
+      // One page that answers, top to bottom: who is best, which gaps are real, and where each
+      // model is strong or weak. Every table has the models as columns, so a model is read down
+      // one column and a task or skill across one row.
+      const { cards: all, tasks, mixed } = scorecards(this.reportRuns);
+      // Columns follow the ranking, so the best model is always the first one read.
+      const ranked = ranking(all), cards = ranked.map(r => r.card);
+      const tagged = harnesses(cards).length > 1;
+      const names = cards.map(c => plain(c.label));
+      const pad = (text: string, w: number) => { const t = truncateToWidth(text, Math.max(1, w - 1)); return t + ' '.repeat(Math.max(0, w - visibleWidth(t))); };
+      head('Model comparison');
+      row(muted(`${ranked.some(r => r.rank !== null) ? count(ranked.filter(r => r.rank !== null).length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}${tagged || !cards.length || cards.every(c => c.synthetic) ? '' : ` · ${cards[0]!.harness}`}`));
       row();
-      if (mixed) { row(amber('Different suite, harness, lane or settings — these are not one controlled comparison.')); row(); }
-      // "Claude sonnet · via Claude Code / 20-52-54" is the provenance label; columns need a name.
-      const short = (s: string) => plain(s).replace(/\s*·\s*via\s[^/]*/, ' ').trim();
-      const modelOnly = (s: string) => short(s).split(' / ')[0]!;
-      const NAME = 24, COL = 16;
-      const cell = (text: string, w: number) => truncateToWidth(text, w - 2).padEnd(w);
-      // One chart per dimension with every candidate on it, so models are read against
-      // each other rather than each getting its own little strip.
-      // Drop the run suffix when model names alone are unambiguous, so the bar gets the room.
-      const names = cards.map(s => (new Set(cards.map(c => modelOnly(c.label))).size === cards.length ? modelOnly(s.label) : short(s.label)));
-      // The correctness row carries the longest suffix, so the bar yields width to it rather than
-      // pushing partial credit off the end of the line.
-      const partialShown = cards.some(s => s.checkScore !== null && s.checkScore !== s.score);
-      const barW = Math.max(12, Math.min(84, width - NAME - (partialShown ? 36 : 20)));
-      const series: [string, (s: Scorecard) => number | null][] = [
-        ['Correctness', s => s.score],
-        ['Instructions', s => s.dimensions.instructions],
-        ['Tool use', s => s.dimensions.tools],
-        ['Design', s => s.dimensions.design],
-      ];
-      for (const [title, pick] of series) {
-        if (cards.every(s => pick(s) === null)) continue;
-        row(muted(title));
-        for (const [i, s] of cards.entries()) {
-          const rate = pick(s);
-          // Partial credit rides on the headline's own line: close but never complete is a real
-          // result, and it must not read as a second, competing score.
-          const partial = title === 'Correctness' && s.checkScore !== null && s.checkScore !== rate
-            ? faint(`  ${pct(s.checkScore)} of checks`) : '';
-          row(cell(names[i]!, NAME) + rateInk(rate)(bar(rate, barW)) + ' ' + bold(pct(rate).padStart(4))
-            + (title === 'Correctness' ? partial + faint(`  ${s.evaluated}/${s.planned} graded`) + (s.notRun ? rose(`  ${s.notRun} not run`) : '') : ''));
+      // The harness line says everything the generic one does, and names the likeliest cause.
+      if (tagged) prose(HARNESS_WARNING, amber);
+      else if (mixed) prose('Different suite, harness, lane or settings — these are not one controlled comparison.', amber);
+      if (mixed || tagged) row();
+
+      row(bold(LABEL.solved) + faint('   every task counts equally'));
+      const nameW = Math.max(8, Math.min(22, Math.max(...names.map(n => n.length)) + 2));
+      const tagW = tagged || cards.some(c => c.synthetic) ? Math.max(...cards.map(c => c.harness.length)) + 2 : 0;
+      const barW = Math.max(6, Math.min(30, width - 4 - nameW - 12 - tagW - 10));
+      for (const { card, rank } of ranked) {
+        // A control's answers are fixed, so a rerun spread would be a number about nothing.
+        const error = card.synthetic ? null : scoreError(card);
+        const tag = tagW ? faint(pad(tagged || card.synthetic ? card.harness : '', tagW)) : '';
+        row(muted(String(rank ?? '–').padStart(2)) + '  ' + pad(plain(card.label), nameW) + rateInk(card.score)(bar(card.score, barW)) + ' ' + bold(pct(card.score).padStart(4))
+          + faint(pad(error === null ? '' : ` ±${Math.round(error * 100)}`, 6)) + tag + (card.notRun ? amber(`${card.notRun} not run`) : ''));
+      }
+      row();
+      prose('Rank = 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart. ± = how far the number could move on a rerun.', faint);
+      if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
+      if (cards.some(c => c.notRun)) prose('Not run = lost to login, quota, crash or cancellation. It never counts against a model.', faint);
+      const calls = verdicts(ranked), stalls = cards.map(stallNote).filter(n => n !== null);
+      if (calls.length || stalls.length) {
+        row();
+        row(muted('Verdict'));
+        for (const call of calls) prose(call);
+        for (const note of stalls) prose(note, amber);
+      }
+      row();
+
+      // Where each model is strong or weak: one row per slice, one column per model.
+      const colW = Math.max(5, Math.min(16, Math.max(...names.map(n => n.length)) + 2, Math.floor((width - 10) / Math.max(1, cards.length))));
+      const labelW = Math.max(8, Math.min(38, width - colW * cards.length));
+      // In a narrow column "Claude opus" and "Claude sonnet" both truncate to "Cla…", so a first
+      // word several models share is dropped there, leaving the part that tells them apart.
+      const first = (n: string) => n.split(' ')[0];
+      const heads = names.map(n => (n.length < colW || names.filter(m => first(m) === first(n)).length < 2 ? n : n.split(' ').slice(1).join(' ') || n));
+      const columns = () => row(' '.repeat(labelW) + heads.map(n => muted(pad(n, colW))).join(''));
+      // A label too long for its column gets its own line, so cells never lose their alignment.
+      const line = (label: string, cells: string[], paint: (s: string) => string = s => s) => {
+        if (visibleWidth(label) >= labelW) { row(paint(label)); row(' '.repeat(labelW) + cells.join('')); }
+        else row(paint(pad(label, labelW)) + cells.join(''));
+      };
+      const rates = (values: (number | null)[]) => values.map(v => rateInk(v)(pad(pct(v), colW)));
+      const tiers = cards.map(c => byTier(c, tasks));
+      if (tiers[0]?.length) {
+        row(bold('By difficulty') + faint('   share of tasks fully solved · (n) tasks'));
+        columns();
+        for (const [i, r] of tiers[0].entries()) line(`${TIER_NAME[r.tier]} (${r.total})`, rates(tiers.map(rows => rows[i]!.rate)));
+        prose('Basic tasks tell small models apart; hard tasks tell the strongest apart.', faint);
+        row();
+      }
+      const skills = cards.map(c => byCapability(c, tasks));
+      if (skills[0]?.length) {
+        row(bold('By skill') + faint('   share of tasks fully solved · (n) tasks'));
+        columns();
+        for (const [i, r] of skills[0].entries()) line(`${SKILL_NAME[r.capability]} (${r.total})`, rates(skills.map(rows => rows[i]!.rate)));
+        row();
+      }
+      row(bold('Per task') + faint('   hardest first'));
+      prose('Tries fully solved out of tries graded. ✓ every try solved, ✗ none, (80%) share of checks passed when not fully solved, · not graded. Rows where models differ are bright.', faint);
+      columns();
+      const paint = { solved: green, partly: amber, unsolved: rose, none: faint };
+      const order = taskOrder(cards, tasks);
+      for (const tier of [...new Set(order.map(i => tasks[i]!.tier ?? 'unrated'))]) {
+        const group = order.filter(i => (tasks[i]!.tier ?? 'unrated') === tier);
+        if (tasks.some(t => t.tier)) row(muted(TIER_NAME[tier]));
+        // Rows every model fully solved say nothing about the difference, so they fold into one line.
+        const everyone = group.filter(i => cards.every(c => c.tasks[i]!.rate === 1));
+        for (const i of group.filter(i => !everyone.includes(i))) {
+          const cells = cards.map(c => taskCell(c.tasks[i]!));
+          const same = cells.every(x => x.text === cells[0]!.text);
+          line(plain(tasks[i]!.title), cells.map(x => paint[x.kind](pad(visibleWidth(x.text) < colW ? x.text : x.text.replace(/ \(\d+%\)$/, ''), colW))), same ? faint : s => s);
+        }
+        if (everyone.length) row(faint(`${count(everyone.length, 'task')} every model solved: ${everyone.map(i => plain(tasks[i]!.title)).join(', ')}`));
+      }
+      row();
+
+      // Signals that describe how a model worked, never part of the rank.
+      const partial = cards.some(c => c.checkScore !== null && c.checkScore !== c.score);
+      const signals = (['instructions', 'tools', 'design'] as const).filter(d => cards.some(c => c.dimensions[d] !== null));
+      const gated = cards.some(c => c.hygiene.total);
+      if (partial || signals.length || gated) {
+        row(bold('Other signals') + faint('   never part of the rank'));
+        columns();
+        if (partial) line(LABEL.checks, rates(cards.map(c => c.checkScore)));
+        for (const d of signals) line(LABEL[d], rates(cards.map(c => c.dimensions[d])));
+        // A gate, never a bar or a percentage: its checks have never failed in any recorded run,
+        // so a 100% beside the score would read as praise for an unmeasured thing.
+        if (gated) {
+          line(LABEL.hygiene, cards.map(c => (!c.hygiene.total ? faint : c.hygiene.passed === c.hygiene.total ? green : rose)(pad(gate(c.hygiene), colW))));
+          prose('Safe-code gate: valid Python, standard library only, no eval — a floor, not a score.', faint);
         }
         row();
       }
-      // A stall is excluded from correctness but never from view: the trials a model loses to the
-      // turn or time budget are rarely spread evenly between models, so the score alone misleads.
-      if (cards.some(s => s.stalled)) {
-        row(muted('Stalled') + faint('        ran out of turns or time · excluded from correctness, shown so it cannot hide'));
-        for (const [i, s] of cards.entries()) {
-          if (!s.stalled) continue;
-          row(cell(names[i]!, NAME) + rose(`${s.stalled} stalled`) + faint(`   ${pct(s.score)} scored · ${pct(s.scoreCountingStalls)} if counted`));
-        }
-        row();
-      }
-      // Hygiene gets a line, not a bar. Its three checks have never failed in any recorded run,
-      // so a full-width 100% beside correctness would read as praise for an unmeasured thing.
-      const hygiene = this.reportRuns.flatMap(r => r.trials).flatMap(t => t.checks.filter(c => c.dimension === 'hygiene'));
-      if (hygiene.length) {
-        const bad = hygiene.filter(c => !c.passed).length;
-        row(muted('Hygiene gate') + '   ' + (bad ? rose(`${bad} of ${hygiene.length} checks failed`) : green(`all ${hygiene.length} passed`))
-          + faint('   valid AST · stdlib only · no eval — a floor, not a score'));
-        row();
-      }
-      // What each model is good at, not just how much of the suite it passed.
-      const capRows = cards.map(s => byCapability(s, tasks));
-      if (capRows[0]?.length) {
-        row(muted('By capability') + faint('   equal weight per task'));
-        for (const [i, capability] of capRows[0].map(r => r.capability).entries()) {
-          const cells = cards.map((_, c) => {
-            const r = capRows[c]![i]!;
-            return `${rateInk(r.rate)(bar(r.rate, 12))} ${cell(pct(r.rate), 6)}${faint(cell(`${r.tasks}t`, 5))}`;
-          });
-          row(cell(capability, 16) + cells.join(''));
-        }
-        row();
-      }
-      row(muted('Per task') + faint('   ● all correct   ◐ some   ○ none   · not graded'));
-      row();
-      const taskW = Math.max(20, Math.min(46, width - cards.length * COL));
-      row(muted(cell('', taskW) + cards.map(s => cell(modelOnly(s.label), COL)).join('')));
-      for (const [i, task] of tasks.entries()) {
-        const cells = cards.map(s => {
-          const t = s.tasks[i]!;
-          if (t.rate === null) return faint(cell('·', COL));
-          const mark = t.rate === 1 ? green('●') : t.rate === 0 ? rose('○') : amber('◐');
-          return `${mark} ${muted(cell(`${t.passed}/${t.evaluated}`, COL - 2))}`;
-        });
-        row(`${cell(plain(task.title), taskW)}${cells.join('')}`);
-      }
-      row();
       row(faint('m full report   e export'));
     } else {
       head(this.dialog === 'report' ? 'Comparison' : 'Evidence', this.dialog === 'report' ? 'selected runs' : 'observable checks');
@@ -785,7 +810,7 @@ export class Dashboard implements Component, Focusable {
           const state = outcome(trial.status);
           const chip = state.kind === 'pass' ? green('PASS') : state.kind === 'scored' ? amber('SCORED') : rose('NOT RUN');
           row();
-          row(`${chip}  ${bold(plain(trial.model))}${muted(' / ')}${plain(trial.task)}${faint(`  repeat ${trial.repetition}`)}`);
+          row(`${chip}  ${bold(plain(trial.model))}${muted(' / ')}${plain(trial.task)}${faint(`  try ${trial.repetition}`)}`);
           // "not run" never means a wrong answer: those trials are excluded from correctness.
           row(faint(state.kind === 'not-run' ? `${state.text} — excluded from scores, not counted against the model` : `${trial.checks.filter(c => c.passed).length} of ${trial.checks.length} checks passed`));
           // A censored trial is recoverable, and the fix is one key away on Home.

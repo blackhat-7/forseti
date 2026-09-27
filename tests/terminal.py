@@ -68,7 +68,7 @@ try:
         collect(0.3)
     assert b'Run completed' in output, 'Synthetic run did not finish in the TUI'
     send('c')
-    assert b'Scorecard' in output, 'Comparison summary did not open'
+    assert b'Model comparison' in output, 'Comparison summary did not open'
     send('\x1b')
     send('e')
     assert b'Exported' in output, 'Report export failed'

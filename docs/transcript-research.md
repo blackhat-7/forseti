@@ -268,3 +268,19 @@ answering, and Opus appending "Notes on the exclusions:" after its fence.
 is about the answer, not about the fence drawn around it. Haiku goes from 0/6 to 6/6, because its
 answers were correct and merely fenced. Ten cases in `verify-controls.mjs` pin both halves so
 neither drifts back.
+
+### Three more `hard` tasks, 2026-09-27 — unmeasured
+
+`invoice-rounding`, `league-table` and `ticket-sla` follow the `retry-rollup` recipe in Python
+instead of SQL: the shipped code is the obvious spelling, it passes `check_public.py`, and the
+hidden rows are where it is wrong. **None has been run against a live model.** They were built on a
+Linux machine, where the macOS sandbox cannot run, so the only evidence is `npm run test:suite`:
+each reference passes and each near-miss baseline fails on exactly one trap.
+
+| Task | Traps | Near-miss baseline misses |
+|---|---|---|
+| `invoice-rounding` | `round()` and a Decimal's `:.2f` round half to even; float arithmetic lands under the half and `Decimal(float)` keeps it; `floor(x + 0.5)` on a credit; Decimal writes `-0.00` | float arithmetic converted to Decimal afterwards |
+| `league-table` | `table={}` default shared across calls; `reverse=True` over a key holding the name; `enumerate` ranks level teams apart | `reverse=True`, so level teams come out Z to A |
+| `ticket-sla` | `strptime(stamp[:19])` drops the offset; `timedelta.seconds` drops whole days | `.seconds` |
+
+Until each has at least three repetitions per model, treat its `hard` tier as a guess.

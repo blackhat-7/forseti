@@ -8,7 +8,7 @@ Two independent parts:
 
 ## Start
 
-Requires **macOS**, **Node 24+**, and **Python 3** installed through Homebrew, `/usr`, or `/Library`. Other operating systems fail closed; there is no unsandboxed fallback.
+Requires **macOS** or **Linux** (kernel 6.12+, Landlock enabled, x86_64 or arm64), **Node 24+**, and **Python 3** installed through Homebrew, `/usr`, or `/Library`. Other operating systems fail closed; there is no unsandboxed fallback.
 
 ```sh
 cd /path/to/forseti
@@ -55,7 +55,7 @@ Flags per trial: `--safe-mode --disable-slash-commands` (so your hooks, plugins,
 - A run may not mix `claude-code` models with Pi-adapter models — Forseti refuses, because the table would compare harnesses.
 - Reports tag the harness and never pool the two.
 - Tool checks are **N/A** here: the suite's tool rubric names Forseti's `read_file`/`write_file`/`python`, which Claude Code doesn't have.
-- This lane runs **outside** the Seatbelt sandbox, so it gets no `Bash` tool — file access to its trial directory and nothing else. The Pi lane's sandboxed Python has no equivalent here; that is a capability difference, not a model difference.
+- This lane runs **outside** the Python sandbox, so it gets no `Bash` tool — file access to its trial directory and nothing else. The Pi lane's sandboxed Python has no equivalent here; that is a capability difference, not a model difference.
 - Reported cost is Claude Code's client-side list-price estimate, not what a subscription is billed.
 
 API keys are also supported:

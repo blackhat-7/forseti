@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { inside, localDir, put } from './files.ts';
@@ -20,14 +20,19 @@ export function pythonExecutable(): string {
   }
   return pythonPath;
 }
+const LINUX = process.platform === 'linux';
+/** Recorded on every run, so results from the two confinement mechanisms never read as one. */
+export const SANDBOX = LINUX ? 'Linux Landlock + seccomp; deny default; no network/fork/exec; public trial only' : 'macOS Seatbelt; deny default; no network/fork; public trial only';
+function workspaceRoot(root: string, runtimeRoots: string[]): string {
+  const resolved = realpathSync(root);
+  if (runtimeRoots.some(path => resolved === path || resolved.startsWith(`${path}/`))) throw new Error('Trial workspaces cannot be inside a system runtime read root');
+  return resolved;
+}
 export function sandboxProfile(root: string, readOnly = false): string {
   if (process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec')) {
-    throw new Error('Fail closed: this release requires macOS sandbox-exec. No unsandboxed fallback.');
+    throw new Error('Fail closed: this release requires macOS sandbox-exec or Linux Landlock. No unsandboxed fallback.');
   }
-  const resolved = realpathSync(root);
-  const runtimeRoots = ['/System', '/usr/lib', '/usr/share', '/Library/Frameworks', '/Library/Developer', '/opt/homebrew/Cellar'];
-  if (runtimeRoots.some(path => resolved === path || resolved.startsWith(`${path}/`))) throw new Error('Trial workspaces cannot be inside a system runtime read root');
-  const literal = JSON.stringify(resolved);
+  const literal = JSON.stringify(workspaceRoot(root, ['/System', '/usr/lib', '/usr/share', '/Library/Frameworks', '/Library/Developer', '/opt/homebrew/Cellar']));
   return `(version 1)
 (deny default)
 (allow process-exec (literal ${JSON.stringify(pythonExecutable())}))
@@ -39,6 +44,12 @@ export function sandboxProfile(root: string, readOnly = false): string {
  (literal "/private/etc/localtime") (subpath ${literal}))
 (allow file-write* ${readOnly ? '' : `(subpath ${literal})`} (literal "/dev/null"))`;
 }
+/** On Linux the interpreter confines itself (src/sandbox-linux.py) before reading candidate code. */
+function linuxConfinement(root: string, readOnly: boolean): string {
+  // A JSON string literal is also a valid Python string literal.
+  const path = JSON.stringify(workspaceRoot(root, ['/usr', '/lib', '/lib64', '/dev']));
+  return `${readFileSync(new URL('./sandbox-linux.py', import.meta.url), 'utf8')}\nconfine(${path}, ${readOnly ? 'True' : 'False'})\n`;
+}
 
 /** Untrusted code receives no host environment, network, child processes, or private suite files. */
 export async function runPython(root: string, source: string, signal?: AbortSignal, timeoutMs = 5000, readOnly = false): Promise<PythonResult> {
@@ -46,13 +57,14 @@ export async function runPython(root: string, source: string, signal?: AbortSign
   inside(root, '.');
   if (Buffer.byteLength(source) > 128 * 1024) throw new Error('Python input exceeds 128 KiB');
   if (signal?.aborted) return { stdout: '', stderr: 'Cancelled', code: null, timedOut: true };
-  const profile = sandboxProfile(root, readOnly);
   // The limits are installed before candidate code, which cannot raise the hard limits.
-  const bootstrap = `import os,sys,resource\nresource.setrlimit(resource.RLIMIT_CPU,(3,3))\nresource.setrlimit(resource.RLIMIT_FSIZE,(1048576,1048576))\nresource.setrlimit(resource.RLIMIT_NOFILE,(64,64))\nsys.path.insert(0,os.getcwd())\nexec(compile(sys.stdin.read(),'<trial>','exec'))`;
+  const bootstrap = `${LINUX ? linuxConfinement(root, readOnly) : ''}import os,sys,resource\nresource.setrlimit(resource.RLIMIT_CPU,(3,3))\nresource.setrlimit(resource.RLIMIT_FSIZE,(1048576,1048576))\nresource.setrlimit(resource.RLIMIT_NOFILE,(64,64))\nsys.path.insert(0,os.getcwd())\nexec(compile(sys.stdin.read(),'<trial>','exec'))`;
   return await new Promise((resolve, reject) => {
-    const child = spawn('/usr/bin/sandbox-exec', ['-p', profile, pythonExecutable(), '-I', '-B', '-c', bootstrap], {
+    const python = [pythonExecutable(), '-I', '-B', '-c', bootstrap];
+    const [command, ...args] = LINUX ? python : ['/usr/bin/sandbox-exec', '-p', sandboxProfile(root, readOnly), ...python];
+    const child = spawn(command!, args, {
       cwd: root, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
-      env: { PATH: '/usr/bin:/bin', HOME: root, TMPDIR: root, TMP: root, TEMP: root, PYTHONDONTWRITEBYTECODE: '1', LC_ALL: 'en_US.UTF-8' },
+      env: { PATH: '/usr/bin:/bin', HOME: root, TMPDIR: root, TMP: root, TEMP: root, PYTHONDONTWRITEBYTECODE: '1', LC_ALL: LINUX ? 'C.UTF-8' : 'en_US.UTF-8' },
     });
     let stdout = '', stderr = '', timedOut = false, size = 0;
     const kill = () => {

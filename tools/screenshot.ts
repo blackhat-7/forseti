@@ -8,7 +8,7 @@ import { Dashboard } from '../src/tui.ts';
 import { inside, localDir } from '../src/files.ts';
 
 const COLUMNS = 132, FONT = 14, CELL = 8.4, LINE = 20, PAD = 18, CHROME = 34;
-const FALLBACK_BG = 'rgb(12,20,35)', FALLBACK_FG = 'rgb(220,230,241)';
+const FALLBACK_BG = 'rgb(24,22,22)', FALLBACK_FG = 'rgb(197,201,197)';
 
 type Span = { text: string; column: number; fg: string; bg: string; bold: boolean };
 
@@ -63,7 +63,7 @@ rows.forEach((row, y) => {
   }
 });
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width.toFixed(0)}" height="${height.toFixed(0)}" viewBox="0 0 ${width.toFixed(0)} ${height.toFixed(0)}" role="img" aria-label="Forseti terminal UI, ${view} view">
-<rect width="100%" height="100%" rx="10" fill="#070d18"/>
+<rect width="100%" height="100%" rx="10" fill="#0d0c0c"/>
 <rect x="${PAD}" y="${CHROME}" width="${(COLUMNS * CELL).toFixed(1)}" height="${(rows.length * LINE).toFixed(1)}" fill="${FALLBACK_BG}"/>
 <circle cx="24" cy="18" r="6" fill="#ff5f57"/><circle cx="44" cy="18" r="6" fill="#febc2e"/><circle cx="64" cy="18" r="6" fill="#28c840"/>
 <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="${FONT}" xml:space="preserve">

@@ -6,6 +6,7 @@
     {
       "id": "shared-count",
       "title": "Fix one shared parser, preserve both callers",
+      "tier": "standard",
       "tags": [
         "python",
         "root-cause",
@@ -28,6 +29,7 @@
     {
       "id": "event-ledger",
       "title": "Apply replayed events atomically",
+      "tier": "standard",
       "tags": [
         "python",
         "sqlite",
@@ -50,6 +52,7 @@
     {
       "id": "weekly-coverage",
       "title": "Count UTC weeks without join inflation",
+      "tier": "standard",
       "tags": [
         "sql",
         "time-window",
@@ -71,6 +74,7 @@
     {
       "id": "incident-window",
       "title": "Separate log evidence from a nearby error",
+      "tier": "standard",
       "tags": [
         "json",
         "operations",
@@ -93,6 +97,7 @@
     {
       "id": "artifact-contract",
       "title": "Audit learned outputs versus constants",
+      "tier": "basic",
       "tags": [
         "python",
         "artifacts",
@@ -115,6 +120,7 @@
     {
       "id": "pause-correction",
       "title": "Obey a late pause without changing state",
+      "tier": "basic",
       "tags": [
         "json",
         "instructions",
@@ -135,6 +141,7 @@
     {
       "id": "reconcile-plan",
       "title": "Prepare a safe, deduplicated repair plan",
+      "tier": "standard",
       "tags": [
         "python",
         "security",
@@ -157,6 +164,7 @@
     {
       "id": "source-map",
       "title": "Document implemented routes, not the roadmap",
+      "tier": "basic",
       "tags": [
         "json",
         "source-grounding",
@@ -179,6 +187,7 @@
     {
       "id": "regression-boundary",
       "title": "Handle missing metrics and equality correctly",
+      "tier": "basic",
       "tags": [
         "python",
         "boundaries",
@@ -200,6 +209,7 @@
     {
       "id": "coverage-audit",
       "title": "Audit branch coverage, strictly",
+      "tier": "basic",
       "tags": [
         "audit",
         "coverage",
@@ -224,6 +234,7 @@
     {
       "id": "migration-safety",
       "title": "Find the blocking backfill safety breaks",
+      "tier": "standard",
       "tags": [
         "audit",
         "migration",
@@ -248,6 +259,7 @@
     {
       "id": "duplicate-rule",
       "title": "Put one drifted rule back in one place",
+      "tier": "standard",
       "tags": [
         "python",
         "refactor",
@@ -272,6 +284,7 @@
     {
       "id": "stuck-job",
       "title": "Reconcile three sources that disagree about a job",
+      "tier": "basic",
       "tags": [
         "sql",
         "operations",
@@ -294,6 +307,7 @@
     {
       "id": "retry-rollup",
       "title": "Count the failures the retries did not fix",
+      "tier": "hard",
       "tags": [
         "sql",
         "metrics",
@@ -305,6 +319,75 @@
       "dimensions": [
         "correctness",
         "instructions",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "evidence"
+      ]
+    },
+    {
+      "id": "invoice-rounding",
+      "title": "Round invoice lines the way finance does",
+      "tier": "hard",
+      "tags": [
+        "python",
+        "money",
+        "rounding"
+      ],
+      "prompt": "Fix invoice(lines) in invoice.py. Each line is a dict with sku, price (a decimal string such as \"19.99\", negative for a credit), qty (a positive int) and discount (a percentage as a decimal string such as \"12.5\"). A line's amount is price * qty * (1 - discount/100), rounded once to the cent, with an exact half cent rounded away from zero, the way the finance team rounds by hand. The invoice total is the sum of the rounded line amounts. Return {\"lines\": [one amount per line, in order], \"total\": amount}, where every amount is a string with exactly two decimals and a leading minus sign only when the amount is below zero. Do not modify the input. Use only Python stdlib. Change only invoice.py. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public rows are a subset: passing that check does not mean the code is right. If tools are unavailable, return only JSON {\"files\":{\"invoice.py\":\"complete replacement contents\"}}. Objective hygiene rubric for the edited Python module: valid Python AST; only absolute standard-library import statements; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. Exception handlers, including transaction rollback and rethrow, are allowed. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/invoice-rounding",
+      "grader": "private/invoice-rounding.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "evidence"
+      ]
+    },
+    {
+      "id": "league-table",
+      "title": "Rank a league table with shared places",
+      "tier": "hard",
+      "tags": [
+        "python",
+        "sorting",
+        "ranking"
+      ],
+      "prompt": "Fix standings(matches) in table.py. Each match is a dict with home, away, home_goals and away_goals. A win is worth 3 points, a draw 1 and a loss 0. Return one row per team that played, as a dict {rank, team, points, diff, scored}, where diff is goals scored minus goals conceded. Order rows by points, then goal difference, then goals scored, each highest first, and then by team name A to Z. Teams level on points, goal difference and goals scored share a rank, and the next rank skips (1, 2, 2, 4). report.py calls standings once per league in the same process; each call covers only the matches it is given. Do not modify the input. Use only Python stdlib. Change only table.py. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public rows are a subset: passing that check does not mean the code is right. If tools are unavailable, return only JSON {\"files\":{\"table.py\":\"complete replacement contents\"}}. Objective hygiene rubric for the edited Python module: valid Python AST; only absolute standard-library import statements; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. Exception handlers, including transaction rollback and rethrow, are allowed. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/league-table",
+      "grader": "private/league-table.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "evidence"
+      ]
+    },
+    {
+      "id": "ticket-sla",
+      "title": "Flag tickets that ran past their SLA",
+      "tier": "hard",
+      "tags": [
+        "python",
+        "datetime",
+        "time-window"
+      ],
+      "prompt": "Fix breaches(tickets, limit_hours, now) in sla.py. Each ticket is a dict with id, opened and resolved; resolved is null while the ticket is still open, and an open ticket is measured up to now. opened, resolved and now are ISO-8601 strings with a UTC offset, and the offsets are not all the same because tickets are logged from several regions. A ticket breaches when the time from opened to resolved (or to now) is strictly longer than limit_hours, a positive int; exactly the limit is not a breach. Return the ids of breaching tickets in input order. Do not modify the input. Use only Python stdlib. Change only sla.py. Read the implementation and its public callers/data before editing. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public rows are a subset: passing that check does not mean the code is right. If tools are unavailable, return only JSON {\"files\":{\"sla.py\":\"complete replacement contents\"}}. Objective hygiene rubric for the edited Python module: valid Python AST; only absolute standard-library import statements; no statically named eval/exec references (direct, attribute or imported, including wildcard imports from builtins). AST inspection does not execute your module. Exception handlers, including transaction rollback and rethrow, are allowed. No length or complexity score is used. observe.py is an immutable public observation driver, not an oracle; do not edit it. Grading supplies case inputs after completion, observes raw outputs and state, and compares them outside Python. The grading filesystem is read-only.",
+      "fixture": "fixtures/ticket-sla",
+      "grader": "private/ticket-sla.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
         "tools"
       ],
       "capabilities": [

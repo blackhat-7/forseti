@@ -86,7 +86,7 @@ export class App {
     put(dir, `${fixture}/context.txt`, 'Answer the task prompt. No file edits are required.\n');
     put(dir, grader, `// Trusted, hidden exact-JSON verifier. No framework dependency.\nconst expected = ${JSON.stringify(expected)};\nexport const reference = { answer: JSON.stringify(expected) };\nexport const baseline = { answer: ${JSON.stringify(expected === null ? '{}' : 'null')} };\nexport async function grade({answer}) {\n let actual, valid = true;\n try { actual = JSON.parse(answer); } catch { valid = false; }\n const same = (a,b) => {\n  if (a === b) return true;\n  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;\n  return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(k => Object.hasOwn(b,k) && same(a[k],b[k]));\n };\n return [\n  { id:'exact-answer', dimension:'correctness', passed:valid && same(actual,expected), evidence:valid ? 'Compared parsed JSON against hidden expected value.' : 'Response was not JSON.' },\n  { id:'json-only', dimension:'instructions', passed:valid, evidence:'Response must be only valid JSON.' }\n ];\n}\n`);
     const updated = structuredClone(this.suite);
-    updated.tasks.push({ id, title: id.replaceAll('-', ' '), tags: ['custom', 'json'], dimensions: ['correctness', 'instructions'], capabilities: ['exactness'], prompt: `${prompt}\nReturn only JSON.`, fixture, grader });
+    updated.tasks.push({ id, title: id.replaceAll('-', ' '), tags: ['custom', 'json'], dimensions: ['correctness', 'instructions'], capabilities: ['exactness'], tier: 'basic', prompt: `${prompt}\nReturn only JSON.`, fixture, grader });
     atomicJson(this.root, this.config.suite, updated);
     this.suite = updated;
   }
