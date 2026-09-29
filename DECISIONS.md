@@ -143,3 +143,4 @@ Entries below were extracted on 2026-09-18 from the work log now at `docs/histor
 - **What changes behaviour outside the repo is part of the model.** (2026-09-29) Claude Code's release (it sets that lane's prompt and tools) and a local server's context size. The versions of packages the try path imports are part of the fingerprint.
 - **fingerprint.lock is the tripwire.** (2026-09-29) npm test fails when the try path's fingerprint moves, so nobody resets the leaderboard by accident; `npm run fingerprint -- "why"` records it on purpose, and the diff shows in review.
 
+- **Every try streams to live.jsonl, and that reset the board once, on purpose.** (2026-09-29) The owner wanted to watch models type live. Both lanes emit one small event stream beside the workspace; Claude Code runs with `--output-format stream-json --verbose --include-partial-messages`. Streaming is in the try path now, so later UI work never has to touch it.
