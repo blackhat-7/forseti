@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   Input, SelectList, ProcessTerminal, TuiAltScreen, Text, ScrollView, VStack,
@@ -6,15 +6,15 @@ import {
   type Component, type Focusable, type TuiMouseEvent,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { FINISHED, comparisonReport, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, outcome, scorecards } from './report.ts';
+import { comparisonReport, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, outcome, scorecards } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
-import { activeRunId, readRun } from './runner.ts';
 import { LOCAL } from './local.ts';
-import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
+import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
 export { terminalText, terminalReport } from './ui/kit.ts';
-import { terminalText, plain, terminalReport, BACKDROP, accent, teal, green, amber, rose, muted, faint, SERIES, bold, theme, tabs, GRADED_ON, THINKING, JUDGE_FIELDS, LOCAL_ROW, TIMEOUTS, TURNS, PARALLEL, dot, nick, remaining, CARD, pill, cards, keyHints, padTo, duration, authLine, field, creditLine, count, tries, width_, pct, rateInk, MAX_TEXT, LIST_WIDTH, twoColumn, table } from './ui/kit.ts';
+import { terminalText, plain, terminalReport, BACKDROP, accent, teal, green, amber, rose, muted, faint, bold, theme, tabs, GRADED_ON, THINKING, JUDGE_FIELDS, LOCAL_ROW, TIMEOUTS, TURNS, PARALLEL, dot, CARD, pill, cards, keyHints, authLine, field, creditLine, count, tries, width_, pct, rateInk, MAX_TEXT, LIST_WIDTH, twoColumn, table } from './ui/kit.ts';
 import { comparisonPage, runLine } from './ui/board.ts';
-import { type Line, piChat, claudeChat } from './ui/live.ts';
+import { LiveWatch } from './ui/live.ts';
+import { LiveView, homeCard } from './ui/running.ts';
 
 /** Tab positions, in the order `tabs` names them and keys 1–6 select them. */
 const HOME = 0, LIVE = 1, MODELS = 2, TESTS = 3, RUNS = 4, SETTINGS = 5;
@@ -43,14 +43,11 @@ export class Dashboard implements Component, Focusable {
   private reportOffset = 0;
   private reportMode: 'summary' | 'full' = 'summary';
   private reportRuns: Run[] = [];
-  /**
-   * The run in progress, read from disk wherever it was started — this TUI, the CLI or another
-   * terminal — so every run shows the same screen. The lock names it, its run.json holds the tries
-   * that finished, and its newest trial folder is the try in progress.
-   */
-  private live?: Run;
-  /** Every try in progress: with tries running side by side there can be several. */
-  private nows: { model: string; task: string; since: number; step: string; chat: Line[] }[] = [];
+  /** The run in progress and every try in it, read from disk so a run started anywhere shows the same. */
+  private watcher: LiveWatch;
+  private liveView = new LiveView();
+  /** The second last painted, so elapsed-time labels tick without repainting on every poll. */
+  private second = 0;
   private reportLength = 0;
   private reportPage = 12;
   private everyTask = false;
@@ -79,34 +76,20 @@ export class Dashboard implements Component, Focusable {
     this.exit = exit;
     this.rows = rows;
     this.resetScroll = resetScroll;
+    this.watcher = new LiveWatch(app);
     // Read now without repainting: nothing is on screen yet, and the caller's render hook may not exist until this returns.
-    this.watch(false);
+    this.watcher.poll(true);
     // Opened during a run, the run is what the user came to see.
     if (this.live) this.tab = LIVE;
-    setInterval(() => this.watch(), 2000).unref();
+    // Ten looks a second keep streams smooth; the watcher makes each look a few stats, and idle ones nearly free.
+    setInterval(() => this.watch(), 100).unref();
   }
-  private watch(repaint = true): void {
-    const id = activeRunId(this.app.root), ended = this.live && !id;
-    this.live = id ? readRun(this.app.root, id) : undefined;
-    this.nows = [];
-    if (this.live) {
-      const run = this.live, dir = join(this.app.root, 'runs', run.id, 'trials');
-      // A trial folder exists from the moment its try starts; one with no result yet is in progress.
-      for (const open of existsSync(dir) ? readdirSync(dir).sort().filter(name => !run.trials.some(t => t.id === name)) : []) {
-        const model = run.models.find(m => run.tasks.some(t => open.slice(5) === `${m.id}-${t.id}`));
-        const task = model && run.tasks.find(t => open.slice(5) === `${model.id}-${t.id}`);
-        if (!model || !task) continue;
-        // The Pi agent logs every turn and tool call; Claude Code logs only its start and end.
-        const events = readFileSync(join(dir, open, 'events.jsonl'), 'utf8').split('\n').flatMap(l => { try { return [JSON.parse(l).event]; } catch { return []; } });
-        const turns = events.filter(e => e.type === 'assistant').length, tool = events.findLast(e => e.type === 'tool')?.event?.tool;
-        const chat = model.provider === 'claude-code' ? claudeChat(join(dir, open, 'public')) : piChat(events);
-        this.nows.push({ model: model.label, task: task.title, since: statSync(join(dir, open)).birthtimeMs, step: turns ? `turn ${turns}${tool ? ` · ${tool}` : ''}` : '', chat });
-      }
-    }
+  private get live(): Run | undefined { return this.watcher.run; }
+  private watch(): void {
+    const was = this.watcher.id, changed = this.watcher.poll(), ended = was && !this.watcher.id, second = Math.floor(Date.now() / 1000);
     // A run started elsewhere just ended: its results are new, so the leaderboard reloads.
-    if (!repaint) return;
     if (ended && !this.controller) void this.app.refresh().then(() => this.repaint());
-    if (this.live || ended) this.repaint();
+    if (changed || ended || (this.watcher.id && second !== this.second)) { this.second = second; this.repaint(); }
   }
   /** Rows the body region actually gets: the window minus the 3-line header and 3-line footer. */
   private bodyRows(): number { return Math.max(8, Math.min(200, Math.trunc(this.rows()) || 24) - 6); }
@@ -161,6 +144,8 @@ export class Dashboard implements Component, Focusable {
     // having to remember which of two keys this level wants is the whole complaint.
     if (key('ctrl+c') || key('escape') || (data === 'q' && !this.typing())) {
       if (this.dialog) this.close();
+      // A zoomed try is the innermost thing open on Live, so leaving it comes before the run.
+      else if (this.tab === LIVE && !key('ctrl+c') && this.liveView.leave()) return;
       else if (this.controller && data === 'q') this.message = 'A run is in progress. Press esc to cancel it.';
       // Cancelling throws away the tries not yet made, so it is asked, never done on one key.
       else if (this.controller || (this.live && key('escape'))) this.dialog = 'cancel'; else if (this.refreshing && data === 'q') this.message = 'Refreshing metadata. Press esc to stop waiting.';
@@ -175,6 +160,7 @@ export class Dashboard implements Component, Focusable {
       return;
     }
     if (data === '?') { this.dialog = 'help'; return; }
+    if (this.tab === LIVE && this.liveView.key(data, this.watcher.open)) return;
     if (key('down') || data === 'j' || key('up') || data === 'k') {
       const rows = this.listLength();
       this.selection[this.tab] = Math.max(0, Math.min(rows - 1, this.selection[this.tab]! + (key('up') || data === 'k' ? -1 : 1)));
@@ -400,15 +386,14 @@ export class Dashboard implements Component, Focusable {
     this.close();
     this.controller = new AbortController();
     this.progress = undefined;
-    this.live = undefined;
     this.lastFailure = '';
     this.message = 'Starting run… Esc cancels safely.';
     this.tab = LIVE;
     this.repaint();
     try {
       const run = await this.app.run(options, p => {
-        // The runner saves run.json after each try, just before reporting it, so a new count means a new result on disk.
-        if (p.completed !== this.live?.trials.length) this.watch();
+        // A report can mean a new result on disk, so look now rather than within the second.
+        this.watcher.poll(true);
         this.progress = p; this.repaint();
       }, this.controller.signal);
       // A reviewer that was switched on and scored nothing is worth saying out loud. Its
@@ -436,6 +421,7 @@ export class Dashboard implements Component, Focusable {
     if (this.dialog === 'report') return this.reportMode === 'summary' ? `m full report   a ${this.everyTask ? 'fold' : 'show'} solved tasks   e export   ↑↓ space b scroll` : 'm summary   e export   ↑↓ space b scroll';
     if (this.dialog === 'evidence') return '←→ trial   ↑↓ space b scroll   gg G ends   e export';
     if (this.dialog) return '';
+    if (this.tab === LIVE && (this.controller || this.live)) return this.liveView.hints(this.watcher.open) || 'tabs still work · edits wait for the run';
     if (this.controller) return 'tabs and ↑↓ still work · edits wait for the run';
     return [
       'r run   − + tries   l lane   t limit   T turns   p cache   P at once',
@@ -494,79 +480,16 @@ export class Dashboard implements Component, Focusable {
 
     if (this.dialog) this.renderDialog(inner, row, prose, head);
     else if (this.tab === LIVE) {
-      const top = lines.length;
-      const run = this.live, done = run?.trials.length ?? 0, total = run?.planned ?? 0, share = total ? done / total : 0;
-      // Time left from the pace so far: finished tries are the only honest predictor available.
-      const left = run && done && total > done ? remaining((Date.now() - Date.parse(run.created)) / done * (total - done)) : '';
-      head(this.controller?.signal.aborted ? 'Stopping safely' : 'Running', `${done} of ${total || '?'} tries${left ? ` · about ${left} left` : ''}`);
-      const label = ` ${Math.round(share * 100)}%`, cells = Math.max(8, inner - label.length);
-      row(accent('━'.repeat(Math.round(cells * share))) + faint('━'.repeat(cells - Math.round(cells * share))) + bold(label));
-      head('Now', this.nows.length ? `${tries(this.nows.length)} in progress` : '');
-      if (this.nows.length) {
-        const nameW = Math.min(20, Math.max(...this.nows.map(n => width_(nick(n.model)))) + 2);
-        for (const n of this.nows) {
-          const detail = [n.step, duration(Date.now() - n.since)].filter(Boolean).join(' · ');
-          row(`${bold(padTo(nick(n.model), nameW))}${padTo(plain(n.task), Math.max(8, inner - nameW - width_(detail) - 2))}  ${faint(detail)}`);
-        }
-      } else row(muted('Preparing isolated trial workspaces…'));
-      const live = this.live;
-      const feed = (live?.trials ?? []).map(trial => ({ model: live!.models.find(m => m.id === trial.model)?.label ?? trial.model, task: live!.tasks.find(t => t.id === trial.task)?.title ?? trial.task, trial }));
-      if (feed.length) {
-        // Solved means every correctness check passed, the same rule the leaderboard scores by.
-        const solved = (t: Trial) => t.checks.some(c => c.dimension === 'correctness') && t.checks.filter(c => c.dimension === 'correctness').every(c => c.passed);
-        const models = [...new Set(feed.map(f => nick(f.model)))];
-        const nameW = Math.min(20, Math.max(...models.map(m => width_(m))) + 2);
-        head('Results', 'solved of finished');
-        for (const [i, model] of models.entries()) {
-          const mine = feed.filter(f => nick(f.model) === model).map(f => f.trial), finished = mine.filter(t => FINISHED.includes(t.status));
-          const won = finished.filter(solved).length, out = finished.filter(t => STALL.includes(t.status)).length, wrong = finished.length - won - out;
-          const tail = [wrong ? rose(`${wrong} wrong`) : '', out ? amber(`${out} ran out`) : '', mine.length > finished.length ? faint(`${mine.length - finished.length} not run`) : ''].filter(Boolean).join(faint('  ·  '));
-          const barW = Math.max(0, Math.min(32, inner - nameW - 8 - 34));
-          row(`${bold(padTo(model, nameW))}${barW ? SERIES[i % SERIES.length]!(bar(finished.length ? won / finished.length : 0, barW)) + '  ' : ''}${bold(`${won}/${finished.length}`.padStart(5))}   ${tail}`);
-        }
-        const latest = feed.slice(-6).reverse();
-        const note = (trial: Trial) => {
-          const correct = trial.checks.filter(c => c.dimension === 'correctness');
-          return !FINISHED.includes(trial.status) ? 'not run' : STALL.includes(trial.status) ? 'ran out' : solved(trial) ? '' : `${correct.filter(c => c.passed).length}/${correct.length} checks`;
-        };
-        head('Latest', 'newest first');
-        for (const { model, task, trial } of latest) {
-          const mark = !FINISHED.includes(trial.status) ? faint('·') : STALL.includes(trial.status) ? amber('◷') : solved(trial) ? green('✓') : rose('✗');
-          const out = trial.tokens?.output ?? 0, tokens = trial.tokens ? (out < 1000 ? '<1k' : `${Math.round(out / 1000)}k`) : '';
-          const tail = `${padTo(note(trial), 12)}${duration(trial.wallMs).padStart(6)}${tokens.padStart(6)}`;
-          row(`${mark} ${bold(padTo(nick(model), nameW))}${padTo(plain(task), Math.max(8, inner - 2 - nameW - width_(tail)))}${faint(tail)}`);
-        }
-      }
-      // Each try's own conversation, when the window has room: side by side when it is wide enough for
-      // a readable column each, stacked when it is tall, and the short form above when it is neither.
-      const framed = lines.slice(top).filter(l => l.startsWith(CARD)).length;
-      const room = this.bodyRows() - (lines.length - top - framed) - 3 * framed - 4, talking = this.nows.filter(n => n.chat.length);
-      const said = (l: Line, w: number) => l.say
-        ? wrap(plain(l.say).replace(/\s+/g, ' '), Math.max(12, w - 2)).map((t, i) => `${i ? ' ' : faint('◆')} ${t}`)
-        : [`${l.failed ? rose('✗') : faint('→')} ${accent(padTo(l.tool ?? '', 13))}${faint(truncateToWidth(l.target ?? '', Math.max(4, w - 16)))}`];
-      const column = (n: typeof talking[number], w: number, height: number, titled: boolean) =>
-        [...(titled ? [bold(truncateToWidth(nick(n.model), w)) + faint(truncateToWidth(`  ${plain(n.task)}`, Math.max(0, w - width_(nick(n.model)))))] : []), ...n.chat.flatMap(l => said(l, w)).slice(-(height - (titled ? 1 : 0)))];
-      const colW = talking.length ? Math.floor((inner - 3 * (talking.length - 1)) / talking.length) : 0;
-      const cell = (text: string, w: number) => { const t = truncateToWidth(text, w); return t + ' '.repeat(Math.max(0, w - width_(t))); };
-      if (talking.length === 1 && room >= 7) {
-        head('Live', `${nick(talking[0]!.model)} · ${plain(talking[0]!.task)}`);
-        column(talking[0]!, inner, room - 3, false).forEach(line => row(line));
-      } else if (talking.length > 1 && room >= 8 && colW >= 38) {
-        head('Live', 'side by side');
-        const cols = talking.map(n => column(n, colW, room - 3, true));
-        for (let r = 0; r < Math.max(...cols.map(c => c.length)); r++) row(cols.map(c => cell(c[r] ?? '', colW)).join(faint(' │ ')));
-      } else if (talking.length > 1 && room >= 8 && Math.floor((room - 3) / talking.length) >= 4) {
-        head('Live');
-        for (const [i, n] of talking.entries()) { if (i) row(); column(n, inner, Math.floor((room - 3) / talking.length) - 1, true).forEach(line => row(line)); }
-      }
-      // The leaderboard stays on Home during a run: results already on record, below the run's own.
-      const board = this.app.leaderboard();
-      if (board) {
-        head('Leaderboard', 'L for the full page');
-        comparisonPage([board], inner, false, true).forEach(line => row(line));
+      const view = this.liveView.render({ watch: this.watcher, width: outer, boxed, rows: this.bodyRows(), busy, stopping: Boolean(this.controller?.signal.aborted), last: this.app.runs[0], now: Date.now() });
+      // The view counts x from the margin; a click target is counted from a card's content.
+      const indent = boxed ? 2 : 0;
+      for (const [i, line] of view.lines.entries()) {
+        for (const h of view.hits.filter(h => h.line === i)) this.pending.push({ at: lines.length, x0: h.x0 - indent, x1: h.x1 - indent, act: h.act });
+        row(line);
       }
     } else if (this.tab === HOME) {
       const enabled = this.models();
+      if (busy) { row(); homeCard(this.watcher, inner, Boolean(this.controller?.signal.aborted), Date.now()).forEach(row); }
       // The answer comes first: how the models compare, from every comparable try on record.
       const board = this.app.leaderboard();
       row();
@@ -690,7 +613,8 @@ export class Dashboard implements Component, Focusable {
     if (this.message) row(muted(truncateToWidth(plain(this.message), outer)));
     // The same two keys do the same thing at every level, so the hint names both every time.
     const leave = this.dialog ? (this.typing() ? `${accent('esc')} ${faint('back')}` : `${accent('esc · q')} ${faint('back')}`)
-      : busy && this.tab === HOME ? `${accent('esc')} ${faint('cancel')}` : `${accent('?')} ${faint('keys')}   ${accent('esc · q')} ${faint('quit')}`;
+      : this.tab === LIVE && this.liveView.zoomed ? `${accent('esc · q')} ${faint('back')}`
+      : busy && (this.tab === HOME || this.tab === LIVE) ? `${accent('esc')} ${faint('cancel')}` : `${accent('?')} ${faint('keys')}   ${accent('esc · q')} ${faint('quit')}`;
     row(spreadAt(keyHints(this.keys(), Math.max(1, outer - width_(leave) - 3)), leave, outer));
     return { footerStart, lines: lines.map(line => {
       const content = truncateToWidth(line, outer);

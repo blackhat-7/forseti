@@ -827,7 +827,7 @@ test('the leaderboard is the first thing on Home and opens in full from any tab'
   assert.match(page, /Per task/, 'the full page, not only the chart');
 });
 
-test('the running screen shows results per model, the latest tries and the time left', () => {
+test('the running screen shows progress, a tally per model and the finished tries, newest first', () => {
   const f = fixture('subscription', 60);
   // The screen reads the run as the runner saves it after every try, so the test saves it the same way.
   const root = mkdtempSync(join(process.cwd(), '.tmp/ui-live-'));
@@ -847,14 +847,14 @@ test('the running screen shows results per model, the latest tries and the time 
     f.progress({ completed: i + 1, total: 4, model: 'x', task: 'y', phase: 'done', runId: 'live' });
   }
   const text = f.text(100);
-  // Reworded with the card layout: 'tries' in the progress line, 'solved of finished' in the Results card's title.
-  assert.match(text, /3 of 4 tries · about .+ left/, 'time left comes from the pace so far');
-  assert.match(text, /Results[─\s]+solved of finished/);
-  assert.match(text, /Claude opus\s+[█░]+\s+1\/1/);
-  assert.match(text, /Claude haiku\s+[█░]+\s+0\/2\s+1 wrong\s+·\s+1 ran out/, 'wrong and ran out are told apart');
-  assert.match(text, /◷\s+Claude haiku\s+Task three\s+ran out/, 'newest first');
-  assert.match(text, /✗\s+Claude haiku\s+Task two\s+1\/2 checks\s+1\.5m\s+3k/);
+  // Redesigned Live tab: the card title carries count, share and time left; one tally line replaces the Results bars.
+  assert.match(text, /Running[─\s]+3 of 4 tries · 75% · about .+ left/, 'time left comes from the pace so far');
+  assert.match(text, /Claude opus\s+✓ 1\s+✗ 0\s+◷ 0\s+Claude haiku\s+✓ 0\s+✗ 1\s+◷ 1/, 'wrong and ran out are told apart');
+  assert.match(text, /Finished[─\s]+newest first/);
+  assert.match(text, /◷\s+Claude haiku\s+Task three\s+ran out/);
+  assert.match(text, /✗\s+Claude haiku\s+Task two\s+1\/2 checks\s+1\.5m\s+3k tokens/);
   assert.match(text, /✓\s+Claude opus\s+Task one/);
+  assert.ok(text.indexOf('Task three') < text.indexOf('Task two') && text.indexOf('Task two') < text.indexOf('Task one'), 'newest first');
   rmSync(root, { recursive: true, force: true });
   assert.doesNotMatch(text, /via Claude Code/, 'names, not provenance');
   for (const width of [40, 80, 120]) f.ui.render(width).forEach(row => assert.ok(visibleWidth(row) <= width, `width ${width}: ${visibleWidth(row)}`));
@@ -875,12 +875,13 @@ test('opening the TUI during a run does not repaint before the screen exists', (
   rmSync(root, { recursive: true, force: true });
 });
 
-test('a tall window shows the conversation of the try in progress; a short one keeps the short form', () => {
+test('a try in progress streams into its own pane; a run from before streaming falls back to events.jsonl', () => {
   const f = fixture();
   const root = mkdtempSync(join(process.cwd(), '.tmp/ui-chat-'));
   const claude = { ...model, id: 'opus', label: 'Claude opus · via Claude Code', provider: 'claude-code' }, local = { ...model, id: 'qwen', label: 'Qwen · local', provider: 'local' };
   const tasks = [{ id: 'one', title: 'Task one', hash: 'one' }];
   const start = (who: ModelConfig, trial: string) => {
+    rmSync(join(root, 'runs'), { recursive: true, force: true });
     mkdirSync(join(root, '.state'), { recursive: true });
     mkdirSync(join(root, 'runs', 'live', 'trials', trial, 'public'), { recursive: true });
     writeFileSync(join(root, '.state', 'run.lock'), JSON.stringify({ pid: process.pid, runId: 'live' }));
@@ -888,40 +889,30 @@ test('a tall window shows the conversation of the try in progress; a short one k
     return join(root, 'runs', 'live', 'trials', trial);
   };
   const view = (rows: number) => flat(new Dashboard({ ...f.app, root }, () => {}, () => {}, () => rows).render(100));
-  // The Pi agent: replies and tool calls come from the trial's own events.jsonl.
+  // A Pi try from before tries streamed: whole replies and tool calls from its events.jsonl.
   const pi = start(local, '0001-qwen-one');
-  writeFileSync(join(pi, 'events.jsonl'), [{ type: 'started' }, { type: 'assistant', text: 'Reading the parser first.' }, { type: 'tool', event: { tool: 'read_file', args: { path: 'src/counts.py' }, ok: true } }, { type: 'tool', event: { tool: 'python', args: { source: 'run check' }, ok: false } }]
-    .map(event => JSON.stringify({ at: '', event })).join('\n'));
+  writeFileSync(join(pi, 'events.jsonl'), [{ type: 'started' }, { type: 'assistant', text: 'Reading the parser first.' }, { type: 'tool', event: { tool: 'read_file', args: { path: 'src/counts.py' }, ok: true } }, { type: 'tool', event: { tool: 'python', args: { source: 'run check' }, ok: false, output: 'NameError: x' } }]
+    .map(event => `${JSON.stringify({ at: '', event })}\n`).join(''));
   const tall = view(60);
-  // Each try now has its own column under Live, headed by its model and task.
-  // One try's conversation: its card title names the model and task.
-  assert.match(tall, /Live[─\s]+Qwen · Task one/);
-  assert.match(tall, /◆ Reading the parser first\./);
-  assert.match(tall, /→ read_file\s+counts\.py/, 'a path shows as its file name');
-  assert.match(tall, /✗ python\s+run check/, 'a failed call is marked');
-  assert.doesNotMatch(view(24), /Live/, 'no room, no panel');
-  // Claude Code: its own session transcript, found by the trial's working folder.
-  const config = mkdtempSync(join(process.cwd(), '.tmp/ui-claude-')), saved = process.env.CLAUDE_CONFIG_DIR;
-  process.env.CLAUDE_CONFIG_DIR = config;
-  try {
-    rmSync(join(root, 'runs'), { recursive: true, force: true });
-    const cc = start(claude, '0001-opus-one'), folder = join(config, 'projects', join(cc, 'public').replace(/[^A-Za-z0-9]/g, '-'));
-    writeFileSync(join(cc, 'events.jsonl'), JSON.stringify({ at: '', event: { type: 'started' } }));
-    mkdirSync(folder, { recursive: true });
-    writeFileSync(join(folder, 's.jsonl'), [
-      { type: 'assistant', message: { content: [{ type: 'text', text: 'Let me look at the resolver.' }, { type: 'tool_use', name: 'Read', input: { file_path: '/x/resolver.py' } }] } },
-      { type: 'user', message: { content: [{ type: 'tool_result', is_error: true }] } },
-    ].map(e => JSON.stringify(e)).join('\n'));
-    const text = view(60);
-    assert.match(text, /◆ Let me look at the resolver\./);
-    assert.match(text, /✗ Read\s+resolver\.py/, 'an error result marks the call it answers');
-  } finally {
-    if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = saved;
-    rmSync(config, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true });
-  }
+  assert.match(tall, /Qwen · Task one[─\s]+turn 1 · \d+s/, 'the pane is titled by model and task, with its turn and age');
+  assert.match(tall, /Reading the parser first\./);
+  assert.match(tall, /▸ read_file\s+counts\.py ✓/, 'a path shows as its file name');
+  assert.match(tall, /▸ python\s+run check ✗ NameError: x/, 'a failed call shows why');
+  // Too short for panes: one line per try, with what it is doing now.
+  assert.match(view(14), /▌ Qwen\s+Task one\s+▸ python.*turn 1/);
+  // Any lane that streams: live.jsonl wins, thinking and words as they arrive.
+  const cc = start(claude, '0001-opus-one');
+  writeFileSync(join(cc, 'events.jsonl'), JSON.stringify({ at: '', event: { type: 'started' } }));
+  writeFileSync(join(cc, 'live.jsonl'), [{ k: 'turn' }, { k: 'think', s: 'The resolver ' }, { k: 'think', s: 'is the likely cause.' }, { k: 'say', s: 'Let me look at the resolver.' }, { k: 'tool', name: 'Read' }, { k: 'args', s: '{"file_path":"/x/resolver.py"}' }]
+    .map(e => JSON.stringify(e)).join('\n') + '\n');
+  const text = view(60);
+  assert.match(text, /┊ The resolver is the likely cause\./, 'deltas join into one thought');
+  assert.match(text, /Let me look at the resolver\./);
+  assert.match(text, /▸ Read\s+resolver\.py▍/, 'the call still running carries the cursor');
+  rmSync(root, { recursive: true, force: true });
 });
 
-test('tries running side by side each get a live column, or stack when the window is narrow', () => {
+test('tries running side by side each get a pane, or stack when the window is narrow', () => {
   const f = fixture();
   const root = mkdtempSync(join(process.cwd(), '.tmp/ui-many-'));
   const a = { ...model, id: 'qa', label: 'Qwen A · local', provider: 'local' }, b = { ...model, id: 'qb', label: 'Qwen B · local', provider: 'local' };
@@ -933,14 +924,14 @@ test('tries running side by side each get a live column, or stack when the windo
   for (const [who, said] of [['qa', 'Alpha is reading.'], ['qb', 'Beta is writing.']] as const) {
     const dir = join(root, 'runs', 'live', 'trials', `000${who === 'qa' ? 1 : 2}-${who}-one`);
     mkdirSync(join(dir, 'public'), { recursive: true });
-    writeFileSync(join(dir, 'events.jsonl'), [{ type: 'started' }, { type: 'assistant', text: said }].map(event => JSON.stringify({ at: '', event })).join('\n'));
+    writeFileSync(join(dir, 'live.jsonl'), `${JSON.stringify({ k: 'turn' })}\n${JSON.stringify({ k: 'say', s: said })}\n`);
   }
   const view = (width: number) => flat(new Dashboard({ ...f.app, root }, () => {}, () => {}, () => 60).render(width));
   const wide = view(140);
-  assert.match(wide, /Now[─\s]+2 tries in progress/); assert.match(wide, /^\s*Qwen A\s+Task one/m); assert.match(wide, /^\s*Qwen B\s+Task one/m, 'every try in progress is listed');
-  assert.match(wide, /◆ Alpha is reading\.\s+│ ◆ Beta is writing\./, 'side by side');
+  assert.match(wide, /Qwen A · Task one.*Qwen B · Task one/, 'every try in progress has a pane, side by side');
+  assert.match(wide, /Alpha is reading\.▍.*Beta is writing\.▍/);
   const narrow = view(80);
-  assert.ok(narrow.indexOf('Alpha is reading.') < narrow.indexOf('Beta is writing.') && !/│ ◆/.test(narrow), 'stacked');
+  assert.ok(narrow.indexOf('Alpha is reading.') < narrow.indexOf('Beta is writing.') && !/Alpha.*Beta/.test(narrow), 'stacked');
   for (const width of [40, 80, 140]) new Dashboard({ ...f.app, root }, () => {}, () => {}, () => 60).render(width).forEach(line => assert.ok(visibleWidth(line) <= width, `width ${width}: ${visibleWidth(line)}`));
   rmSync(root, { recursive: true, force: true });
 });
