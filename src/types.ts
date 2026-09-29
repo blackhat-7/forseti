@@ -27,6 +27,8 @@ export type GradeContext = {
   python: (source: string) => Promise<PythonResult>;
   /** Which agent produced the submission. The tool rubric only applies to Forseti's own file tools. */
   agent?: 'pi' | 'claude-code';
+  /** A world task's estate as the session left it: its own report, whose shape its grader knows. */
+  world?: unknown;
 };
 /**
  * What skill a task demands, as opposed to `dimensions`, which is what kind of check runs.
@@ -45,7 +47,9 @@ export type Capability = 'evidence' | 'restraint' | 'exactness' | 'scope' | 'saf
 export type Tier = 'basic' | 'standard' | 'hard';
 export type Task = { id: string; title: string; tags: string[]; dimensions: Dimension[]; capabilities: Capability[]; tier: Tier;
   /** A larger task may raise the run's turn and time budget for itself, never lower it. */
-  turns?: number; timeout?: number; prompt: string; fixture: string; grader: string };
+  turns?: number; timeout?: number; prompt: string; fixture: string; grader: string;
+  /** A suite module simulating a production estate; the model then gets a terminal onto it. See src/world.ts. */
+  world?: string };
 export type Suite = { schema: 1; id: string; title: string; tasks: Task[] };
 export type ModelConfig = {
   id: string; label: string; provider: string; model: string;
@@ -78,6 +82,8 @@ export type Trial = {
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
   estimatedCost: number | null;
   trace: ToolEvent[]; answer: string; files: Record<string, string>; turns: number;
+  /** A world task's estate as the session left it, for its grader. */
+  world?: unknown;
   /** The grading this try's checks came from, when a regrade replaced the original. See gradingKey. */
   graded?: string;
   /** The exact model the provider served, such as claude-sonnet-5-5 for the alias sonnet. Read from the try's log, never recorded by the try itself. */

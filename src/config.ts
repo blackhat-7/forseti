@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, relative } from 'node:path';
 import { CLAUDE_CODE_MODELS } from './claudecode.ts';
 import { LOCAL, localUrl } from './local.ts';
-import { atomicJson, files, inside, MAX_ENTRIES, readText, slug } from './files.ts';
+import { atomicJson, files, inside, MAX_ENTRIES, MAX_SUITE_BYTES, readText, slug } from './files.ts';
 import type { Capability, Config, Tier, Dimension, JudgeConfig, ModelConfig, RunOptions, Suite } from './types.ts';
 
 export const CAPABILITIES: Capability[] = ['evidence', 'restraint', 'exactness', 'scope', 'safety'];
@@ -90,11 +90,13 @@ export function loadSuite(root: string, path: string): { suite: Suite; dir: stri
     if (!TIERS.includes(task.tier)) throw new Error(`Declare a tier for ${task.id}: ${TIERS.join(', ')}`);
     if (!Array.isArray(task.dimensions) || !task.dimensions.length || new Set(task.dimensions).size !== task.dimensions.length || task.dimensions.some(d => !DIMENSIONS.includes(d))) throw new Error(`Declare unique rubric dimensions for ${task.id}`);
     if (typeof task.fixture !== 'string' || !task.fixture.startsWith('fixtures/') || typeof task.grader !== 'string' || !task.grader.startsWith('private/') || !task.grader.endsWith('.mjs')) throw new Error('Use fixtures/ public paths and private/*.mjs graders');
+    if (task.world !== undefined && (typeof task.world !== 'string' || !task.world.startsWith('private/') || !task.world.endsWith('.mjs'))) throw new Error(`A world is a private/*.mjs module: ${task.id}`);
     files(inside(dir, task.fixture));
     readText(dir, task.grader);
+    if (task.world) readText(dir, task.world);
   }
   // The snapshot holds every task's fixture and grader, so the per-trial file cap does not apply to it.
-  return { suite, dir, contents: files(dir, MAX_ENTRIES) };
+  return { suite, dir, contents: files(dir, MAX_ENTRIES, MAX_SUITE_BYTES) };
 }
 export function validateOptions(o: RunOptions): void {
   const inRange = (v: number, low: number, high: number) => Number.isInteger(v) && v >= low && v <= high;

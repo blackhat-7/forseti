@@ -39,5 +39,5 @@ export function rejectArtifacts(trial: Trial, task: Task, lane: RunOptions['lane
 }
 /** The grader's raw verdict on a submission; `work` holds its files, and graders read it only through the sandbox. */
 export function gradeSubmission(grader: Grader, trial: Trial, lane: RunOptions['lane'], control: boolean, agent: Agent, work: string, signal: AbortSignal): Promise<Check[]> {
-  return grader.grade({ lane, control, agent, answer: trial.answer, files: trial.files, trace: trial.trace, python: source => runPython(work, source, signal, 5000, true) });
+  return grader.grade({ lane, control, agent, answer: trial.answer, files: trial.files, trace: trial.trace, world: trial.world, python: source => runPython(work, source, signal, 5000, true) });
 }

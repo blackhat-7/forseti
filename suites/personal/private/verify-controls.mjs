@@ -20,7 +20,44 @@ function pythonIn(dir) {
   };
 }
 const results = [];
-for (const task of suite.tasks) {
+/** A fixture as nested files, which a production checkout needs and a single-module task does not. */
+function tree(dir, prefix = '') {
+  const out = {};
+  for (const entry of readdirSync(join(dir, prefix), {withFileTypes:true}).sort((a, b) => a.name.localeCompare(b.name))) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) Object.assign(out, tree(dir, rel)); else out[rel] = readFileSync(join(dir, rel), 'utf8');
+  }
+  return out;
+}
+/**
+ * A task with a simulated estate: its controls are shell sessions, not files. The reference must
+ * pass every check and the baseline must fail one, graded on the estate each session left behind.
+ */
+async function verifyWorld(task, grader, name, control) {
+  assert(Array.isArray(control.commands) && typeof control.answer === 'string', `${task.id} ${name}: a world control is {commands, answer}`);
+  const files = tree(join(suiteDir, task.fixture));
+  const {createWorld, directory} = await import(new URL(task.world, new URL('../', import.meta.url)));
+  assert(typeof directory === 'string' && /^[\w.-]+$/.test(directory), `${task.id}: the world names the folder it is checked out in`);
+  const fs = {
+    read: p => { if (!Object.hasOwn(files, p)) throw Error('missing'); return files[p]; },
+    write: (p, t) => { files[p] = t; }, list: () => Object.keys(files), remove: p => { delete files[p]; },
+  };
+  const world = createWorld({home:`/tmp/ws-control/${directory}`, fs});
+  for (const command of control.commands) {
+    const r = await world.exec(command);
+    assert(typeof r.output === 'string' && Number.isInteger(r.code), `${task.id} ${name}: exec returns {output, code}`);
+  }
+  const report = JSON.parse(JSON.stringify(world.report()));
+  const trace = control.commands.map(command => ({tool:'bash',args:{command},ok:true,ms:1,output:''}));
+  const checks = await grader.grade({answer:control.answer,files,trace,world:report,python:async () => { throw Error('no interpreter for world tasks'); },lane:'tools',control:true});
+  assert(checks.length > 0 && checks.every(c => typeof c.passed === 'boolean' && task.dimensions.includes(c.dimension)), `${task.id}: undeclared rubric`);
+  assert(task.dimensions.every(d => checks.some(c => c.dimension === d)), `${task.id}: missing declared rubric`);
+  if (name === 'reference') assert(checks.every(c => c.passed), `${task.id} reference: ${JSON.stringify(checks.filter(c => !c.passed))}`);
+  else assert(checks.some(c => !c.passed && c.dimension === 'correctness'), `${task.id} baseline must fail substantively`);
+  return {task:task.id,control:name,checks:checks.length,passed:checks.filter(c => c.passed).length};
+}
+// ONLY=<task id> verifies one task's controls, for work on a single task.
+for (const task of suite.tasks.filter(t => !process.env.ONLY || t.id === process.env.ONLY)) {
   const grader = await import(new URL(task.grader, new URL('../', import.meta.url)));
   if (task.dimensions.includes('design')) {
     const review = grader.review;
@@ -34,6 +71,7 @@ for (const task of suite.tasks) {
   for (const name of ['reference', 'baseline']) {
     const control = grader[name];
     assert(control, `${task.id} lacks ${name}`);
+    if (task.world) { results.push(await verifyWorld(task, grader, name, control)); continue; }
     const files = {...fixture(task.id), ...control.files};
     const dir = mkdtempSync(join(tmp, 'personal-control-'));
     try {

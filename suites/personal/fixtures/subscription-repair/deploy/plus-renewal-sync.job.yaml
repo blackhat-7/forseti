@@ -1,0 +1,38 @@
+# Cloud Run job, applied by Cloud Build on merge to main:
+#   gcloud run jobs replace deploy/plus-renewal-sync.job.yaml --region=us-central1
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: plus-renewal-sync
+  labels:
+    team: billing
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/cloudsql-instances: quillmart-prod:us-central1:core-pg
+    spec:
+      taskCount: 1
+      template:
+        spec:
+          serviceAccountName: plus-renewal-sync@quillmart-prod.iam.gserviceaccount.com
+          timeoutSeconds: 600
+          maxRetries: 0
+          containers:
+            - image: us-central1-docker.pkg.dev/quillmart-prod/billing/plus-renewal-sync:v1.14.0
+              resources:
+                limits:
+                  cpu: 1000m
+                  memory: 512Mi
+              env:
+                - name: DUNNING_MAX_FAILURES
+                  value: "3"
+                - name: GRACE_DAYS
+                  value: "3"
+                - name: BATCH_SIZE
+                  value: "500"
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: plus-renewal-sync-database-url
+                      key: latest

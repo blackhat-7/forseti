@@ -3,30 +3,31 @@
 Handoff note. Rewritten at the end of every session, never appended to. Cap 40 lines.
 Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
-**Last session:** 2026-09-29
+**Last session:** 2026-09-30
 
 ## State
 
 - **Runs on macOS and Linux.** On Linux, `src/sandbox-linux.py` confines Python with Landlock + seccomp. Kernel 6.12+, x86_64 or arm64; anything else fails closed.
-- **28 tasks.** `hard` 3 (`due-dates`, `sheet-eval`, `lock-refresh`) · `standard` 14 · `basic` 11. A task may set its own `turns`/`timeout`; the effective budget is the larger of the run's and the task's.
-- **Scoring changed this session.** Running out of a task's turn or time budget counts as unsolved (auth, quota, crash, cancel stay `not-run`). The headline weights each difficulty level equally.
+- **31 tasks.** `hard` 6 (`due-dates`, `sheet-eval`, `lock-refresh`, and three ops tasks) · `standard` 14 · `basic` 11. A task may set its own `turns`/`timeout`; the effective budget is the larger of the run's and the task's.
+- **Scoring:** running out of a task's turn or time budget counts as unsolved (auth, quota, crash, cancel stay `not-run`). Each difficulty level weighs equally.
 - **The rebuilt hard tier separates, on one try each.** `lock-refresh` and `sheet-eval`: Haiku ✗, Sonnet ✗, Opus ✓. `crew-schedule` and `log-query`: Haiku ✗, Sonnet ✓. Detail in `docs/transcript-research.md`. Not yet a measurement.
-- **The leaderboard is strict and currently empty.** It shows only tries recorded under today's code, task fingerprints and default settings; the lane (Claude Code vs Pi) may differ. Live streaming (commit b333ddc) moved the fingerprint on purpose: every earlier try is stale.
+- **The leaderboard is strict.** Only tries under today's fingerprints and default settings count. It holds Claude Sonnet 5.5 and Haiku 4.5 (56 tries each) and local Qwen (28).
 - **Every try streams to `trials/<id>/live.jsonl`.** The TUI's Live tab (key 2) tails it: one pane per try in progress, `[` `]` focus, ⏎ zoom. Claude Code runs with `--output-format stream-json`.
 - **A run only makes missing tries.** Same model + same task and harness submission fingerprints + same settings = already done; `--fresh` forces a rerun. A grading-only change is regraded from saved files (`npm start -- regrade`, also run before every run).
-- Battery on Linux: `npm run check` clean · `npm test` **88/88** · `npm run test:terminal` passes · `test:suite`, `test:judge` not run this session.
+- **Three production-ops tasks on a simulated estate** (`checkout-hotfix`, `subscription-repair`, `bucket-residency`). A task's `world` module answers gcloud/kubectl/psql/gsutil in-process; nothing real is reachable, and the model is not told. Engine: `suites/personal/private/ops/`. Contract: `docs/suite-contract.md#world-tasks`. Never run on a model yet.
+- Battery on Linux: `npm run check` clean · `npm test` **90/90** · `npm run test:suite` passes · `test:terminal`, `test:judge` not run this session.
 
 ## Done this session
 
-- TUI split into `src/ui/` (kit, board, live, running). Tabs: Home · Live · Models · Tests · Runs · Settings.
-- Redesign: one drawing per frame, scroll kept on repaint, clicks on tabs/rows/dialog buttons, eighth-block bars, centered dialogs.
+- World tasks: `src/world.ts`, a terminal tool in both lanes, virtual operator time (20 s per command), checkout in `/tmp/ws-*/<dir>`. Tasks without a world are unchanged; `fingerprint.lock` declares the old fingerprint equal.
 
 ## Next
 
-`PLAN.md`: top up the hard tier to 3 tries — only missing tries run. Editing `src/trial.ts` or anything it calls makes every try stale.
+`PLAN.md`: pilot the three ops tasks on Haiku and Sonnet, then read the transcripts for realism bugs. Ask the owner before spending Claude quota.
 
 ## Gotchas
 
+- **A world's outputs must read like the real tool, byte for byte.** Unknown commands get the real tool's error, never an invented success. `ONLY=<task> npm run test:suite` checks one task's controls.
 - **`render(w, 'body')` reuses the last frame drawn at that width.** A test that changes state must render the header (or `'all'`) first.
 - **`parallel` in forseti.json sets tries at once (default 1).** Local-server models still run one at a time.
 - **If `npm test` fails on `fingerprint.lock`, you changed how tries run.** Only `src/trial.ts` and its imports count, without comments or layout. Record it with `npm run fingerprint -- "why"` only if intended. A Claude Code update also resets Claude tries.

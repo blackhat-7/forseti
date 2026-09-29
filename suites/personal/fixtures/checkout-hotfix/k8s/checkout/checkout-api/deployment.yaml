@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: checkout
+  labels:
+    app: checkout-api
+spec:
+  replicas: 12
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: checkout-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: checkout-api
+    spec:
+      serviceAccountName: checkout-api
+      containers:
+        - name: checkout-api
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/checkout-api:v3.9.0
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DB_HOST
+              value: "127.0.0.1"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: "core"
+            - name: DB_USER
+              value: "checkout"
+            - name: DB_POOL_SIZE
+              value: "40"
+            - name: DB_POOL_TIMEOUT_MS
+              value: "5000"
+            - name: IDEMPOTENCY_KEYS
+              value: "enabled"
+            - name: OTEL_SERVICE_NAME
+              value: "checkout-api"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.4
+          args:
+            - "--port=5432"
+            - "quillmart-prod:us-central1:core-pg"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi

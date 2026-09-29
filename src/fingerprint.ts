@@ -73,7 +73,9 @@ export function taskFingerprint(task: Task, suite: Record<string, string>): stri
   const { title, tier, capabilities, dimensions, grader, ...shown } = task;
   const prefix = `${task.fixture.replace(/\/$/, '')}/`;
   const fixture = Object.fromEntries(Object.entries(suite).filter(([p]) => p.startsWith(prefix)).map(([p, text]) => [p.slice(prefix.length), text]).sort(([a], [b]) => a.localeCompare(b)));
-  return hash({ scheme: SCHEME, task: shown, fixture });
+  // A simulated estate is what the model meets on every command, so its code counts as the task.
+  const world = task.world ? { world: Object.fromEntries(closure(suite, task.world).map(p => [p, canonical(p, suite[p]!)])) } : {};
+  return hash({ scheme: SCHEME, task: shown, fixture, ...world });
 }
 /** How a task is graded: what it checks, its own grader and the helpers every grader imports. */
 export function taskGrading(task: Task, suite: Record<string, string>): string {

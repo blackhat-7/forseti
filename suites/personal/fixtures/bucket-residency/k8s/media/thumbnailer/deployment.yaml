@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thumbnailer
+  namespace: media
+  labels:
+    app: thumbnailer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: thumbnailer
+  template:
+    metadata:
+      labels:
+        app: thumbnailer
+    spec:
+      serviceAccountName: thumbnailer
+      containers:
+        - name: thumbnailer
+          image: us-docker.pkg.dev/quillmart-prod/apps/thumbnailer:v2.3.0
+          env:
+            - name: SUBSCRIPTION
+              value: "projects/quillmart-prod/subscriptions/thumbnailer-sub"
+            - name: THUMBS_BUCKET
+              value: "qm-user-thumbs"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 256Mi

@@ -13,11 +13,12 @@
  * Run as a script by the CLI itself: `node src/mcpserver.ts <workDir> <traceFile>`. Every call is
  * appended to the trace file so the runner can recover it, because the CLI reports no tool detail.
  */
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { clean } from './files.ts';
 import { runPython } from './sandbox.ts';
 import type { ToolEvent } from './types.ts';
+import { TERMINAL, openWorld, runCommand, type World } from './world.ts';
 
 /** Name, description and schema copied from `taskTools` in adapter.ts, so neither lane is told more. */
 export const MCP_TOOLS = [
@@ -27,20 +28,25 @@ export const MCP_TOOLS = [
 export const MCP_SERVER = 'forseti';
 export const MCP_ALLOWED = MCP_TOOLS.map(t => `mcp__${MCP_SERVER}__${t.name}`).join(',');
 
-export async function callTool(work: string, name: string, args: Record<string, unknown>): Promise<string> {
-  if (name === 'python') return JSON.stringify(await runPython(work, String(args.source)));
+/** A world task's only tool: the terminal, named as the Pi lane names it. */
+export const TERMINAL_TOOLS = [
+  { name: TERMINAL.name, description: TERMINAL.description, inputSchema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
+] as const;
+export async function callTool(work: string, name: string, args: Record<string, unknown>, world?: World): Promise<string> {
+  if (world && name === TERMINAL.name) return await runCommand(world, String(args.command));
+  if (!world && name === 'python') return JSON.stringify(await runPython(work, String(args.source)));
   throw new Error(`Unknown tool: ${name}`);
 }
 /**
  * Serves one JSON-RPC line at a time. Returns the reply, or undefined for a notification.
  * The 64-call budget mirrors the Pi lane's, so neither lane can out-spend the other on tools.
  */
-export function createHandler(work: string, onEvent: (event: ToolEvent) => void, limit = 64) {
+export function createHandler(work: string, onEvent: (event: ToolEvent) => void, limit = 64, world?: World) {
   let calls = 0;
   return async (message: { id?: unknown; method?: string; params?: { name?: string; arguments?: Record<string, unknown> } }) => {
     const reply = (result: unknown) => (message.id === undefined ? undefined : { jsonrpc: '2.0', id: message.id, result });
-    if (message.method === 'initialize') return reply({ protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: MCP_SERVER, version: '1' } });
-    if (message.method === 'tools/list') return reply({ tools: MCP_TOOLS });
+    if (message.method === 'initialize') return reply({ protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: world ? TERMINAL.server : MCP_SERVER, version: '1' } });
+    if (message.method === 'tools/list') return reply({ tools: world ? TERMINAL_TOOLS : MCP_TOOLS });
     if (message.method !== 'tools/call') return reply({});
     const name = String(message.params?.name ?? '');
     const args = message.params?.arguments ?? {};
@@ -48,7 +54,7 @@ export function createHandler(work: string, onEvent: (event: ToolEvent) => void,
     const started = performance.now();
     try {
       if (++calls > limit) throw new Error(`Tool-call budget exhausted (${limit})`);
-      event.output = (await callTool(work, name, args)).slice(0, 32_000);
+      event.output = (await callTool(work, name, args, world)).slice(0, 32_000);
       event.ok = true;
       return reply({ content: [{ type: 'text', text: event.output }] });
     } catch (e) {
@@ -61,8 +67,8 @@ export function createHandler(work: string, onEvent: (event: ToolEvent) => void,
   };
 }
 /** Newline-delimited JSON-RPC on stdin/stdout, which is what `--mcp-config` spawns. */
-export function serve(work: string, onEvent: (event: ToolEvent) => void, input = process.stdin, output = process.stdout): void {
-  const handle = createHandler(work, onEvent);
+export function serve(work: string, onEvent: (event: ToolEvent) => void, input = process.stdin, output = process.stdout, world?: World): void {
+  const handle = createHandler(work, onEvent, 64, world);
   let buffer = '';
   let queue: Promise<unknown> = Promise.resolve();
   input.on('data', (chunk: Buffer | string) => {
@@ -82,7 +88,13 @@ export function serve(work: string, onEvent: (event: ToolEvent) => void, input =
   });
 }
 if (process.argv[1] && import.meta.filename === process.argv[1]) {
-  const [work, trace] = process.argv.slice(2);
-  if (!work || !trace) throw new Error('Usage: mcpserver.ts <workDir> <traceFile>');
-  serve(work, event => appendFileSync(trace, `${JSON.stringify(event)}\n`, { mode: 0o600 }));
+  const [work, trace, worldModule, reportPath] = process.argv.slice(2);
+  if (!work || !trace || (worldModule && !reportPath)) throw new Error('Usage: mcpserver.ts <workDir> <traceFile> [<worldModule> <reportFile>]');
+  // The CLI ends this process when the try ends, so the estate's report is rewritten after every
+  // command: whatever the model did last is on disk for the grader.
+  const world = worldModule ? await openWorld(worldModule, work) : undefined;
+  serve(work, event => {
+    appendFileSync(trace, `${JSON.stringify(event)}\n`, { mode: 0o600 });
+    if (world) writeFileSync(reportPath!, JSON.stringify(world.report()), { mode: 0o600 });
+  }, process.stdin, process.stdout, world);
 }

@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { safeError } from './adapter.ts';
 import { files, inside } from './files.ts';
 import { MCP_ALLOWED, MCP_SERVER } from './mcpserver.ts';
+import { TERMINAL } from './world.ts';
 import type { LiveEvent, ModelConfig, RunOptions, Task, ToolEvent, Trial } from './types.ts';
 
 /** Model aliases the CLI accepts. Full IDs also work; these are what we offer in the catalog. */
@@ -41,7 +42,7 @@ export function claudeCodeBinary(): string {
 }
 
 /** The flags are part of the result: they are recorded per run so an old run stays reproducible. */
-export function claudeCodeArgs(model: string, maxTurns: number, mcpConfig = 'MCP_CONFIG'): string[] {
+export function claudeCodeArgs(model: string, maxTurns: number, mcpConfig = 'MCP_CONFIG', allowed = CLAUDE_CODE_ALLOWED): string[] {
   return [
     '-p',
     '--model', model,
@@ -61,7 +62,7 @@ export function claudeCodeArgs(model: string, maxTurns: number, mcpConfig = 'MCP
     // Locked-down: anything that would prompt is denied rather than waiting for a human.
     '--permission-mode', 'dontAsk',
     '--permission-prompts', 'none',
-    '--allowedTools', CLAUDE_CODE_ALLOWED,
+    '--allowedTools', allowed,
     '--disallowedTools', CLAUDE_CODE_DENIED,
     '--max-turns', String(maxTurns),
   ];
@@ -189,18 +190,21 @@ export function classify(text: string, exitCode: number | null): Trial['status']
 export async function runClaudeCode(
   work: string, scratch: string, model: ModelConfig, task: Task, options: RunOptions, trial: Trial,
   signal: AbortSignal, notify: (phase: string) => void, record: (event: unknown) => void, live: (event: LiveEvent) => void = () => {},
+  world?: { module: string; report: string },
 ): Promise<void> {
   const root = realpathSync(work);
   // Both files live beside the workspace, never inside it: anything under `work` is part of the
   // submission, would be graded as an added file and would be readable by the model.
   const tracePath = inside(scratch, 'tools.jsonl');
   const configPath = inside(scratch, 'mcp.json');
-  writeFileSync(configPath, JSON.stringify({ mcpServers: { [MCP_SERVER]: {
+  // A world task's server is the terminal onto the estate, named like one, in place of Python.
+  const server = world ? TERMINAL.server : MCP_SERVER;
+  writeFileSync(configPath, JSON.stringify({ mcpServers: { [server]: {
     command: process.execPath,
-    args: [fileURLToPath(new URL('mcpserver.ts', import.meta.url)), root, tracePath],
+    args: [fileURLToPath(new URL('mcpserver.ts', import.meta.url)), root, tracePath, ...(world ? [world.module, world.report] : [])],
   } } }), { mode: 0o600 });
-  const prompt = `${task.prompt}\n\nWork only inside this directory. Public files:\n${Object.keys(files(root)).join('\n') || '(empty)'}`;
-  const args = claudeCodeArgs(model.model, options.maxTurns, configPath);
+  const prompt = world ? task.prompt : `${task.prompt}\n\nWork only inside this directory. Public files:\n${Object.keys(files(root)).join('\n') || '(empty)'}`;
+  const args = claudeCodeArgs(model.model, options.maxTurns, configPath, world ? `Read,Write,Edit,Glob,Grep,mcp__${TERMINAL.server}__${TERMINAL.name}` : CLAUDE_CODE_ALLOWED);
   record({ type: 'claude-code', binary: claudeCodeBinary(), args });
   notify(`claude code · ${model.model}`);
 

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: uploads-api
+  namespace: media
+spec:
+  selector:
+    app: uploads-api
+  ports:
+    - port: 80
+      targetPort: 8080

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-worker
+  namespace: payments
+  labels:
+    app: payments-worker
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: payments-worker
+  template:
+    metadata:
+      labels:
+        app: payments-worker
+    spec:
+      serviceAccountName: payments-worker
+      containers:
+        - name: payments-worker
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/payments-worker:v1.9.3
+          env:
+            - name: DB_HOST
+              value: "127.0.0.1"
+            - name: DB_NAME
+              value: "core"
+            - name: DB_USER
+              value: "payments-worker@quillmart-prod.iam"
+            - name: DB_POOL_SIZE
+              value: "10"
+            - name: PUBSUB_SUBSCRIPTION
+              value: "payments-capture"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.4
+          args:
+            - "--port=5432"
+            - "--auto-iam-authn"
+            - "quillmart-prod:us-central1:core-pg"

@@ -31,6 +31,8 @@ Each line carries its own done-check. A task too big for one session gets split 
 - [ ] Add a second entitled live model when quota allows. Done when one run compares two live models under the same harness, with no recorded provider failure standing in for a result.
 - [ ] **Measure the rebuilt hard tier properly.** Run Haiku, Sonnet and Opus on `due-dates,sheet-eval,lock-refresh,crew-schedule,log-query` at `--repeat 3`; tries already recorded under the same conditions are skipped. Done when the page calls Opus over Sonnet and Sonnet over Haiku a separation, or the tier is rebuilt. Run it alone: no parallel subagents, and check `/usage` first.
 
+- [ ] **Pilot the three ops tasks.** Run Haiku and Sonnet once on `checkout-hotfix,subscription-repair,bucket-residency`, read each transcript for anything that reveals the simulation or a command the estate answers wrongly, fix, then set the tier from results. Done when both have one graded try each and no realism bug is open.
+
 ## Later
 
 - [ ] Raise the reviewer to 3 rounds and re-measure. Single-round judging was unstable in milestone 18; majority settling is what `repeat` exists for.

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: orders
+  labels:
+    app: orders-api
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      serviceAccountName: orders-api
+      containers:
+        - name: orders-api
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/orders-api:v5.2.1
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DB_HOST
+              value: "127.0.0.1"
+            - name: DB_NAME
+              value: "core"
+            - name: DB_USER
+              value: "orders"
+            - name: DB_POOL_SIZE
+              value: "20"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 768Mi
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.4
+          args:
+            - "--port=5432"
+            - "quillmart-prod:us-central1:core-pg"

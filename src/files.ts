@@ -46,7 +46,9 @@ export function readText(root: string, path: string): string {
   if (!st.isFile() || st.size > MAX_FILE) throw new Error('Expected a text file of at most 128 KiB');
   return readFileSync(full, 'utf8');
 }
-export function files(root: string, limit = MAX_FILES): Record<string, string> {
+/** A suite snapshot holds every task's fixture, grader and simulated estate, so it gets a larger allowance than one try's workspace. */
+export const MAX_SUITE_BYTES = 4 * 1024 * 1024;
+export function files(root: string, limit = MAX_FILES, bytes = 512 * 1024): Record<string, string> {
   const result: Record<string, string> = Object.create(null);
   let size = 0, entries = 0;
   function visit(dir: string, depth = 0) {
@@ -60,7 +62,7 @@ export function files(root: string, limit = MAX_FILES): Record<string, string> {
         if (Object.keys(result).length >= limit) throw new Error(`Too many fixture files (max ${limit})`);
         const text = readText(root, rel);
         size += Buffer.byteLength(text);
-        if (size > 512 * 1024) throw new Error('Fixture tree exceeds 512 KiB');
+        if (size > bytes) throw new Error(`Fixture tree exceeds ${bytes / 1024} KiB`);
         result[rel] = text;
       }
     }

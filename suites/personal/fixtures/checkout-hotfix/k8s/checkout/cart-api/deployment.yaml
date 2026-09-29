@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart-api
+  namespace: checkout
+  labels:
+    app: cart-api
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: cart-api
+  template:
+    metadata:
+      labels:
+        app: cart-api
+    spec:
+      serviceAccountName: cart-api
+      containers:
+        - name: cart-api
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/cart-api:v2.13.3
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: REDIS_ADDR
+              value: "10.20.0.4:6379"
+            - name: SESSION_TTL
+              value: "72h"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi

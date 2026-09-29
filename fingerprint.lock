@@ -1,7 +1,7 @@
 {
   "scheme": 2,
-  "harness": "27bfe2fa281d1b839700337f025f0451e7cace3edda0b8ca8cf96eb3bbb9e195",
-  "grading": "8b491f6fe635ea37440c6a3559547b323587489a166e882ad9cea325f4f6d1d5",
+  "harness": "4e1a097b5ee714941d43897420b0a4e36865d11ad8c720c6cacf9e95bd71cef1",
+  "grading": "c2b3c3c4f4c45009c324c48955938e229334686bb80c0fabee282d4bccc2a06a",
   "files": [
     "adapter.ts",
     "auth.ts",
@@ -13,7 +13,8 @@
     "sandbox-linux.py",
     "sandbox.ts",
     "trial.ts",
-    "types.ts"
+    "types.ts",
+    "world.ts"
   ],
   "gradingFiles": [
     "adapter.ts",
@@ -26,15 +27,22 @@
     "mcpserver.ts",
     "sandbox-linux.py",
     "sandbox.ts",
-    "types.ts"
+    "types.ts",
+    "world.ts"
   ],
-  "note": "Grading moved from src/trial.ts to src/grade.ts with its own fingerprint, so a grading change regrades saved tries instead of rerunning models. A pure move: the old try path is declared equivalent below.",
+  "note": "World tasks: a task may name a simulated production estate; the model then gets a terminal onto it (src/world.ts) instead of Python. Tasks without a world run exactly as before: same tools, system prompt, prompt, MCP server and workspace.",
   "equivalent": [
     {
       "was": "e9ef57a27baa290ca498be82e674e01d1fafb18b95b0ccbf4655d8f8d80d1404",
-      "harness": "27bfe2fa281d1b839700337f025f0451e7cace3edda0b8ca8cf96eb3bbb9e195",
-      "grading": "8b491f6fe635ea37440c6a3559547b323587489a166e882ad9cea325f4f6d1d5",
-      "note": "The try path before grade.ts existed (commit b333ddc to b0c9210). Splitting grading out moved code without changing it, so tries recorded then are current for both parts."
+      "harness": "4e1a097b5ee714941d43897420b0a4e36865d11ad8c720c6cacf9e95bd71cef1",
+      "grading": "c2b3c3c4f4c45009c324c48955938e229334686bb80c0fabee282d4bccc2a06a",
+      "note": "The try path before grade.ts existed (commit b333ddc to b0c9210). Splitting grading out moved code without changing it; adding world tasks changed nothing for tasks without one. Tries recorded then are current for both parts."
+    },
+    {
+      "was": "27bfe2fa281d1b839700337f025f0451e7cace3edda0b8ca8cf96eb3bbb9e195",
+      "harness": "4e1a097b5ee714941d43897420b0a4e36865d11ad8c720c6cacf9e95bd71cef1",
+      "grading": "c2b3c3c4f4c45009c324c48955938e229334686bb80c0fabee282d4bccc2a06a",
+      "note": "Adding world tasks changed the try and grading code only on paths a task without `world` never takes (checked: every existing task's fingerprint is unchanged, and its tools, prompts, MCP server and workspace are identical). So tries recorded before are current for both parts."
     }
   ]
 }

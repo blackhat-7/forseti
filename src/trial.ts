@@ -1,4 +1,4 @@
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { authInfo, modelsFor } from './auth.ts';
 import { runAgent, safeError } from './adapter.ts';
@@ -7,6 +7,7 @@ import { files, inside, localDir, put } from './files.ts';
 import { applicableDimensions, gradeSubmission, loadGrader, rejectArtifacts, validateChecks, type Agent, type Grader } from './grade.ts';
 import { review as reviewSubmission, type JudgeCall, type Review } from './judge.ts';
 import type { JudgeConfig, LiveEvent, ModelConfig, RunOptions, Task, Trial } from './types.ts';
+import { loadWorldModule, openWorld, removeWorkspace, runCommand, worldWorkspace } from './world.ts';
 
 /**
  * Everything that decides how one try runs. This file is part of the harness fingerprint; the
@@ -57,7 +58,9 @@ export async function runTrial(ctx: TrialContext, job: Job, id: string): Promise
   const { options, signal } = ctx, agent = laneOf(job.model), control = job.model.provider === 'control';
   const trial = blankTrial(id, job.model, job.task, job.repetition, ctx.local);
   const trialDir = localDir(ctx.runDir, `trials/${trial.id}`);
-  const work = localDir(trialDir, 'public');
+  const worldModule = job.task.world ? inside(ctx.snapshot, job.task.world) : undefined;
+  // A world task's checkout lives in a folder named like one; its files are recorded with the try as usual.
+  const work = worldModule ? worldWorkspace((await loadWorldModule(worldModule)).directory) : localDir(trialDir, 'public');
   const record = (event: unknown) => appendFileSync(inside(trialDir, 'events.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), event })}\n`, { mode: 0o600 });
   const live = liveLog(inside(trialDir, 'live.jsonl'));
   const start = performance.now();
@@ -75,19 +78,24 @@ export async function runTrial(ctx: TrialContext, job: Job, id: string): Promise
     else if (!trial.auth.ready) { trial.status = 'auth_error'; trial.error = trial.auth.note; }
     else {
       const grader = await loadGrader(inside(ctx.snapshot, job.task.grader)) as Grader & {
-        reference?: { files?: Record<string, string>; answer?: string };
-        baseline?: { files?: Record<string, string>; answer?: string };
+        reference?: { files?: Record<string, string>; answer?: string; commands?: string[] };
+        baseline?: { files?: Record<string, string>; answer?: string; commands?: string[] };
         review?: Review;
       };
       deadline = setTimeout(() => controller.abort(), budget.timeout * 1000);
+      // The Claude Code lane's estate lives in its tool server's process, which leaves its report here.
+      const reportPath = inside(trialDir, 'world.json');
+      const world = worldModule && (control || agent === 'pi') ? await openWorld(worldModule, work) : undefined;
       if (control) {
         ctx.notify('applying synthetic control');
         const answer = job.model.model === 'reference' ? grader.reference : grader.baseline;
         if (!answer) throw new Error(`Missing ${job.model.model} control for ${job.task.id}`);
         for (const [path, content] of Object.entries(answer.files ?? {})) put(work, path, content);
+        for (const command of answer.commands ?? []) trial.trace.push({ tool: 'bash', args: { command }, ok: true, ms: 0, output: await runCommand(world!, command) });
         trial.answer = answer.answer ?? '';
-      } else if (agent === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, live.emit);
-      else await runAgent(work, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, modelsFor(job.model, ctx.local, ctx.contexts), live.emit);
+      } else if (agent === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, live.emit, worldModule ? { module: worldModule, report: reportPath } : undefined);
+      else await runAgent(work, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, modelsFor(job.model, ctx.local, ctx.contexts), live.emit, world);
+      if (worldModule) trial.world = world ? world.report() : existsSync(reportPath) ? JSON.parse(readFileSync(reportPath, 'utf8')) : (await openWorld(worldModule, work)).report();
       if (controller.signal.aborted) {
         trial.status = signal.aborted ? 'cancelled' : 'timeout';
         trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${budget.timeout}s exceeded; counted as unsolved`;
@@ -128,6 +136,7 @@ export async function runTrial(ctx: TrialContext, job: Job, id: string): Promise
     trial.error = safeError(error);
   } finally {
     if (deadline) clearTimeout(deadline);
+    if (worldModule) removeWorkspace(work);
     live.close();
     signal.removeEventListener('abort', cancel);
     controller.abort();

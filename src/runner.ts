@@ -8,7 +8,7 @@ import { claudeCodeArgs, claudeCodeBinary } from './claudecode.ts';
 import { SCHEME, gradeClosure, gradingFingerprint, harnessFingerprint, taskFingerprint, taskGrading, trialClosure, canonical } from './fingerprint.ts';
 export { gradeClosure } from './fingerprint.ts';
 import { DEFAULT_OPTIONS, loadSuite, selectedModels, validateOptions } from './config.ts';
-import { MAX_ENTRIES, atomicJson, files, hash, inside, localDir, put } from './files.ts';
+import { MAX_ENTRIES, MAX_SUITE_BYTES, atomicJson, files, hash, inside, localDir, put } from './files.ts';
 import { makeJudgeCall, type JudgeCall } from './judge.ts';
 import { listLocalModels, LOCAL } from './local.ts';
 import { SANDBOX, checkSandbox, pythonExecutable } from './sandbox.ts';
@@ -223,7 +223,7 @@ function refingerprint(root: string, run: Run): void {
   if (cache?.scheme !== SCHEME) {
     const at = (path: string) => inside(dir, path);
     if (!existsSync(at('harness/src')) || !existsSync(at('harness/package-lock.json')) || !existsSync(at('suite/suite.json'))) return;
-    const suite = files(at('suite'), MAX_ENTRIES), definitions = (JSON.parse(suite['suite.json']!) as { tasks: Task[] }).tasks;
+    const suite = files(at('suite'), MAX_ENTRIES, MAX_SUITE_BYTES), definitions = (JSON.parse(suite['suite.json']!) as { tasks: Task[] }).tasks;
     const logged = run.models.some(m => m.provider === 'claude-code') && !run.environment.claudeVersion && existsSync(at('trials'))
       ? readdirSync(at('trials')).map(t => { try { return /versions\/([\d.]+)/.exec(readFileSync(at(`trials/${t}/events.jsonl`), 'utf8'))?.[1]; } catch { return undefined; } }).find(Boolean) : undefined;
     const src = files(at('harness/src')), lock = readFileSync(at('harness/package-lock.json'), 'utf8');

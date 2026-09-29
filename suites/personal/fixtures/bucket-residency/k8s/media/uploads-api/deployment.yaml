@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: uploads-api
+  namespace: media
+  labels:
+    app: uploads-api
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: uploads-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: uploads-api
+    spec:
+      serviceAccountName: uploads-api
+      containers:
+        - name: uploads-api
+          image: us-docker.pkg.dev/quillmart-prod/apps/uploads-api:v4.12.3
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: uploads-config
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080

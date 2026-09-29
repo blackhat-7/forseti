@@ -125,6 +125,12 @@ For code tasks, add a manifest entry, public fixture directory and private `.mjs
 
 `forseti.json` is the small editable configuration. Change `suite` to another **workspace-local** manifest, or edit a model's `thinking` field. Use distinct config IDs for reasoning variants; reports retain the exact settings. Config holds no secrets. New providers require Pi support; new catalog entries require a reviewed, pinned Pi dependency update, not arbitrary CLI execution.
 
+## Production operations tasks
+
+Three `hard` tasks put a model on call for a simulated production estate: stop a live checkout outage (`checkout-hotfix`), repair subscriptions a bad job cancelled in the production database (`subscription-repair`), and move a live uploads bucket to the EU (`bucket-residency`). The model gets a terminal with `gcloud`, `kubectl`, `psql`, `gsutil` and the usual Unix tools, and is not told the estate is simulated.
+
+Nothing real is reachable. Every command is answered by JavaScript over in-memory state; no process is started and no network is used, whatever the model types. Each command costs 20 virtual seconds plus its own duration, and the incident keeps moving meanwhile, so a slow, over-cautious fix loses orders just as a reckless one causes an outage. Graders read what the session did to the estate: whether it was fixed, how fast, and what else broke on the way. Contract: [world tasks](docs/suite-contract.md#world-tasks).
+
 ## Judge design quality
 
 Some things cannot be counted: whether an abstraction earns its place, whether a comment carries

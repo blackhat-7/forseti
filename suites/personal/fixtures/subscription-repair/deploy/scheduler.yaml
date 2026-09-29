@@ -1,0 +1,17 @@
+# Cloud Scheduler jobs, location us-central1. Times are UTC.
+- name: plus-renewal-sync
+  schedule: "*/20 * * * *"
+  target: run-job/plus-renewal-sync
+  service_account: plus-renewal-sync-invoker@quillmart-prod.iam.gserviceaccount.com
+- name: mailer-dispatch
+  schedule: "15,45 * * * *"
+  target: run-service/mailer POST /dispatch
+  service_account: mailer-invoker@quillmart-prod.iam.gserviceaccount.com
+- name: billing-retry
+  schedule: "5 * * * *"
+  target: run-service/billing-api POST /internal/retry-failed-payments
+  service_account: billing-invoker@quillmart-prod.iam.gserviceaccount.com
+- name: invoice-generator
+  schedule: "0 2 * * *"
+  target: run-job/invoice-generator
+  service_account: invoice-generator-invoker@quillmart-prod.iam.gserviceaccount.com
