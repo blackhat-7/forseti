@@ -17,6 +17,10 @@ const up = '\x1b[A';
 const auth: AuthInfo = { mode: 'pi', billing: 'subscription', ready: true, note: 'Existing subscription' };
 const model: ModelConfig = { id: 'example', label: 'Example model', provider: 'example', model: 'model-one', auth: 'pi', enabled: true, thinking: 'off' };
 const options: RunOptions = { repeat: 2, seed: 42, lane: 'tools', timeout: 90, maxTurns: 12, maxTokens: 4096, allowMetered: false, cache: true };
+// One empty workspace for every fixture: the running screen reads the run lock under root, and the
+// real workspace may have a run going.
+const ISOLATED = mkdtempSync(join(process.cwd(), '.tmp/ui-'));
+test.after(() => rmSync(ISOLATED, { recursive: true, force: true }));
 function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
   const calls: RunOptions[] = [];
   let aborted = false;
@@ -33,7 +37,7 @@ function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
       wallMs: 100, modelMs: 70, toolMs: 20, gradeMs: 10, firstTokenMs: null, tokens: null, estimatedCost: null, trace: [], answer: '41', files: {}, turns: 1 }],
   };
   const app = {
-    root: process.cwd(),
+    root: ISOLATED,
     config: { schema: 1, suite: 'suite', models: [structuredClone(model)], disabledTests: [], removedTests: [], judge: { ...DEFAULT_JUDGE }, local: { url: '' } } as Config,
     suite: { schema: 1, id: 'suite', title: 'Independent benchmark', tasks: [{ id: 'json', title: 'JSON test', tags: ['json'], dimensions: ['correctness', 'instructions'], prompt: 'Return 42.', fixture: 'fixtures/json', grader: 'private/json.mjs' }] } as Suite,
     catalog: [
@@ -182,7 +186,8 @@ for (const billing of ['metered', 'unknown'] as const) {
     assert.equal(f.calls[0]!.allowMetered, true);
     assert.deepEqual(f.calls[0]!.models, ['example']);
     assert.match(f.text(), /Running/);
-    assert.match(f.text(), /grading/);
+    // The step now comes from the run on disk, like every run's; this mock has written nothing yet.
+    assert.match(f.text(), /Preparing isolated trial workspaces/);
     f.key('r', 'q');
     assert.equal(f.calls.length, 1);
     assert.equal(f.exits, 0);
@@ -311,9 +316,10 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
   assert.equal(f.calls[0]!.timeout, 180, 'and it reaches the run');
   // A run is long, so looking around stays possible; changing anything does not.
   assert.match(f.text(), /Running/, 'Home shows the progress panel');
-  assert.match(f.text(), /running · 1\/2/, 'the header carries the run');
+  // Counts come from the run on disk, which this mock never writes; the header still says a run is going.
+  assert.match(f.text(), /running · 0\/\?/, 'the header carries the run');
   f.key('-', 'l', '3', 'a');
-  assert.match(f.text(), /running · 1\/2/, 'still visible from another tab');
+  assert.match(f.text(), /running · 0\/\?/, 'still visible from another tab');
   assert.doesNotMatch(f.text(), /Running/, 'the progress panel belongs to Home');
   assert.equal(f.app.suite.tasks.length, 1, 'a does not open the add-test form while busy');
   f.key('q');
@@ -817,9 +823,12 @@ test('the running screen shows results per model, the latest tries and the time 
   const tried = (m: string, task: string, status: Trial['status'], passed: boolean) => ({ ...f.run.trials[0]!, id: `${m}-${task}`, model: m, task, status, wallMs: 90_000, tokens: { input: 0, output: 3000, cacheRead: 0, cacheWrite: 0 },
     checks: status === 'timeout' ? [] : [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }, { id: 'd', dimension: 'correctness' as const, passed: true, evidence: '' }] });
   const trials = [tried('opus', 'one', 'passed', true), tried('haiku', 'two', 'failed', false), tried('haiku', 'three', 'timeout', false)];
+  // The lock names the run in progress, exactly as the runner writes it.
+  mkdirSync(join(root, '.state'), { recursive: true });
+  writeFileSync(join(root, '.state', 'run.lock'), JSON.stringify({ pid: process.pid, runId: 'live' }));
   for (const [i] of trials.entries()) {
-    mkdirSync(join(root, 'runs', 'live'), { recursive: true });
-    writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', status: 'running', models, tasks, planned: 4, trials: trials.slice(0, i + 1) }));
+    mkdirSync(join(root, 'runs', 'live', 'trials'), { recursive: true });
+    writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', created: new Date(Date.now() - 180_000).toISOString(), status: 'running', models, tasks, planned: 4, trials: trials.slice(0, i + 1) }));
     f.progress({ completed: i + 1, total: 4, model: 'x', task: 'y', phase: 'done', runId: 'live' });
   }
   const text = f.text(100);

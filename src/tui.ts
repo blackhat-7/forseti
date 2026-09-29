@@ -1,3 +1,5 @@
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import {
   Input, SelectList, ProcessTerminal, TuiAltScreen, Text, ScrollView, VStack,
@@ -7,7 +9,7 @@ import {
 import type { App, CatalogEntry } from './app.ts';
 import { FINISHED, comparisonReport, levelsNote, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
-import { readRun } from './runner.ts';
+import { activeRunId, readRun } from './runner.ts';
 import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
 
@@ -293,11 +295,12 @@ export class Dashboard implements Component, Focusable {
   private reportMode: 'summary' | 'full' = 'summary';
   private reportRuns: Run[] = [];
   /**
-   * The current run as last saved. Read from its run.json rather than passed in the progress event,
-   * so the running screen never touches the fingerprinted runner code.
+   * The run in progress, read from disk wherever it was started — this TUI, the CLI or another
+   * terminal — so every run shows the same screen. The lock names it, its run.json holds the tries
+   * that finished, and its newest trial folder is the try in progress.
    */
   private live?: Run;
-  private runStart = 0;
+  private now?: { model: string; task: string; since: number; step: string };
   private reportLength = 0;
   private reportPage = 12;
   private everyTask = false;
@@ -318,6 +321,28 @@ export class Dashboard implements Component, Focusable {
     this.repaint = repaint;
     this.exit = exit;
     this.rows = rows;
+    this.watch();
+    setInterval(() => this.watch(), 2000).unref();
+  }
+  private watch(): void {
+    const id = activeRunId(this.app.root), ended = this.live && !id;
+    this.live = id ? readRun(this.app.root, id) : undefined;
+    this.now = undefined;
+    if (this.live) {
+      const run = this.live, dir = join(this.app.root, 'runs', run.id, 'trials');
+      const open = existsSync(dir) ? readdirSync(dir).sort().reverse().find(name => !run.trials.some(t => t.id === name)) : undefined;
+      const model = open && run.models.find(m => run.tasks.some(t => open.slice(5) === `${m.id}-${t.id}`));
+      const task = model && run.tasks.find(t => open!.slice(5) === `${model.id}-${t.id}`);
+      if (model && task) {
+        // The Pi agent logs every turn and tool call; Claude Code logs only its start and end.
+        const events = readFileSync(join(dir, open!, 'events.jsonl'), 'utf8').split('\n').flatMap(l => { try { return [JSON.parse(l).event]; } catch { return []; } });
+        const turns = events.filter(e => e.type === 'assistant').length, tool = events.findLast(e => e.type === 'tool')?.event?.tool;
+        this.now = { model: model.label, task: task.title, since: statSync(join(dir, open!)).birthtimeMs, step: turns ? `turn ${turns}${tool ? ` · ${tool}` : ''}` : '' };
+      }
+    }
+    // A run started elsewhere just ended: its results are new, so the leaderboard reloads.
+    if (ended && !this.controller) void this.app.refresh().then(() => this.repaint());
+    if (this.live || ended) this.repaint();
   }
   /** Rows the body region actually gets: the window minus the 3-line header and 3-line footer. */
   private bodyRows(): number { return Math.max(8, Math.min(200, Math.trunc(this.rows()) || 24) - 6); }
@@ -359,6 +384,10 @@ export class Dashboard implements Component, Focusable {
       else if (this.controller) {
         if (data === 'q') this.message = 'A run is in progress. Press esc again to cancel it.';
         else { this.controller.abort(); this.message = 'Cancelling… keeping completed evidence.'; }
+      } else if (this.live && key('escape')) {
+        // A run started elsewhere stops the way it would on its own Ctrl+C: finished tries are kept.
+        try { process.kill(JSON.parse(readFileSync(join(this.app.root, '.state/run.lock'), 'utf8')).pid, 'SIGINT'); this.message = 'Cancelling… keeping completed evidence.'; }
+        catch { this.message = 'That run already ended.'; }
       } else if (this.refreshing && data === 'q') this.message = 'Refreshing metadata. Press esc to stop waiting.';
       else this.exit();
       return;
@@ -586,14 +615,13 @@ export class Dashboard implements Component, Focusable {
     this.controller = new AbortController();
     this.progress = undefined;
     this.live = undefined;
-    this.runStart = Date.now();
     this.lastFailure = '';
     this.message = 'Starting run… Esc cancels safely.';
     this.repaint();
     try {
       const run = await this.app.run(options, p => {
         // The runner saves run.json after each try, just before reporting it, so a new count means a new result on disk.
-        if (p.completed !== this.live?.trials.length) this.live = readRun(this.app.root, p.runId) ?? this.live;
+        if (p.completed !== this.live?.trials.length) this.watch();
         this.progress = p; this.repaint();
       }, this.controller.signal);
       // A reviewer that was switched on and scored nothing is worth saying out loud. Its
@@ -650,8 +678,8 @@ export class Dashboard implements Component, Focusable {
 
     // While a run is live the header carries it, so it is never out of sight on another tab.
     const p = this.progress;
-    const summary = this.controller
-      ? `${this.controller.signal.aborted ? 'stopping' : 'running'} · ${p?.completed ?? 0}/${p?.total ?? '?'}`
+    const summary = this.controller || this.live
+      ? `${this.controller?.signal.aborted ? 'stopping' : 'running'} · ${this.live?.trials.length ?? 0}/${this.live?.planned ?? '?'}`
       : `${count(this.models().length, 'model')} · ${count(this.enabledTasks().length, 'test')} · ${tries(this.options.repeat)}`;
     row(spread(bold('forseti'), width >= 60 ? (this.controller ? accent(summary) : faint(summary)) : ''));
     // Tabs carry the only underline in the UI, so the active view is obvious without rules or boxes.
@@ -661,20 +689,21 @@ export class Dashboard implements Component, Focusable {
     row(' '.repeat(before) + accent('─'.repeat(tabs[this.tab]!.length)));
 
     if (this.dialog) this.renderDialog(inner, row, prose, head);
-    else if (this.controller && this.tab === 0) {
-      const done = p?.completed ?? 0, total = p?.total ?? 0;
+    else if ((this.controller || this.live) && this.tab === 0) {
+      const run = this.live, done = run?.trials.length ?? 0, total = run?.planned ?? 0;
       // Time left from the pace so far: finished tries are the only honest predictor available.
-      const left = done && total > done ? remaining((Date.now() - this.runStart) / done * (total - done)) : '';
+      const left = run && done && total > done ? remaining((Date.now() - Date.parse(run.created)) / done * (total - done)) : '';
       row();
-      head(this.controller.signal.aborted ? 'Stopping safely' : 'Running', `${done} of ${total || '?'}${left ? ` · about ${left} left` : ''}`);
+      head(this.controller?.signal.aborted ? 'Stopping safely' : 'Running', `${done} of ${total || '?'}${left ? ` · about ${left} left` : ''}`);
       row();
       const cells = Math.max(8, Math.min(60, inner));
       row(accent('━'.repeat(Math.round(cells * (total ? done / total : 0)))) + faint('━'.repeat(cells - Math.round(cells * (total ? done / total : 0)))));
       row();
-      if (p) {
-        row(`${faint('Now')}   ${bold(nick(p.model))}${faint('  ·  ')}${plain(p.task)}`);
-        row(`      ${muted(plain(p.phase))}`);
-      } else row(muted('Preparing isolated trial workspaces…'));
+      if (this.now) {
+        row(`${faint('Now')}   ${bold(nick(this.now.model))}${faint('  ·  ')}${plain(this.now.task)}`);
+        row(`      ${muted([duration(Date.now() - this.now.since), this.now.step].filter(Boolean).join(' · '))}`);
+      }
+      else row(muted('Preparing isolated trial workspaces…'));
       const live = this.live;
       const feed = (live?.trials ?? []).map(trial => ({ model: live!.models.find(m => m.id === trial.model)?.label ?? trial.model, task: live!.tasks.find(t => t.id === trial.task)?.title ?? trial.task, trial }));
       if (feed.length) {
@@ -699,7 +728,7 @@ export class Dashboard implements Component, Focusable {
           return !FINISHED.includes(trial.status) ? 'not run' : STALL.includes(trial.status) ? 'ran out' : solved(trial) ? '' : `${correct.filter(c => c.passed).length}/${correct.length} checks`;
         };
         // The note column takes room only when a row has something to say in it.
-        const noteW = latest.some(f => note(f.trial)) ? 11 : 0;
+        const noteW = latest.some(f => note(f.trial)) ? 13 : 0;
         for (const { model, task, trial } of latest) {
           const mark = !FINISHED.includes(trial.status) ? faint('·') : STALL.includes(trial.status) ? amber('◷') : solved(trial) ? green('✓') : rose('✗');
           const tokens = trial.tokens ? `${Math.round(trial.tokens.output / 1000)}k tok` : '';
@@ -709,7 +738,7 @@ export class Dashboard implements Component, Focusable {
         }
       }
       row();
-      row(faint('esc cancels · finished tries are kept'));
+      row(faint(this.controller ? 'esc cancels · finished tries are kept' : 'started elsewhere · esc cancels it · q leaves, the run keeps going'));
     } else if (this.tab === 0) {
       const enabled = this.models();
       // The answer comes first: how the models compare, from every comparable try on record.
