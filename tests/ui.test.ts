@@ -865,3 +865,47 @@ test('opening the TUI during a run does not repaint before the screen exists', (
   assert.match(ui.render(80).map(stripVTControlCharacters).join('\n'), /Running\s+0 of 2/, 'and the first render already shows the run');
   rmSync(root, { recursive: true, force: true });
 });
+
+test('a tall window shows the conversation of the try in progress; a short one keeps the short form', () => {
+  const f = fixture();
+  const root = mkdtempSync(join(process.cwd(), '.tmp/ui-chat-'));
+  const claude = { ...model, id: 'opus', label: 'Claude opus · via Claude Code', provider: 'claude-code' }, local = { ...model, id: 'qwen', label: 'Qwen · local', provider: 'local' };
+  const tasks = [{ id: 'one', title: 'Task one', hash: 'one' }];
+  const start = (who: ModelConfig, trial: string) => {
+    mkdirSync(join(root, '.state'), { recursive: true });
+    mkdirSync(join(root, 'runs', 'live', 'trials', trial, 'public'), { recursive: true });
+    writeFileSync(join(root, '.state', 'run.lock'), JSON.stringify({ pid: process.pid, runId: 'live' }));
+    writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', status: 'running', models: [who], tasks, planned: 1, trials: [] }));
+    return join(root, 'runs', 'live', 'trials', trial);
+  };
+  const view = (rows: number) => new Dashboard({ ...f.app, root }, () => {}, () => {}, () => rows).render(100).map(stripVTControlCharacters).join('\n');
+  // The Pi agent: replies and tool calls come from the trial's own events.jsonl.
+  const pi = start(local, '0001-qwen-one');
+  writeFileSync(join(pi, 'events.jsonl'), [{ type: 'started' }, { type: 'assistant', text: 'Reading the parser first.' }, { type: 'tool', event: { tool: 'read_file', args: { path: 'src/counts.py' }, ok: true } }, { type: 'tool', event: { tool: 'python', args: { source: 'run check' }, ok: false } }]
+    .map(event => JSON.stringify({ at: '', event })).join('\n'));
+  const tall = view(60);
+  assert.match(tall, /Live\s+Qwen · Task one/);
+  assert.match(tall, /◆ Reading the parser first\./);
+  assert.match(tall, /→ read_file\s+counts\.py/, 'a path shows as its file name');
+  assert.match(tall, /✗ python\s+run check/, 'a failed call is marked');
+  assert.doesNotMatch(view(24), /Live/, 'no room, no panel');
+  // Claude Code: its own session transcript, found by the trial's working folder.
+  const config = mkdtempSync(join(process.cwd(), '.tmp/ui-claude-')), saved = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = config;
+  try {
+    rmSync(join(root, 'runs'), { recursive: true, force: true });
+    const cc = start(claude, '0001-opus-one'), folder = join(config, 'projects', join(cc, 'public').replace(/[^A-Za-z0-9]/g, '-'));
+    writeFileSync(join(cc, 'events.jsonl'), JSON.stringify({ at: '', event: { type: 'started' } }));
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 's.jsonl'), [
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Let me look at the resolver.' }, { type: 'tool_use', name: 'Read', input: { file_path: '/x/resolver.py' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', is_error: true }] } },
+    ].map(e => JSON.stringify(e)).join('\n'));
+    const text = view(60);
+    assert.match(text, /◆ Let me look at the resolver\./);
+    assert.match(text, /✗ Read\s+resolver\.py/, 'an error result marks the call it answers');
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = saved;
+    rmSync(config, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true });
+  }
+});

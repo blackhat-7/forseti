@@ -61,6 +61,42 @@ const dot = (on: boolean) => (on ? green('●') : faint('○'));
 const runWhen = (id: string) => (/^\d{4}-\d{2}-\d{2}T/.test(id) ? `${id.slice(5, 10)} ${id.slice(11, 13)}:${id.slice(14, 16)}` : id);
 /** "Claude sonnet · via Claude Code / 14-31-08" is provenance; a column needs "Claude sonnet". */
 const nick = (label: string) => plain(label).split(' / ')[0]!.split(' · ')[0]!.trim();
+/** One line of a try's conversation: something the model said, or a tool it called and how that went. */
+type Line = { say?: string; tool?: string; target?: string; failed?: boolean };
+/** The file, command or pattern a tool call was about, in a few words. */
+function target(input: Record<string, unknown> = {}): string {
+  const value = input.file_path ?? input.path ?? input.command ?? input.pattern ?? input.code ?? input.source ?? '';
+  const text = plain(String(value)).trim();
+  return /^[\w./-]+$/.test(text) && text.includes('/') ? text.split('/').at(-1)! : text.split('\n')[0]!;
+}
+/** The Pi agent logs each reply and each tool call to the trial's events.jsonl as they happen. */
+function piChat(events: { type?: string; text?: string; event?: { tool?: string; args?: Record<string, unknown>; ok?: boolean } }[]): Line[] {
+  return events.flatMap((e): Line[] => e.type === 'assistant' && e.text?.trim() ? [{ say: e.text.trim() }]
+    : e.type === 'tool' && e.event?.tool ? [{ tool: e.event.tool, target: target(e.event.args), failed: e.event.ok === false }] : []);
+}
+/**
+ * Claude Code writes its own session transcript, keyed by the working folder, while it works; the
+ * trial's own log has only its start and end. Read-only, and only to show the owner their run.
+ */
+function claudeChat(work: string): Line[] {
+  const folder = join(process.env.CLAUDE_CONFIG_DIR ?? join(process.env.HOME ?? '', '.claude'), 'projects', work.replace(/[^A-Za-z0-9]/g, '-'));
+  try {
+    const file = readdirSync(folder).filter(f => f.endsWith('.jsonl')).map(f => join(folder, f)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+    if (!file) return [];
+    const lines: Line[] = [];
+    for (const raw of readFileSync(file, 'utf8').split('\n')) {
+      let entry: { type?: string; message?: { content?: unknown } };
+      try { entry = JSON.parse(raw); } catch { continue; }
+      if (!Array.isArray(entry.message?.content)) continue;
+      for (const block of entry.message.content as { type: string; text?: string; name?: string; input?: Record<string, unknown>; is_error?: boolean }[]) {
+        if (entry.type === 'assistant' && block.type === 'text' && block.text?.trim()) lines.push({ say: block.text.trim() });
+        else if (entry.type === 'assistant' && block.type === 'tool_use') lines.push({ tool: (block.name ?? '').replace(/^mcp__\w+__/, ''), target: target(block.input) });
+        else if (block.type === 'tool_result' && block.is_error) { const last = lines.findLast(l => l.tool); if (last) last.failed = true; }
+      }
+    }
+    return lines;
+  } catch { return []; }
+}
 /** "under a minute", "46 min", "1 h 20 min": an estimate, so no false precision. */
 function remaining(ms: number): string {
   const m = Math.round(ms / 60_000);
@@ -300,7 +336,7 @@ export class Dashboard implements Component, Focusable {
    * that finished, and its newest trial folder is the try in progress.
    */
   private live?: Run;
-  private now?: { model: string; task: string; since: number; step: string };
+  private now?: { model: string; task: string; since: number; step: string; chat: Line[] };
   private reportLength = 0;
   private reportPage = 12;
   private everyTask = false;
@@ -338,7 +374,8 @@ export class Dashboard implements Component, Focusable {
         // The Pi agent logs every turn and tool call; Claude Code logs only its start and end.
         const events = readFileSync(join(dir, open!, 'events.jsonl'), 'utf8').split('\n').flatMap(l => { try { return [JSON.parse(l).event]; } catch { return []; } });
         const turns = events.filter(e => e.type === 'assistant').length, tool = events.findLast(e => e.type === 'tool')?.event?.tool;
-        this.now = { model: model.label, task: task.title, since: statSync(join(dir, open!)).birthtimeMs, step: turns ? `turn ${turns}${tool ? ` · ${tool}` : ''}` : '' };
+        const chat = model.provider === 'claude-code' ? claudeChat(join(dir, open!, 'public')) : piChat(events);
+        this.now = { model: model.label, task: task.title, since: statSync(join(dir, open!)).birthtimeMs, step: turns ? `turn ${turns}${tool ? ` · ${tool}` : ''}` : '', chat };
       }
     }
     // A run started elsewhere just ended: its results are new, so the leaderboard reloads.
@@ -697,6 +734,7 @@ export class Dashboard implements Component, Focusable {
 
     if (this.dialog) this.renderDialog(inner, row, prose, head);
     else if ((this.controller || this.live) && this.tab === 0) {
+      const top = lines.length;
       const run = this.live, done = run?.trials.length ?? 0, total = run?.planned ?? 0;
       // Time left from the pace so far: finished tries are the only honest predictor available.
       const left = run && done && total > done ? remaining((Date.now() - Date.parse(run.created)) / done * (total - done)) : '';
@@ -743,6 +781,17 @@ export class Dashboard implements Component, Focusable {
           const taskW = Math.max(10, inner - 4 - Math.min(18, nameW) - width_(tail) - 2);
           row(`  ${mark}  ${padTo(nick(model), Math.min(18, nameW))}${padTo(plain(task), taskW)}${faint(tail)}`);
         }
+      }
+      // The try's own conversation, when the window has room for it; a small window keeps the short form.
+      const room = this.bodyRows() - (lines.length - top) - 4;
+      if (this.now?.chat.length && room >= 8) {
+        row();
+        row(bold('Live') + faint(`   ${nick(this.now.model)} · ${plain(this.now.task)}`));
+        // What the model says wraps in full; tool calls stay one line each. The newest lines stay in view.
+        const said = (l: Line) => l.say
+          ? wrap(plain(l.say).replace(/\s+/g, ' '), Math.max(12, inner - 4)).map((t, i) => `  ${i ? ' ' : faint('◆')} ${muted(t)}`)
+          : [`  ${l.failed ? rose('✗') : faint('→')} ${accent(padTo(l.tool ?? '', 10))}${truncateToWidth(l.target ?? '', Math.max(8, inner - 16))}`];
+        for (const line of this.now.chat.flatMap(said).slice(-(room - 2))) row(line);
       }
       row();
       row(faint(this.controller ? 'esc cancels · finished tries are kept' : 'started elsewhere · esc cancels it · q leaves, the run keeps going'));
