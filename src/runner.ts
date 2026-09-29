@@ -10,7 +10,7 @@ import { claudeCodeArgs, runClaudeCode } from './claudecode.ts';
 import { DIMENSIONS, loadSuite, selectedModels, validateOptions } from './config.ts';
 import { atomicJson, files, hash, inside, localDir, put } from './files.ts';
 import { makeJudgeCall, review as reviewSubmission, type JudgeCall, type Review } from './judge.ts';
-import { LOCAL } from './local.ts';
+import { listLocalModels, LOCAL } from './local.ts';
 import { SANDBOX, checkSandbox, pythonExecutable, runPython } from './sandbox.ts';
 import { FINISHED, conditionsKey, modelKey, trialKey } from './report.ts';
 import type { Check, Config, Dimension, GradeContext, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
@@ -107,12 +107,15 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
   catch { throw new Error('Run lock exists. Another run may be active. If it crashed, inspect .state/run.lock and its PID before removing that local file.'); }
   try {
     const pythonVersion = await checkSandbox(root);
+    // Read once per run: the local server's real context size, recorded below with the model.
+    const contexts: Record<string, number> = models.some(m => m.provider === LOCAL)
+      ? Object.fromEntries((await listLocalModels(config.local.url)).flatMap(m => (m.contextWindow ? [[m.id, m.contextWindow]] : []))) : {};
     const harness = { src: harnessFiles(root), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8'), system: SYSTEM_PROMPT };
     // A task's hash covers its own grader and the helpers every grader imports, not every grader:
     // editing one task's grader must not make every other task's recorded tries unusable.
     const graders = (t: Task) => Object.entries(contents).filter(([p]) => p === t.grader || p === 'private/helpers.mjs');
     const taskEntries = tasks.map(t => ({ id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, turns: t.turns, timeout: t.timeout, hash: hash({ task: t, fixture: files(inside(dir, t.fixture)), private: graders(t) }) }));
-    const environment = { node: process.version, python: pythonExecutable(), pythonVersion, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)), os: `${platform()} ${release()} ${arch()}`, sandbox: SANDBOX, pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url } : catalogModels.getModel(m.provider, m.model))) };
+    const environment = { node: process.version, python: pythonExecutable(), pythonVersion, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)), os: `${platform()} ${release()} ${arch()}`, sandbox: SANDBOX, pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null } : catalogModels.getModel(m.provider, m.model))) };
     // Only the tries not already on record under these exact conditions are run; see trialKey.
     const draft = { options, models, tasks: taskEntries, harnessHash: hash(harness), environment, judge };
     const done = new Map<string, number>();
@@ -177,7 +180,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
             for (const [path, content] of Object.entries(control.files ?? {})) put(work, path, content);
             trial.answer = control.answer ?? '';
           } else if (job.model.provider === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, budget, trial, controller.signal, notify, record);
-          else await runAgent(work, job.model, job.task, budget, trial, controller.signal, notify, record, modelsFor(job.model, config.local.url));
+          else await runAgent(work, job.model, job.task, budget, trial, controller.signal, notify, record, modelsFor(job.model, config.local.url, contexts));
           if (controller.signal.aborted) {
             trial.status = signal.aborted ? 'cancelled' : 'timeout';
             trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${budget.timeout}s exceeded; counted as unsolved`;

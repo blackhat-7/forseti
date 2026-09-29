@@ -69,8 +69,8 @@ export function authInfo(config: Pick<ModelConfig, 'provider' | 'auth'>, local =
     return { mode: config.auth === 'pi' ? 'Pi credentials (read-only)' : 'environment API key', billing: 'unknown', ready: false, note: (e as Error).message };
   }
 }
-export function modelsFor(config: ModelConfig, local = '') {
-  if (config.provider === LOCAL) return localModels(local, [config.model]);
+export function modelsFor(config: ModelConfig, local = '', contexts: Record<string, number> = {}) {
+  if (config.provider === LOCAL) return localModels(local, [config.model], contexts);
   // No refresh callback is ever invoked: token rotation would mutate the external login
   // even if the refreshed token were kept in memory rather than written to auth.json.
   const credentials: CredentialStore = {

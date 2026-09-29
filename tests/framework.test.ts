@@ -676,9 +676,13 @@ test('a local OpenAI-compatible server runs through the Pi adapter with no crede
     assert.equal((chat.body!.messages as { role: string }[])[0]!.role, 'system', 'system role, not the OpenAI-only developer role');
     assert.equal((chat.body!.chat_template_kwargs as { enable_thinking: boolean }).enable_thinking, false, 'thinking off is sent, not assumed: a hybrid model thinks unless told otherwise');
     assert.ok(!('reasoning_effort' in chat.body!));
-    assert.deepEqual(getSupportedThinkingLevels(localModels(server.url, [local.model]).getModel(LOCAL, local.model)!), ['off', 'high'], 'on or off; a local template has no effort dial');
-    await runAgent(dir, { ...local, thinking: 'high' }, task, DEFAULT_OPTIONS, blankTrial('think', local, task, 1, server.url), new AbortController().signal, () => {}, () => {}, localModels(server.url, [local.model]));
-    assert.equal((server.requests.at(-1)!.body!.chat_template_kwargs as { enable_thinking: boolean }).enable_thinking, true);
+    // Changed on purpose: Qwen3.8's template reads `reasoning_effort` (low, medium, xhigh; default
+    // xhigh), so the effort is sent and the recorded level is the level that ran.
+    assert.deepEqual(getSupportedThinkingLevels(localModels(server.url, [local.model]).getModel(LOCAL, local.model)!), ['off', 'low', 'medium', 'high', 'xhigh']);
+    await runAgent(dir, { ...local, thinking: 'xhigh' }, task, DEFAULT_OPTIONS, blankTrial('think', local, task, 1, server.url), new AbortController().signal, () => {}, () => {}, localModels(server.url, [local.model]));
+    assert.deepEqual(server.requests.at(-1)!.body!.chat_template_kwargs, { enable_thinking: true, preserve_thinking: true, reasoning_effort: 'xhigh' });
+    // A reported context is used, so the per-turn output budget is not squeezed by a guessed 32k window.
+    assert.equal(localModels(server.url, [local.model], { [local.model]: 114_688 }).getModel(LOCAL, local.model)!.contextWindow, 114_688);
     assert.doesNotMatch(chat.auth ?? '', /sk-|eyJ/, 'no real credential ever goes to a local server');
 
     // The whole path from Settings to a graded trial, as the app runs it.
