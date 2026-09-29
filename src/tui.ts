@@ -911,9 +911,9 @@ export class Dashboard implements Component, Focusable {
       ] as const) row(`${accent(keys)}${' '.repeat(Math.max(2, 14 - keys.length))}${muted(what)}`);
     } else {
       const summary = this.dialog === 'report' && this.reportMode === 'summary';
-      const first = this.reportRuns[0];
-      head(this.dialog === 'evidence' ? 'Evidence' : summary ? 'Model comparison' : 'Full report',
-        this.dialog === 'evidence' ? 'observable checks' : summary ? count(this.reportRuns.length, 'run') : `${count(this.reportRuns.length, 'run')} · ${first?.tasks.length ?? 0} tests × ${tries(first?.options.repeat ?? 0)} · ${first?.options.lane ?? ''} lane`);
+      const first = this.reportRuns[0], board = first?.id === 'leaderboard';
+      head(this.dialog === 'evidence' ? 'Evidence' : board ? 'Leaderboard' : summary ? 'Model comparison' : 'Full report',
+        this.dialog === 'evidence' ? 'observable checks' : board ? 'every comparable try, all runs' : summary ? count(this.reportRuns.length, 'run') : `${count(this.reportRuns.length, 'run')} · ${first?.tasks.length ?? 0} tests × ${tries(first?.options.repeat ?? 0)} · ${first?.options.lane ?? ''} lane`);
       row();
       let body: string[];
       let chrome = 5;

@@ -10,7 +10,7 @@
       "provider": "control",
       "model": "reference",
       "auth": "none",
-      "enabled": false,
+      "enabled": true,
       "thinking": "off"
     },
     {
@@ -93,5 +93,8 @@
     "auth": "cli",
     "thinking": "medium",
     "repeat": 1
+  },
+  "local": {
+    "url": ""
   }
 }
