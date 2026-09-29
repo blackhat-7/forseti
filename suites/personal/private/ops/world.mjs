@@ -62,6 +62,12 @@ export function simulate({ start, home, fs, state, programs, tick = () => {}, re
       return result;
     },
     report: () => ({ elapsed: ctx.t, commands: ctx.commands, events: ctx.events, ...report(ctx) }),
+    /**
+     * The checkout's history as `git` shows it, set by makeGit. Forseti builds a real repository
+     * with these commits beside the checkout and writes the real hashes back here, because the
+     * Claude Code client shows the model the branch and recent commits of its working directory.
+     */
+    repository: () => ctx.repository,
     ctx,
   };
 }

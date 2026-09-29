@@ -19,6 +19,7 @@ export function makeGit(ctx, { branch = 'main', remote = 'git@github.com:quillma
   const staged = new Set();
   let current = branch;
   const commits = log.map(c => ({ ...c }));
+  ctx.repository = { branch, remote, commits, at: (t) => ctx.at(t).toISOString(), user: () => ({ name: 'On-call Engineer', email: `${ctx.shell?.env.USER ?? 'oncall'}@quillmart.com` }) };
   const base = () => snapshot;
   const resolve = (spec = 'HEAD') => {
     const m = /^(?:HEAD|@|main|origin\/main)(?:~(\d+)|\^+)?$/.exec(spec);

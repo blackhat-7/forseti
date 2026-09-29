@@ -1,7 +1,7 @@
 {
   "scheme": 2,
-  "harness": "4e1a097b5ee714941d43897420b0a4e36865d11ad8c720c6cacf9e95bd71cef1",
-  "grading": "c2b3c3c4f4c45009c324c48955938e229334686bb80c0fabee282d4bccc2a06a",
+  "harness": "941ad889367faafb88d744d77536bf6f8d02dfe28e4303c2b0d54f1caef64f4b",
+  "grading": "e8b6d1da48d8a98d70d8c53f4de3e95c65a72c413281c2466e79c5f9524f47da",
   "files": [
     "adapter.ts",
     "auth.ts",
@@ -30,19 +30,25 @@
     "types.ts",
     "world.ts"
   ],
-  "note": "World tasks: a task may name a simulated production estate; the model then gets a terminal onto it (src/world.ts) instead of Python. Tasks without a world run exactly as before: same tools, system prompt, prompt, MCP server and workspace.",
+  "note": "World checkouts become real git repositories matching the world's history, so Claude Code's prompt shows the same branch and commits as the terminal's git. Only world tasks reach this code.",
   "equivalent": [
     {
       "was": "e9ef57a27baa290ca498be82e674e01d1fafb18b95b0ccbf4655d8f8d80d1404",
-      "harness": "4e1a097b5ee714941d43897420b0a4e36865d11ad8c720c6cacf9e95bd71cef1",
-      "grading": "c2b3c3c4f4c45009c324c48955938e229334686bb80c0fabee282d4bccc2a06a",
+      "harness": "941ad889367faafb88d744d77536bf6f8d02dfe28e4303c2b0d54f1caef64f4b",
+      "grading": "e8b6d1da48d8a98d70d8c53f4de3e95c65a72c413281c2466e79c5f9524f47da",
       "note": "The try path before grade.ts existed (commit b333ddc to b0c9210). Splitting grading out moved code without changing it; adding world tasks changed nothing for tasks without one. Tries recorded then are current for both parts."
     },
     {
       "was": "27bfe2fa281d1b839700337f025f0451e7cace3edda0b8ca8cf96eb3bbb9e195",
-      "harness": "4e1a097b5ee714941d43897420b0a4e36865d11ad8c720c6cacf9e95bd71cef1",
-      "grading": "c2b3c3c4f4c45009c324c48955938e229334686bb80c0fabee282d4bccc2a06a",
+      "harness": "941ad889367faafb88d744d77536bf6f8d02dfe28e4303c2b0d54f1caef64f4b",
+      "grading": "e8b6d1da48d8a98d70d8c53f4de3e95c65a72c413281c2466e79c5f9524f47da",
       "note": "Adding world tasks changed the try and grading code only on paths a task without `world` never takes (checked: every existing task's fingerprint is unchanged, and its tools, prompts, MCP server and workspace are identical). So tries recorded before are current for both parts."
+    },
+    {
+      "was": "4e1a097b5ee714941d43897420b0a4e36865d11ad8c720c6cacf9e95bd71cef1",
+      "harness": "941ad889367faafb88d744d77536bf6f8d02dfe28e4303c2b0d54f1caef64f4b",
+      "grading": "e8b6d1da48d8a98d70d8c53f4de3e95c65a72c413281c2466e79c5f9524f47da",
+      "note": "Building a real git repository for a world task's checkout runs only for tasks with a world, and no world task has a recorded try. Tries recorded before are current for both parts."
     }
   ]
 }

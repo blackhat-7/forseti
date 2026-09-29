@@ -528,7 +528,7 @@ export function createWorld({ home, fs }) {
       timeline: c.events.filter(e => !e.kind.startsWith('estate.mail')).map(e => ({ t: e.t, kind: e.kind, ...(e.verb ? { verb: e.verb, table: e.table } : {}), ...(e.rows !== undefined ? { rows: e.rows } : {}), ...(e.job ? { job: e.job } : {}), ...(e.instance ? { instance: e.instance } : {}), ...(e.image ? { image: e.image } : {}), ...(e.wrong !== undefined ? { wrong: e.wrong } : {}), ...(e.statements ? { statements: e.statements } : {}) })),
     };
   }
-  return { exec: world.exec, report: world.report };
+  return { exec: world.exec, report: world.report, repository: world.repository };
 }
 
 /** `gcloud artifacts docker tags list`, the one question an operator asks the registry here. */

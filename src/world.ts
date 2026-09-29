@@ -1,4 +1,5 @@
-import { mkdtempSync, realpathSync, rmSync, unlinkSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, realpathSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { files, inside, localDir, put, readText } from './files.ts';
@@ -13,7 +14,9 @@ import { files, inside, localDir, put, readText } from './files.ts';
  * the operator being measured. Everything it can see — tool names, descriptions, prompt, working
  * directory — reads like an engineer's own terminal.
  */
-export type World = { exec(command: string): { output: string; code: number } | Promise<{ output: string; code: number }>; report(): unknown };
+export type World = { exec(command: string): { output: string; code: number } | Promise<{ output: string; code: number }>; report(): unknown; repository?(): Repository | undefined };
+/** The checkout's history as the world's `git` shows it, newest first. See `repository` below. */
+type Repository = { branch: string; remote: string; commits: { sha: string; author: string; email: string; t: number; subject: string; body?: string }[]; at(t: number): string; user(): { name: string; email: string } };
 type WorldModule = { directory: string; createWorld(options: { home: string; fs: WorldFs }): World };
 type WorldFs = { read(path: string): string; write(path: string, text: string): void; list(): string[]; remove(path: string): void };
 
@@ -50,7 +53,56 @@ export function workspaceFs(work: string): WorldFs {
   };
 }
 export async function openWorld(modulePath: string, work: string): Promise<World> {
-  return (await loadWorldModule(modulePath)).createWorld({ home: work, fs: workspaceFs(work) });
+  const world = (await loadWorldModule(modulePath)).createWorld({ home: work, fs: workspaceFs(work) });
+  repository(work, world);
+  return world;
+}
+/**
+ * Makes the checkout a real git repository with the history the world's `git` shows, and gives the
+ * world the real commit hashes. The Claude Code client puts the branch and recent commits of its
+ * working directory in the model's prompt; a folder that is "not a git repository" while `git log`
+ * answers would give the estate away. The repository sits in the parent folder, so the workspace,
+ * and so what is graded, holds no `.git`. Only fixed arguments from the suite reach `git`, with
+ * the user's own git configuration ignored. Without `git` installed the checkout stays a folder.
+ * Whichever process opens the world first builds it; the other adopts the same hashes.
+ */
+function repository(work: string, world: World): void {
+  const repo = world.repository?.();
+  if (!repo?.commits.length) return;
+  const root = join(work, '..');
+  const env = { PATH: '/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin', HOME: root, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' };
+  const git = (args: string[], extra: Record<string, string> = {}) => {
+    const r = spawnSync('git', ['-C', root, ...args], { env: { ...env, ...extra }, encoding: 'utf8' });
+    if (r.error || r.status !== 0) throw new Error(`git ${args[0]}: ${r.stderr || r.error?.message}`);
+    return r.stdout;
+  };
+  try {
+    if (!existsSync(join(root, '.git'))) {
+      const user = repo.user();
+      git(['init', '-q', '-b', repo.branch]);
+      git(['config', 'user.name', user.name]);
+      git(['config', 'user.email', user.email]);
+      git(['remote', 'add', 'origin', repo.remote]);
+      const oldest = [...repo.commits].reverse();
+      for (const [k, c] of oldest.entries()) {
+        const last = k === oldest.length - 1;
+        if (last) git(['add', '-A', '.']);
+        const when = repo.at(c.t);
+        git(['commit', '-q', '--no-verify', '--no-gpg-sign', ...(last ? [] : ['--allow-empty']), '-m', c.subject, ...(c.body ? ['-m', c.body] : [])],
+          { GIT_AUTHOR_NAME: c.author, GIT_AUTHOR_EMAIL: c.email, GIT_AUTHOR_DATE: when, GIT_COMMITTER_NAME: c.author, GIT_COMMITTER_EMAIL: c.email, GIT_COMMITTER_DATE: when });
+      }
+      git(['update-ref', `refs/remotes/origin/${repo.branch}`, 'HEAD']);
+      git(['symbolic-ref', 'refs/remotes/origin/HEAD', `refs/remotes/origin/${repo.branch}`]);
+      git(['branch', '-q', `--set-upstream-to=origin/${repo.branch}`]);
+    }
+    const shas = git(['log', '--format=%H %s']).trim().split('\n');
+    // Hashes are adopted only when the histories line up commit for commit.
+    if (shas.length === repo.commits.length && shas.every((line, k) => line.slice(41) === repo.commits[k]!.subject)) {
+      shas.forEach((line, k) => { repo.commits[k]!.sha = line.slice(0, 40); });
+    }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT' && !/ENOENT/.test(String((e as Error).message))) throw e;
+  }
 }
 /** What the terminal tool returns: the output, and the exit code only when it failed, like a terminal. */
 export async function runCommand(world: World, command: string): Promise<string> {

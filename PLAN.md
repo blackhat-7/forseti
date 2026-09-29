@@ -35,7 +35,7 @@ Each line carries its own done-check. A task too big for one session gets split 
 
 ## Later
 
-- [ ] **Find what gives the ops simulation away, and fix it.** Not for scoring: only to make the estate harder to tell from real. Scan ops-task transcripts (thinking, messages, commands in `live.jsonl`) for signs a model suspected a setup ("simulated", "mock", "test environment", "not real"), then remove each tell. Known ones: Claude Code's system prompt says the checkout is not a git repo while `git log` works; data may look too tidy. Done when a pilot's transcripts show no suspicion.
+- [~] **Find what gives the ops simulation away, and fix it.** Not for scoring: only to make the estate harder to tell from real. After each ops run, `npm start -- tells [RUN_ID]` lists every sentence where a model suspected a setup; remove the tell behind each. Done: the checkout is now a real git repo matching the world's `git`. Done when a pilot's transcripts show no suspicion.
 
 - [ ] Raise the reviewer to 3 rounds and re-measure. Single-round judging was unstable in milestone 18; majority settling is what `repeat` exists for.
 - [ ] Grow the judge calibration set past eight cases, from real disagreements rather than invented ones.

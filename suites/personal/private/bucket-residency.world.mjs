@@ -59,7 +59,7 @@ export function createWorld({ home, fs }) {
     tick(ctx) { kubeTick(ctx); traffic(ctx); },
     report: (ctx) => summarize(ctx),
   });
-  return { exec: world.exec, report: world.report };
+  return { exec: world.exec, report: world.report, repository: world.repository };
 
   function build(ctx) {
     state.gcloud = { account: 'morgan.lee@quillmart.com', project: PROJECT, region: 'us-central1', configuration: 'default', projects: [{ id: PROJECT, name: 'Quillmart Prod', number: NUMBER }, { id: 'quillmart-staging', name: 'Quillmart Staging', number: '771093842205' }] };

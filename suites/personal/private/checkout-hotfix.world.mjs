@@ -497,7 +497,7 @@ export function createWorld({ home, fs }) {
     env: { PGHOST: '127.0.0.1', PGPORT: '5432', PGUSER: 'oncall', PGDATABASE: 'core', CLOUDSDK_CORE_DISABLE_PROMPTS: '0', EDITOR: 'vi' },
     report: (ctx) => report(ctx, db, baseline),
   });
-  return { exec: world.exec, report: world.report };
+  return { exec: world.exec, report: world.report, repository: world.repository };
 }
 /** Groups this on-call account has no role in: gcloud answers with the API's permission error. */
 function restricted() {

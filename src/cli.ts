@@ -5,11 +5,12 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { App } from './app.ts';
 import { authInfo, defaultAuth, ENV_KEYS } from './auth.ts';
-import { DEFAULT_OPTIONS } from './config.ts';
+import { DEFAULT_OPTIONS, loadSuite } from './config.ts';
 import { atomicJson, clean } from './files.ts';
 import { LOCAL } from './local.ts';
 import { conditionsNow, gradeClosure, harnessFiles, regrade } from './runner.ts';
 import { SCHEME } from './fingerprint.ts';
+import { findTells } from './tells.ts';
 import { comparisonReport } from './report.ts';
 import { checkSandbox, pythonExecutable } from './sandbox.ts';
 import type { ModelConfig, RunOptions } from './types.ts';
@@ -36,6 +37,7 @@ const help = `FORSETI  ·  evidence-first LLM benchmarks
   npm start -- parallel N                     How many tries a run makes at once (default 1)
   npm start -- leaderboard                    Every comparable finished try, all runs
   npm start -- regrade                        Grade saved tries again by today's graders; calls no model
+  npm start -- tells [RUN_ID]                 Where a model suspected an ops task's estate is not real
   npm start -- runs
   npm start -- compare RUN_ID [RUN_ID ...]
 
@@ -126,6 +128,15 @@ async function main() {
     const { regraded, failed } = await regrade(root, app.config);
     console.log(`Regraded ${regraded} ${regraded === 1 ? 'try' : 'tries'} from their saved submissions. No model was called.`);
     for (const f of failed) console.log(clean(`  could not regrade ${f}`));
+    return;
+  }
+  if (command === 'tells') {
+    const worlds = new Set(loadSuite(root, app.config.suite).suite.tasks.filter(t => t.world).map(t => t.id));
+    const runs = action ? app.runs.filter(r => r.id === action) : app.runs;
+    const tells = findTells(root, runs, worlds);
+    const tries = runs.flatMap(r => r.trials).filter(t => worlds.has(t.task)).length;
+    console.log(`${tells.length} suspicion${tells.length === 1 ? '' : 's'} in ${tries} ops ${tries === 1 ? 'try' : 'tries'}. Not scored: each points at something that makes the estate look staged.`);
+    for (const t of tells) console.log(clean(`  ${t.run}/${t.trial} · ${t.task} · ${t.where}: ${t.quote}`));
     return;
   }
   if (command === 'parallel') {

@@ -18,6 +18,8 @@ import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, ha
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
 import { OPERATOR_PROMPT, openWorld } from '../src/world.ts';
+import { findTells, SUSPICION } from '../src/tells.ts';
+import { spawnSync } from 'node:child_process';
 import type { Config, Dimension, LiveEvent, ModelConfig, Run, ToolEvent, Trial } from '../src/types.ts';
 import type { JudgeCall } from '../src/judge.ts';
 
@@ -818,8 +820,12 @@ export function createWorld({ home, fs }) {
       return { output: 'bash: ' + command.split(' ')[0] + ': command not found\\n', code: 127 };
     },
     report: () => ({ ran }),
+    repository: () => history,
   };
 }
+const history = { branch: 'main', remote: 'git@example.com:acme/infra.git', user: () => ({ name: 'Ops', email: 'ops@acme.example' }),
+  at: (t) => new Date(Date.UTC(2026, 0, 1) + t * 1000).toISOString(),
+  commits: [{ sha: '0'.repeat(40), author: 'Ana', email: 'ana@acme.example', t: -60, subject: 'deploy: v2' }, { sha: '1'.repeat(40), author: 'Ana', email: 'ana@acme.example', t: -3600, subject: 'deploy: v1' }] };
 `;
 const MINI_GRADER = `export const reference = { commands: ['pwd', 'deploy prod'], answer: 'Deployed.' };
 export const baseline = { commands: ['pwd'], answer: 'Deployed.' };
@@ -847,6 +853,15 @@ test('a world task gets a terminal onto its estate instead of an interpreter, an
   const work = localDir(temp(), 'acme-infra');
   put(work, 'runbooks/deploy.md', 'Run it.\n');
   const world = await openWorld(join(dir, 'suites/personal', mini.world!), work);
+  // Claude Code shows the model its folder's branch and recent commits, so the checkout is a real
+  // repository with the history the world's git shows, and the world shows the real hashes.
+  const real = spawnSync('git', ['log', '--format=%H %s'], { cwd: work, encoding: 'utf8' }).stdout.trim().split('\n');
+  const shown = (world.repository!() as { commits: { sha: string; subject: string }[] }).commits.map(c => `${c.sha} ${c.subject}`);
+  assert.deepEqual(real, shown);
+  assert.match(shown[0]!, /^[0-9a-f]{40} deploy: v2$/);
+  assert.notEqual(shown[0]!.slice(0, 40), '0'.repeat(40));
+  assert.equal(spawnSync('git', ['status', '--short'], { cwd: work, encoding: 'utf8' }).stdout, '', 'a clean checkout');
+  assert.ok(!Object.keys(files(work)).some(p => p.includes('.git')), 'and none of it is part of what is graded');
   const provider = fauxProvider(); const models = createModels(); models.setProvider(provider.provider);
   const native = provider.getModel();
   const model: ModelConfig = { id: 'simulated', label: 'Test-only fake', provider: native.provider, model: native.id, auth: 'none', enabled: true, thinking: 'off' };
@@ -906,6 +921,20 @@ test('a world try runs in a checkout named like one, records its estate for grad
   writeFileSync(join(dir, 'suites/personal/private/mini.world.mjs'), `${MINI_WORLD}\nexport const louder = 1;\n`);
   assert.notEqual(hash(), before);
   assert.equal(conditionsNow(dir, cfg(), DEFAULT_OPTIONS, '3').tasks.filter(t => t.id !== id).map(t => t.hash).join(), others, 'and no other task\'s');
+});
+
+test('suspicion that an ops estate is staged is listed for fixing, from ops tries only', () => {
+  const dir = temp();
+  const model: ModelConfig = { id: 'm', label: 'm', provider: 'claude-code', model: 'sonnet', auth: 'cli', enabled: true, thinking: 'off' };
+  const ops = blankTrial('0001-ops', model, { ...task, id: 'ops' }, 1), other = blankTrial('0002-other', model, task, 1);
+  const run = { id: 'r', trials: [ops, other] } as Run;
+  const live = (events: LiveEvent[]) => events.map(e => JSON.stringify(e)).join('\n');
+  put(dir, 'runs/r/trials/0001-ops/live.jsonl', live([{ k: 'think', s: 'The pods look fine. Hmm, this feels like a simulated ' }, { k: 'think', s: 'environment. Anyway.' }, { k: 'args', s: '{"command":"kubectl get pods"}' }, { k: 'say', s: 'Rolled back checkout-api.' }]));
+  put(dir, 'runs/r/trials/0002-other/live.jsonl', live([{ k: 'think', s: 'This is a benchmark task.' }]));
+  const tells = findTells(dir, [run], new Set(['ops']));
+  assert.deepEqual(tells.map(t => [t.trial, t.where]), [['0001-ops', 'thinking']], 'a sentence split across stream chunks is still one sentence');
+  assert.match(tells[0]!.quote, /simulated environment/);
+  for (const plain of ['Rolling back to the previous revision.', 'The staging context is current, switching to prod.', 'Run the test suite after the fix.']) assert.doesNotMatch(plain, SUSPICION, plain);
 });
 
 test('a try already on record under the same conditions is never run again', async () => {
