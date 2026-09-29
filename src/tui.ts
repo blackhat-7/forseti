@@ -129,7 +129,7 @@ function table(rows: string[][], widths: number[]): string[] {
  * where each model is strong or weak. Every table has the models as columns in rank order, so a
  * model is read down one column and a task or skill across one row.
  */
-function comparisonPage(runs: Run[], width: number, everyTask: boolean): string[] {
+function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnly = false): string[] {
   const { cards: all, tasks, mixed } = scorecards(runs);
   const ranked = ranking(all), cards = ranked.map(r => r.card);
   const rivals = ranked.filter(r => r.rank !== null).map(r => r.card);
@@ -179,6 +179,7 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean): string[
     }
   }
   for (const gap of tierGaps) prose(gap, amber);
+  if (chartOnly) return out;
   row();
   prose(`Rank = 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart. ± = how far the number could move on a rerun.${tiers[0]?.length ? ' Place = rank on that difficulty alone, by the same rule. Basic tasks tell small models apart; hard tasks tell the strongest apart.' : ''}`, faint);
   if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
@@ -390,6 +391,12 @@ export class Dashboard implements Component, Focusable {
       else this.options.repeat = Math.max(1, Math.min(20, this.options.repeat + step));
       return;
     }
+    // The leaderboard is what this tool is for, so it opens from anywhere.
+    if (data === 'L') {
+      const board = leaderboard(this.app.runs, this.app.suite.tasks);
+      if (!board) throw new Error('No finished tries yet. Start with r.');
+      this.report = terminalReport(comparisonReport([board])); this.reportRuns = [board]; this.reportOffset = 0; this.reportMode = 'summary'; this.dialog = 'report'; return;
+    }
     if (data === 'l') { this.options.lane = this.options.lane === 'tools' ? 'prompt' : 'tools'; return; }
     if (data === 'p') { this.options.cache = !this.options.cache; return; }
     if (data === 't') { this.options.timeout = TIMEOUTS[(TIMEOUTS.indexOf(this.options.timeout) + 1) % TIMEOUTS.length] ?? 180; return; }
@@ -419,11 +426,6 @@ export class Dashboard implements Component, Focusable {
       const run = this.app.runs[index];
       if (key('space') && run) { if (this.selectedRuns.has(run.id)) this.selectedRuns.delete(run.id); else this.selectedRuns.add(run.id); }
       if (key('enter') && run) { this.detailRun = run; this.trialIndex = 0; this.reportOffset = 0; this.dialog = 'evidence'; }
-      if (data === 'L') {
-        const board = leaderboard(this.app.runs, this.app.suite.tasks);
-        if (!board) throw new Error('No finished tries yet. Start with r.');
-        this.report = terminalReport(comparisonReport([board])); this.reportRuns = [board]; this.reportOffset = 0; this.reportMode = 'summary'; this.dialog = 'report';
-      }
       if (data === 'c') { const ids = this.runIds(); this.report = terminalReport(this.app.compare(ids)); this.reportRuns = this.app.runs.filter(r => ids.includes(r.id)); this.reportOffset = 0; this.reportMode = 'summary'; this.dialog = 'report'; }
       if (data === 'e') this.export();
     } else if (this.tab === 4 && (key('space') || key('enter'))) {
@@ -676,6 +678,14 @@ export class Dashboard implements Component, Focusable {
       const planned = this.models().length * this.enabledTasks().length * this.options.repeat;
       const enabled = this.models();
       row();
+      // The answer comes first: how the models compare, from every comparable try on record.
+      const board = leaderboard(this.app.runs, this.app.suite.tasks);
+      if (board) {
+        head('Leaderboard', 'every comparable try, all runs · L for the full page');
+        row();
+        comparisonPage([board], inner, false, true).forEach(line => row(line));
+        row();
+      }
       head(plain(this.app.suite.title), `${count(planned, 'trial')} · ${this.options.lane} lane`);
       row();
       // Home earns the whole window: what will run sits beside how it will run.
@@ -906,7 +916,7 @@ export class Dashboard implements Component, Focusable {
         ['a', 'add model or test'], ['d', 'remove, with confirmation'], ['u', 'restore last removed test'],
         ['r', 'review preflight'], ['− +', 'tries per test, or reviewer rounds on Settings'], ['l', 'tools / prompt lane'],
         ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer, local server'], ['R', 'refresh metadata, sends nothing'],
-        ['c · ⏎ · e', 'runs: compare, evidence, export'], ['L', 'runs: leaderboard of every comparable try'], ['m', 'comparison: summary / full report'], ['a', 'comparison: show / fold tasks every model solved'], ['←→', 'evidence: previous / next trial'],
+        ['c · ⏎ · e', 'runs: compare, evidence, export'], ['L', 'leaderboard of every comparable try, from any tab'], ['m', 'comparison: summary / full report'], ['a', 'comparison: show / fold tasks every model solved'], ['←→', 'evidence: previous / next trial'],
         ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc · q', 'leave what you are looking at: close a panel, else quit'], ['esc during a run', 'cancel it safely, keeping completed evidence'], ['during a run', 'tabs and ↑↓ work; edits wait'], ['ctrl+c', 'quit'],
       ] as const) row(`${accent(keys)}${' '.repeat(Math.max(2, 14 - keys.length))}${muted(what)}`);
     } else {

@@ -788,3 +788,14 @@ test('a local server is set on Settings, listed in the picker and added with no 
   assert.match(f.text(), /example\/model-one/);
   assert.doesNotMatch(f.text(), /local\/\/models/);
 });
+
+test('the leaderboard is the first thing on Home and opens in full from any tab', () => {
+  const f = fixture('subscription', 200);
+  const home = f.text(120);
+  assert.match(home, /Leaderboard\s+every comparable try, all runs · L for the full page/);
+  assert.ok(home.indexOf('How the models compare') < home.indexOf('Run settings'), 'the answer comes before the run controls');
+  f.key('3', 'L');
+  const page = f.text(120);
+  assert.match(page, /Leaderboard\s+every comparable try, all runs/);
+  assert.match(page, /Per task/, 'the full page, not only the chart');
+});

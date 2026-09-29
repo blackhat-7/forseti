@@ -4,6 +4,8 @@ The dashboard uses the pinned Pi TUI package, not the global Pi runtime. It open
 
 Tables have one shape: a left-aligned name column, then right-aligned figures. Runs are listed by when they ran, each model's score and the run's shape (tests × tries), with the selected run's scores under the list, so a run is found by what it showed rather than by its hash. Tests show their difficulty, the skills they test in plain words, what they are graded on and the start of the prompt.
 
+**Home opens on the leaderboard.** The first thing on screen is the comparison chart built from every comparable try in every run (see `leaderboard` in `src/report.ts`). `L` opens the full leaderboard page from any tab.
+
 ## Keys
 
 - **Tab / Shift+Tab, 1–5, ←→:** Home, Models, Tests, Runs, Settings.
