@@ -7,7 +7,6 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## State
 
-- **Runs on macOS and Linux.** On Linux, `src/sandbox-linux.py` confines Python with Landlock + seccomp. Kernel 6.12+, x86_64 or arm64; anything else fails closed.
 - **31 tasks.** `hard` 6 (`due-dates`, `sheet-eval`, `lock-refresh`, and three ops tasks) · `standard` 14 · `basic` 11. A task may set its own `turns`/`timeout`; the effective budget is the larger of the run's and the task's.
 - **Scoring:** running out of a task's turn or time budget counts as unsolved (auth, quota, crash, cancel stay `not-run`). Each difficulty level weighs equally.
 - **The rebuilt hard tier separates, on one try each.** `lock-refresh` and `sheet-eval`: Haiku ✗, Sonnet ✗, Opus ✓. `crew-schedule` and `log-query`: Haiku ✗, Sonnet ✓. Detail in `docs/transcript-research.md`. Not yet a measurement.
