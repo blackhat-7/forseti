@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting-exporter
+  namespace: data
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: reporting-exporter
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/reporting-exporter:v2.2.0
+          env:
+            # Reads the orders database directly (read replica was retired in 2024).
+            - name: DB_HOST
+              value: "10.84.0.3"
+            - name: DB_NAME
+              value: "orders"
+            - name: DB_USER
+              value: "reporting_ro"
+            - name: EXPORT_BUCKET
+              value: "gs://qm-reporting-exports"

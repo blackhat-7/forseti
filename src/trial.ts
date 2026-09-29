@@ -7,7 +7,7 @@ import { files, inside, localDir, put } from './files.ts';
 import { applicableDimensions, gradeSubmission, loadGrader, rejectArtifacts, validateChecks, type Agent, type Grader } from './grade.ts';
 import { review as reviewSubmission, type JudgeCall, type Review } from './judge.ts';
 import type { JudgeConfig, LiveEvent, ModelConfig, RunOptions, Task, Trial } from './types.ts';
-import { loadWorldModule, openWorld, removeWorkspace, runCommand, worldWorkspace } from './world.ts';
+import { loadWorldModule, openWorld, removeWorkspace, runCommand, worldSeed, worldWorkspace } from './world.ts';
 
 /**
  * Everything that decides how one try runs. This file is part of the harness fingerprint; the
@@ -78,24 +78,26 @@ export async function runTrial(ctx: TrialContext, job: Job, id: string): Promise
     else if (!trial.auth.ready) { trial.status = 'auth_error'; trial.error = trial.auth.note; }
     else {
       const grader = await loadGrader(inside(ctx.snapshot, job.task.grader)) as Grader & {
-        reference?: { files?: Record<string, string>; answer?: string; commands?: string[] };
-        baseline?: { files?: Record<string, string>; answer?: string; commands?: string[] };
+        reference?: { files?: Record<string, string>; answer?: string; commands?: string[] | ((seed: number) => string[]) };
+        baseline?: { files?: Record<string, string>; answer?: string; commands?: string[] | ((seed: number) => string[]) };
         review?: Review;
       };
       deadline = setTimeout(() => controller.abort(), budget.timeout * 1000);
       // The Claude Code lane's estate lives in its tool server's process, which leaves its report here.
       const reportPath = inside(trialDir, 'world.json');
-      const world = worldModule && (control || agent === 'pi') ? await openWorld(worldModule, work) : undefined;
+      const seed = worldSeed(job.repetition);
+      if (worldModule) record({ type: 'world', seed });
+      const world = worldModule && (control || agent === 'pi') ? await openWorld(worldModule, work, seed) : undefined;
       if (control) {
         ctx.notify('applying synthetic control');
         const answer = job.model.model === 'reference' ? grader.reference : grader.baseline;
         if (!answer) throw new Error(`Missing ${job.model.model} control for ${job.task.id}`);
         for (const [path, content] of Object.entries(answer.files ?? {})) put(work, path, content);
-        for (const command of answer.commands ?? []) trial.trace.push({ tool: 'bash', args: { command }, ok: true, ms: 0, output: await runCommand(world!, command) });
+        for (const command of (typeof answer.commands === 'function' ? answer.commands(seed) : answer.commands) ?? []) trial.trace.push({ tool: 'bash', args: { command }, ok: true, ms: 0, output: await runCommand(world!, command) });
         trial.answer = answer.answer ?? '';
-      } else if (agent === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, live.emit, worldModule ? { module: worldModule, report: reportPath } : undefined);
+      } else if (agent === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, live.emit, worldModule ? { module: worldModule, report: reportPath, seed } : undefined);
       else await runAgent(work, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, modelsFor(job.model, ctx.local, ctx.contexts), live.emit, world);
-      if (worldModule) trial.world = world ? world.report() : existsSync(reportPath) ? JSON.parse(readFileSync(reportPath, 'utf8')) : (await openWorld(worldModule, work)).report();
+      if (worldModule) trial.world = world ? world.report() : existsSync(reportPath) ? JSON.parse(readFileSync(reportPath, 'utf8')) : (await openWorld(worldModule, work, seed)).report();
       if (controller.signal.aborted) {
         trial.status = signal.aborted ? 'cancelled' : 'timeout';
         trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${budget.timeout}s exceeded; counted as unsolved`;

@@ -5,7 +5,20 @@
  *   resolve({ host, port, dbname, user }) returns either { error, wait? } (printed after
  *   `psql: error: `, exit 2) or a connection:
  *     { db: DatabaseSync, name: instance name, readOnly?, settings?: {name: value},
- *       activity?: () => rows for pg_stat_activity, owners?: Set of table names the user does not own }
+ *       activity?: () => rows for pg_stat_activity, owners?: Set of table names the user does not own,
+ *       cost?(verb, table, rows, returned) -> seconds a statement takes on this server,
+ *       lockWait?(table, rows) -> seconds a write waits for row locks the application holds,
+ *       release?({ rows: {table: n}, seconds, committed }) when a transaction's row locks go,
+ *       committed?() after anything commits, size?(table) -> bytes, replayedAt?() -> timestamp,
+ *       open?() / close?() around the session, holdClock?: the session's time is paid after close() }
+ *   A read replica can be served from the primary's own database: open() rewinds it inside a
+ *   savepoint and close() undoes that, with holdClock so nothing else runs in between.
+ *
+ * Time: a statement's cost is paid on the virtual clock when its transaction ends, so the rest of
+ * the estate moves on only once nothing is left open, and the seconds a transaction held its row
+ * locks are reported to release(). `statement_timeout` and `lock_timeout` cancel a statement the
+ * way PostgreSQL does, undoing it. `DO` blocks run a PL/pgSQL subset (DECLARE, :=, IF, LOOP,
+ * WHILE, FOR, EXIT/CONTINUE WHEN, GET DIAGNOSTICS, SELECT INTO, PERFORM, RAISE, COMMIT).
  *
  * Behaviour follows psql 15: `-c` runs its statements as one implicit transaction and stops at the
  * first error; files and stdin run statement by statement, keep going after an error unless
@@ -56,6 +69,24 @@ function shift(ts, sign, spec) {
   return stamp(d.getTime() + k * parts.seconds * 1000);
 }
 
+const toMs = (v) => { if (v === null || v === undefined) return null; const s = normalizeTimestamp(String(v)) ?? (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? `${v} 00:00:00` : null); return s ? Date.parse(`${s.replace(' ', 'T')}Z`) : null; };
+/** An interval as PostgreSQL prints it: `00:04:12.53`, `1 day 02:00:00`, `-00:00:05`. */
+export function formatInterval(seconds) {
+  const sign = seconds < 0 ? '-' : '';
+  let s = Math.abs(seconds);
+  const days = Math.floor(s / 86400);
+  s -= days * 86400;
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const frac = Math.round((sec % 1) * 100);
+  const clock = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(Math.floor(sec)).padStart(2, '0')}${frac ? `.${String(frac).padStart(2, '0').replace(/0$/, '')}` : ''}`;
+  return days ? `${sign}${days} day${days === 1 ? '' : 's'} ${sign}${clock}` : `${sign}${clock}`;
+}
+function parseInterval(text) {
+  const m = /^(-)?(?:(\d+) days? (-)?)?(\d{2,}):(\d{2}):(\d{2}(?:\.\d+)?)$/.exec(text.trim());
+  if (!m) return null;
+  const v = Number(m[2] ?? 0) * 86400 + Number(m[4]) * 3600 + Number(m[5]) * 60 + Number(m[6]);
+  return m[1] ? -v : v;
+}
 /** Splits SQL text into statements, with the line each one ends on. */
 export function splitSql(text) {
   const out = [];
@@ -115,6 +146,60 @@ function operandBefore(code, end) {
   while (k > 0 && /[\w.]/.test(code[k - 1])) k--;
   return { start: k, stop };
 }
+/** The operand that starts just after `start` in code: a literal, a call, a parenthesis or a name. */
+function operandAfter(code, start) {
+  let k = start;
+  while (k < code.length && /\s/.test(code[k])) k++;
+  const begin = k;
+  if (code[k] === '\u0001') { const e = code.indexOf('\u0001', k + 1); return { start: begin, stop: e + 1 }; }
+  while (k < code.length && /[\w.]/.test(code[k])) k++;
+  if (code[k] === '(') {
+    let depth = 0;
+    for (; k < code.length; k++) { if (code[k] === '(') depth++; else if (code[k] === ')' && --depth === 0) { k++; break; } }
+  }
+  return { start: begin, stop: k };
+}
+/** Whether an operand reads as a timestamp: now(), a timestamp function or literal, or a *_at-style column. */
+function timestampish(text, literals) {
+  const t = text.trim();
+  if (/^\u0001(\d+)\u0001$/.test(t)) return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(literals[Number(t.slice(1, -1))] ?? '');
+  return /^(now\(\s*\)|pg_ts\(|pg_shift\(|date_trunc\(|pg_last_xact_replay_timestamp\(\s*\))/i.test(t) || /^[\w.]*(_at|_time|_start|_end|timestamp|_date)$/i.test(t);
+}
+/**
+ * `ORDER BY` as PostgreSQL defaults it: NULLs last when ascending, first when descending. SQLite
+ * does the opposite, so every item without an explicit NULLS gets one.
+ */
+function nullsOrder(code) {
+  const stops = /^(limit|offset|fetch|for|union|intersect|except|window|rows|range|groups)\b/i;
+  let out = '', i = 0;
+  for (;;) {
+    const m = /\border\s+by\s+/gi;
+    m.lastIndex = i;
+    const hit = m.exec(code);
+    if (!hit) { out += code.slice(i); return out; }
+    out += code.slice(i, hit.index + hit[0].length);
+    let k = hit.index + hit[0].length, depth = 0, item = '';
+    const items = [];
+    for (; k < code.length; k++) {
+      const c = code[k];
+      if (c === '(') depth++;
+      else if (c === ')') { if (depth === 0) break; depth--; }
+      if (depth === 0 && c === ',') { items.push(item); item = ''; continue; }
+      if (depth === 0 && /\s/.test(code[k - 1] ?? ' ') && stops.test(code.slice(k))) break;
+      if (depth === 0 && c === ';') break;
+      item += c;
+    }
+    items.push(item);
+    out += items.map(raw => {
+      const it = nullsOrder(raw);
+      const trimmed = it.replace(/\s+$/, '');
+      const trailing = it.slice(trimmed.length);
+      if (!trimmed.trim() || /\bnulls\s+(first|last)\s*$/i.test(trimmed)) return it;
+      return `${trimmed}${/\bdesc$/i.test(trimmed) ? ' NULLS FIRST' : ' NULLS LAST'}${trailing}`;
+    }).join(',');
+    i = k;
+  }
+}
 /** PostgreSQL spellings SQLite does not know, rewritten to ones it does. */
 export function translate(sql) {
   const { code: raw, literals } = protect(sql);
@@ -138,6 +223,7 @@ export function translate(sql) {
     else if (/^(numeric|decimal|real|float[48]?|double)/.test(type)) replacement = `CAST(${operand} AS REAL)`;
     else if (/^(text|varchar|character|char|name)/.test(type)) replacement = `CAST(${operand} AS TEXT)`;
     else if (type === 'interval') replacement = `interval ${operand}`;
+    else if (/^(timestamptz|timestamp)/.test(type)) replacement = `pg_ts(${operand})`;
     code = code.slice(0, start) + replacement + code.slice(m.index + m[0].length);
   }
   // `x - interval '2 hours'` and `x + interval '1 day'`.
@@ -148,6 +234,22 @@ export function translate(sql) {
     if (start === stop) break;
     code = `${code.slice(0, start)}pg_shift(${code.slice(start, stop)}, '${m[1]}', ${m[2]})${code.slice(m.index + m[0].length)}`;
   }
+  // `timestamp - timestamp` is an interval in PostgreSQL; in SQLite it would be 0.
+  for (let guard = 0, from = 0; guard < 50; guard++) {
+    const m = /(?<![-+*\/<>=!(,]\s*)(?<=[\w)\u0001]\s*)-(?!-)/g;
+    m.lastIndex = from;
+    const hit = m.exec(code);
+    if (!hit) break;
+    const left = operandBefore(code, hit.index), right = operandAfter(code, hit.index + 1);
+    const a = code.slice(left.start, left.stop), b = code.slice(right.start, right.stop);
+    if (a && b && timestampish(a, literals) && timestampish(b, literals)) {
+      const replacement = `pg_age(${a}, ${b})`;
+      code = code.slice(0, left.start) + replacement + code.slice(right.stop);
+      from = left.start + replacement.length;
+    } else from = hit.index + 1;
+  }
+  // A bare `interval '5 minutes'` in a comparison reads as the same interval text.
+  code = code.replace(new RegExp(`\\binterval\\s*(${LIT})`, 'gi'), 'pg_interval($1)');
   code = code.replace(/\bextract\s*\(\s*(\w+)\s+from\s+/gi, (_, f) => `pg_extract('${f.toLowerCase()}', `);
   code = code.replace(/\bnot\s+ilike\b/gi, 'NOT LIKE').replace(/\bilike\b/gi, 'LIKE');
   code = code.replace(/\bis\s+not\s+distinct\s+from\b/gi, 'IS').replace(/\bis\s+distinct\s+from\b/gi, 'IS NOT');
@@ -155,6 +257,7 @@ export function translate(sql) {
   code = code.replace(/<>\s*all\s*\(\s*array\s*\[([^\]]*)\]\s*\)/gi, 'NOT IN ($1)');
   code = code.replace(/\bgreatest\s*\(/gi, 'max(').replace(/\bleast\s*\(/gi, 'min(');
   code = code.replace(/\bstring_agg\s*\(/gi, 'group_concat(');
+  code = code.replace(/\bjsonb?_build_object\s*\(/gi, 'json_object(').replace(/\bjsonb?_build_array\s*\(/gi, 'json_array(').replace(/\bto_jsonb?\s*\(/gi, 'json_quote(');
   code = code.replace(/\blimit\s+all\b/gi, '');
   code = code.replace(/\bfor\s+(?:no\s+key\s+)?(?:update|share)(?:\s+of\s+\w+)?(?:\s+(?:skip\s+locked|nowait))?\s*$/i, '');
   code = code.replace(/\bas\s+table\s+([\w.]+)/gi, 'AS SELECT * FROM $1');
@@ -181,6 +284,7 @@ export function translate(sql) {
     if (rewritten === code.slice(m.index, end)) break;
     code = code.slice(0, m.index) + rewritten + code.slice(end);
   }
+  code = nullsOrder(code);
   return restore(code, literals);
 }
 /** Where the statement proper begins: 0, or just past a leading WITH clause. */
@@ -340,6 +444,8 @@ export function formatResult({ columns, rows }, o) {
 }
 
 const attached = new WeakSet();
+/** The psql session using each database right now, for functions that need it. */
+const current = new WeakMap();
 /** pg_catalog and information_schema as attached schemas, so both qualified and bare names resolve. */
 function catalogs(conn, ctx) {
   const db = conn.db;
@@ -354,17 +460,27 @@ function catalogs(conn, ctx) {
     db.exec('CREATE TABLE information_schema.columns (table_catalog TEXT, table_schema TEXT, table_name TEXT, column_name TEXT, ordinal_position INTEGER, column_default TEXT, is_nullable TEXT, data_type TEXT)');
     const fn = (name, f, n) => db.function(name, { deterministic: false, varargs: n === undefined }, f);
     fn('now', () => stamp(ctx.now().getTime()));
-    fn('pg_current_user', () => conn.user);
-    fn('current_database', () => conn.dbname);
-    fn('version', () => `PostgreSQL ${conn.settings?.server_version ?? '15.8'} on x86_64-pc-linux-gnu, compiled by Debian clang version 12.0.1, 64-bit`);
+    // A database can be served under more than one connection (a replica view): ask the session using it.
+    const live = () => current.get(db)?.conn ?? conn;
+    fn('pg_current_user', () => live().user);
+    fn('current_database', () => live().dbname);
+    fn('version', () => `PostgreSQL ${live().settings?.server_version ?? '15.8'} on x86_64-pc-linux-gnu, compiled by Debian clang version 12.0.1, 64-bit`);
     fn('pg_shift', (ts, sign, spec) => shift(ts, sign, spec));
     fn('pg_extract', (field, ts) => {
       if (ts === null) return null;
+      const span = parseInterval(String(ts));
+      if (span !== null) { const f = String(field).toLowerCase(); return f === 'epoch' ? span : f === 'day' ? Math.trunc(span / 86400) : f === 'hour' ? Math.trunc(span % 86400 / 3600) : f === 'minute' ? Math.trunc(span % 3600 / 60) : f === 'second' ? span % 60 : null; }
       const iso = normalizeTimestamp(String(ts)) ?? String(ts);
       const d = new Date(`${iso.replace(' ', 'T')}${iso.length > 10 ? 'Z' : 'T00:00:00Z'}`);
       return { epoch: d.getTime() / 1000, year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate(), hour: d.getUTCHours(), minute: d.getUTCMinutes(), second: d.getUTCSeconds(), dow: d.getUTCDay(), doy: Math.floor((d - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86400000) + 1 }[String(field).toLowerCase()] ?? null;
     });
     fn('date_part', (field, ts) => db.prepare('SELECT pg_extract(?, ?) v').get(field, ts).v);
+    fn('pg_age', (a, b) => { const x = toMs(a), y = toMs(b); return x === null || y === null ? null : formatInterval((x - y) / 1000); });
+    fn('pg_interval', (spec) => { const p = intervalParts(spec); return p ? formatInterval(p.seconds + p.months * 30 * 86400) : null; });
+    fn('left', (text, n) => (text === null ? null : n >= 0 ? String(text).slice(0, n) : String(text).slice(0, Math.max(0, String(text).length + n))));
+    fn('right', (text, n) => (text === null ? null : n >= 0 ? (n ? String(text).slice(-n) : '') : String(text).slice(-n)));
+    fn('lpad', (text, n, fill = ' ') => (text === null ? null : String(text).length >= n ? String(text).slice(0, n) : String(fill).repeat(n).slice(0, n - String(text).length) + text));
+    fn('rpad', (text, n, fill = ' ') => (text === null ? null : String(text).length >= n ? String(text).slice(0, n) : text + String(fill).repeat(n).slice(0, n - String(text).length)));
     fn('date_trunc', (unit, ts) => {
       if (ts === null) return null;
       const s = normalizeTimestamp(String(ts)) ?? (/^\d{4}-\d{2}-\d{2}$/.test(String(ts)) ? `${ts} 00:00:00` : null);
@@ -383,12 +499,19 @@ function catalogs(conn, ctx) {
       const s = normalizeTimestamp(String(ts)) ?? String(ts);
       return String(format).replace(/YYYY/g, s.slice(0, 4)).replace(/MM/g, s.slice(5, 7)).replace(/DD/g, s.slice(8, 10)).replace(/HH24/g, s.slice(11, 13)).replace(/MI/g, s.slice(14, 16)).replace(/SS/g, s.slice(17, 19));
     });
-    fn('pg_sleep', (seconds) => { ctx.wait(Number(seconds) || 0); return ''; });
+    // Sleeping inside a transaction keeps its locks: the time is owed by the session, not skipped.
+    fn('pg_sleep', (seconds) => { const session = current.get(db); if (session) session.charge(Number(seconds) || 0); else ctx.wait(Number(seconds) || 0); return ''; });
     fn('pg_backend_pid', () => 48213);
     fn('txid_current', () => 91842277);
-    fn('pg_total_relation_size', (name) => { try { return (db.prepare(`SELECT count(*) n FROM "${String(name).replace(/"/g, '')}"`).get().n + 40) * 312; } catch { return null; } });
-    fn('pg_relation_size', (name) => { try { return (db.prepare(`SELECT count(*) n FROM "${String(name).replace(/"/g, '')}"`).get().n + 40) * 208; } catch { return null; } });
-    fn('pg_size_pretty', (n) => (n === null ? null : n < 10240 ? `${n} bytes` : n < 10485760 ? `${Math.round(n / 1024)} kB` : n < 10737418240 ? `${Math.round(n / 1048576)} MB` : `${Math.round(n / 1073741824)} GB`));
+    fn('pg_total_relation_size', (name) => relationSize(live(), String(name).replace(/"/g, '').replace(/^public\./, ''), 1.5));
+    fn('pg_relation_size', (name) => relationSize(live(), String(name).replace(/"/g, '').replace(/^public\./, ''), 1));
+    fn('pg_table_size', (name) => relationSize(live(), String(name).replace(/"/g, '').replace(/^public\./, ''), 1.05));
+    fn('pg_ts', (v) => (v === null || v === undefined ? null : normalizeTimestamp(String(v)) ?? (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? `${v} 00:00:00` : String(v))));
+    fn('pg_is_in_recovery', () => (live().readOnly ? 1 : 0));
+    fn('pg_last_xact_replay_timestamp', () => (live().readOnly ? live().replayedAt?.() ?? null : null));
+    fn('jsonb_extract_path_text', (json, ...path) => { try { let v = JSON.parse(json); for (const k of path) v = v?.[k]; return v === undefined || v === null ? null : typeof v === 'object' ? JSON.stringify(v) : String(v); } catch { return null; } });
+    fn('current_setting', (name) => ({ timezone: 'UTC', server_version: '15.8', statement_timeout: '0', lock_timeout: '0' }[String(name).toLowerCase()] ?? null));
+    fn('pg_size_pretty', (n) => pretty(n));
     let uuid = 0;
     fn('gen_random_uuid', () => { uuid++; const h = (uuid * 2654435761 >>> 0).toString(16).padStart(8, '0'); return `${h}-9c1e-4b7a-8f3d-${String(uuid).padStart(12, '0')}`; });
     db.aggregate('array_agg', { start: () => null, step: (acc, v) => [...(acc ?? []), v], result: (acc) => (acc === null ? null : `{${acc.map(v => (v === null ? 'NULL' : String(v))).join(',')}}`) });
@@ -427,6 +550,20 @@ function columnsOf(db, table) {
   });
 }
 const ownerOf = (conn, table) => (conn.owners?.has(table) ? 'app' : conn.user);
+/** Bytes on disk: the server's own figure when it gives one, else rows times a typical width. */
+function relationSize(conn, table, factor) {
+  const own = conn.size?.(table);
+  if (own !== undefined && own !== null) return Math.round(own * factor / 1.5);
+  try { return Math.round((conn.db.prepare(`SELECT count(*) n FROM main."${table}"`).get().n + 40) * 208 * factor); } catch { return null; }
+}
+const pretty = (n) => (n === null ? null : n < 10240 ? `${n} bytes` : n < 10485760 ? `${Math.round(n / 1024)} kB` : n < 10737418240 ? `${Math.round(n / 1048576)} MB` : `${Math.round(n / 1073741824)} GB`);
+/** A setting's value in seconds: '30s', '5min', '1500ms', '5000' (milliseconds), 0 = off. */
+function seconds(value) {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|min|h|d)?\s*$/i.exec(String(value ?? '0'));
+  if (!m) return null;
+  return Number(m[1]) * ({ ms: 0.001, s: 1, min: 60, h: 3600, d: 86400 }[(m[2] ?? 'ms').toLowerCase()]);
+}
+const TIMEOUTS = ['statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout'];
 
 /** One psql process: its options, its connection and its transaction state. */
 class Session {
@@ -442,15 +579,40 @@ class Session {
     this.stopped = false;
     this.timing = false;
     conn.ctx = ctx;
+    /** Virtual seconds owed by the open transaction, paid when it ends. */
+    this.debt = 0;
+    /** Row locks the open transaction holds: rows per table, and for how many seconds. */
+    this.holding = null;
+    this.lastRowCount = 0;
+    this.gucs = { statement_timeout: String(conn.settings?.statement_timeout ?? '0'), lock_timeout: String(conn.settings?.lock_timeout ?? '0'), idle_in_transaction_session_timeout: '0' };
+    this.localGucs = null;
+    this.inDo = false;
+    current.set(this.db, this);
+    conn.open?.();
   }
-  begin(mode) { this.db.exec('BEGIN'); this.txn = mode; }
+  guc(name) { return this.localGucs?.[name] ?? this.gucs[name]; }
+  charge(sec) { this.debt += sec; if (this.holding) this.holding.seconds += sec; }
+  /** The transaction is over: its locks go, what it wrote replicates, and the clock moves. */
+  settle(committed) {
+    if (this.holding) { this.conn.release?.({ rows: this.holding.rows, seconds: this.holding.seconds, committed }); this.holding = null; }
+    if (committed) this.conn.committed?.();
+    this.localGucs = null;
+    if (this.virtual) return;
+    const owed = this.debt;
+    this.debt = 0;
+    if (owed > 0) this.ctx.wait(owed);
+  }
+  /** A view served inside the provider's own savepoint has no transactions of its own to run. */
+  get virtual() { return Boolean(this.conn.holdClock); }
+  begin(mode) { if (!this.virtual) this.db.exec('BEGIN'); this.txn = mode; }
   commit() {
-    if (this.txn === 'aborted') { this.db.exec('ROLLBACK'); this.discard(); this.txn = 'none'; return 'ROLLBACK'; }
-    if (this.txn !== 'none') { this.db.exec('COMMIT'); this.flush(); }
+    if (this.txn === 'aborted') { if (!this.virtual) this.db.exec('ROLLBACK'); this.discard(); this.txn = 'none'; this.settle(false); return 'ROLLBACK'; }
+    if (this.txn !== 'none') { if (!this.virtual) this.db.exec('COMMIT'); this.flush(); }
     this.txn = 'none';
+    this.settle(true);
     return 'COMMIT';
   }
-  rollback() { if (this.db.isTransaction) this.db.exec('ROLLBACK'); this.discard(); this.txn = 'none'; }
+  rollback() { if (!this.virtual && this.db.isTransaction) this.db.exec('ROLLBACK'); this.discard(); this.txn = 'none'; this.settle(false); }
   flush() { for (const e of this.pending) this.ctx.event(e.kind, e.detail); this.pending = []; }
   discard() {
     const writes = this.pending.filter(e => e.kind === 'sql.statement');
@@ -461,8 +623,9 @@ class Session {
     if (this.txn === 'none') this.ctx.event(kind, detail);
     else this.pending.push({ kind, detail });
   }
-  print(lines_) { this.out.push(...lines_); }
-  tag(text) { if (!this.o.quiet) this.out.push(text); }
+  // Statements inside a DO block print nothing of their own; only NOTICEs and errors surface.
+  print(lines_) { if (!this.inDo) this.out.push(...lines_); }
+  tag(text) { if (!this.o.quiet && !this.inDo) this.out.push(text); }
   /** Runs one statement and prints what psql prints for it. Returns false on error. */
   statement(sql, where) {
     const prefix = where ? `psql:${where}: ` : '';
@@ -491,10 +654,25 @@ class Session {
       this.tag(verb === 'ROLLBACK' ? 'ROLLBACK' : verb);
       return true;
     }
-    if (verb === 'SET' || verb === 'RESET' || verb === 'DISCARD') { this.tag(verb); return true; }
+    if (verb === 'SET' || verb === 'RESET' || verb === 'DISCARD') {
+      const set = /^\s*set\s+(session\s+|local\s+)?([\w.]+)\s*(?:=|\bto\b)\s*(.+)$/i.exec(plain);
+      const reset = /^\s*reset\s+([\w.]+|all)\s*$/i.exec(plain);
+      if (set) {
+        const name = set[2].toLowerCase(), value = set[3].trim().replace(/^'(.*)'$/, '$1');
+        if (TIMEOUTS.includes(name)) {
+          const v = /^default$/i.test(value) ? '0' : value;
+          if (seconds(v) === null) return fail([`ERROR:  invalid value for parameter "${name}": "${value}"`]);
+          if (/local/i.test(set[1] ?? '')) { if (this.txn === 'none') this.err.push(`${prefix}WARNING:  SET LOCAL can only be used in transaction blocks`); else (this.localGucs ??= {})[name] = v; }
+          else this.gucs[name] = v;
+        }
+      } else if (reset) { if (TIMEOUTS.includes(reset[1].toLowerCase())) this.gucs[reset[1].toLowerCase()] = '0'; if (/^all$/i.test(reset[1])) for (const k of TIMEOUTS) this.gucs[k] = '0'; }
+      this.tag(verb);
+      return true;
+    }
     if (verb === 'SHOW') {
       const name = (words[1] ?? '').toLowerCase();
-      const settings = { max_connections: '100', server_version: '15.8', timezone: 'UTC', statement_timeout: '0', lock_timeout: '0', transaction_isolation: 'read committed', search_path: '"$user", public', default_transaction_read_only: this.conn.readOnly ? 'on' : 'off', transaction_read_only: this.conn.readOnly ? 'on' : 'off', ...Object.fromEntries(Object.entries(this.conn.settings ?? {}).map(([k, v]) => [k.toLowerCase(), String(v)])) };
+      const settings = { max_connections: '100', server_version: '15.8', timezone: 'UTC', statement_timeout: '0', lock_timeout: '0', idle_in_transaction_session_timeout: '0', transaction_isolation: 'read committed', search_path: '"$user", public', default_transaction_read_only: this.conn.readOnly ? 'on' : 'off', transaction_read_only: this.conn.readOnly ? 'on' : 'off', ...Object.fromEntries(Object.entries(this.conn.settings ?? {}).map(([k, v]) => [k.toLowerCase(), String(v)])) };
+      for (const k of TIMEOUTS) { const v = this.guc(k); settings[k] = seconds(v) ? (/^\d+$/.test(v) ? (Number(v) % 1000 === 0 && Number(v) ? `${Number(v) / 1000}s` : `${v}ms`) : v.replace(/\s+/g, '')) : '0'; }
       if (!(name in settings)) return fail([`ERROR:  unrecognized configuration parameter "${name}"`]);
       this.print(formatResult({ columns: [{ label: name }], rows: [[settings[name]]] }, this.o));
       return true;
@@ -507,6 +685,7 @@ class Session {
     }
     if (verb === 'GRANT' || verb === 'REVOKE') return fail(['ERROR:  permission denied to grant privileges']);
     if (verb === 'COPY') return this.copy(sql, fail);
+    if (verb === 'DO') return this.doBlock(sql, fail, prefix);
     if (verb === 'EXPLAIN') return this.explain(sql, fail);
     return this.run(sql, verb, fail);
   }
@@ -528,16 +707,28 @@ class Session {
     const blocked = this.denied(sql, verb);
     if (blocked) return fail(blocked);
     let text = sql;
+    const target = targetOfAny(sql);
+    const isWrite = ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'TRUNCATE'].includes(verb);
+    // A write runs under a savepoint, so a timeout can undo it the way PostgreSQL cancels it.
+    const guarded = isWrite && !this.virtual;
+    if (guarded) this.db.exec('SAVEPOINT pg_statement');
+    const undo = () => { if (guarded) { this.db.exec('ROLLBACK TO pg_statement'); this.db.exec('RELEASE pg_statement'); } };
+    const keep = () => { if (guarded) this.db.exec('RELEASE pg_statement'); };
+    const failWith = (messages) => { undo(); const r = fail(messages); this.endStatement(false); return r; };
     if (verb === 'TRUNCATE') {
       const names = sql.replace(/^\s*truncate\s+(?:table\s+)?(?:only\s+)?/i, '').replace(/\s+(restart|continue)\s+identity|\s+(cascade|restrict)/gi, '').split(',').map(s => s.trim()).filter(Boolean);
       text = names.map(n => `DELETE FROM ${n}`).join(';');
       try {
         let rows = 0;
         for (const s of text.split(';')) rows += Number(this.db.prepare(translate(s)).run().changes);
-        this.note('sql.statement', { instance: this.conn.name, verb: 'TRUNCATE', table: targetOfAny(sql), sources: [], rows, sql: sql.slice(0, 600) });
+        if (!this.timed(target, rows, verb, failWith)) return false;
+        keep();
+        this.note('sql.statement', { instance: this.conn.name, verb: 'TRUNCATE', table: target, sources: [], rows, sql: sql.slice(0, 600) });
         this.tag('TRUNCATE TABLE');
+        this.lastRowCount = rows;
+        this.endStatement();
         return true;
-      } catch (e) { return fail(pgError(e, 'DELETE')); }
+      } catch (e) { return failWith(pgError(e, 'DELETE')); }
     }
     const drop = /^\s*alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?"?([\w.]+)"?\s+drop\s+(?:column\s+)?(?:if\s+exists\s+)?"?(\w+)"?/i.exec(text);
     if (drop) {
@@ -552,9 +743,8 @@ class Session {
     const translated = translate(text);
     if (/\b(pg_catalog|information_schema|pg_stat_activity|pg_tables|pg_stat_user_tables|pg_settings)\b/i.test(translated)) refreshCatalogs(this.conn);
     let stmt;
-    try { stmt = this.db.prepare(translated); } catch (e) { return fail(pgError(e, verb, targetOfAny(sql))); }
+    try { stmt = this.db.prepare(translated); } catch (e) { return failWith(pgError(e, verb, target)); }
     const returning = stmt.columns().length > 0;
-    const started = this.ctx.t;
     try {
       let rows = [], changes = 0;
       if (returning) {
@@ -562,24 +752,179 @@ class Session {
         rows = stmt.all();
         if (['INSERT', 'UPDATE', 'DELETE'].includes(verb)) changes = rows.length;
       } else changes = Number(stmt.run().changes);
-      this.ctx.wait(0.05 + Math.max(rows.length, changes) / 8000);
       const columns = stmt.columns().map(c => ({ label: label(c), type: c.type })).filter(c => c.label !== '__pg_rn');
       if (returning && stmt.columns().some(c => c.name === '__pg_rn')) { const drop = stmt.columns().findIndex(c => c.name === '__pg_rn'); rows = rows.map(r => r.filter((_, k) => k !== drop)); }
-      const isWrite = ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER'].includes(verb);
       if (isWrite) {
         const kind = verb === 'CREATE' && /\bas\s+select\b/i.test(translated) ? 'CREATE TABLE AS' : verb;
         if (kind === 'CREATE TABLE AS') changes = this.db.prepare(`SELECT count(*) n FROM main."${targetOfAny(translated)}"`).get().n;
-        this.note('sql.statement', { instance: this.conn.name, verb: kind, table: targetOfAny(sql), sources: sourcesOf(sql), rows: changes, sql: sql.slice(0, 600) });
-      }
+        if (!this.timed(['INSERT', 'UPDATE', 'DELETE'].includes(verb) ? target : null, changes, verb, failWith, rows.length)) return false;
+        keep();
+        this.note('sql.statement', { instance: this.conn.name, verb: kind, table: target, sources: sourcesOf(sql), rows: changes, sql: sql.slice(0, 600) });
+      } else this.charge(this.conn.cost?.(verb, target, 0, rows.length, this.inDo) ?? (this.inDo ? 0.0002 : 0.05) + rows.length / 8000);
+      this.lastRowCount = verb === 'SELECT' || verb === 'WITH' ? rows.length : changes;
       if (returning && (verb === 'SELECT' || verb === 'WITH' || rows.length || /\breturning\b/i.test(sql))) this.print(formatResult({ columns, rows }, this.o));
       if (verb === 'INSERT') this.tag(`INSERT 0 ${changes}`);
       else if (verb === 'UPDATE' || verb === 'DELETE') this.tag(`${verb} ${changes}`);
       else if (verb === 'CREATE') this.tag(/\bas\s+select\b/i.test(translated) ? `SELECT ${changes}` : /^\s*create\s+(unique\s+)?index/i.test(sql) ? 'CREATE INDEX' : /^\s*create\s+(or\s+replace\s+)?view/i.test(sql) ? 'CREATE VIEW' : 'CREATE TABLE');
       else if (verb === 'DROP') this.tag(/^\s*drop\s+index/i.test(sql) ? 'DROP INDEX' : /^\s*drop\s+view/i.test(sql) ? 'DROP VIEW' : 'DROP TABLE');
       else if (verb === 'ALTER') this.tag('ALTER TABLE');
-      if (this.timing) this.out.push(`Time: ${(0.412 + (this.ctx.t - started) * 1000).toFixed(3)} ms`);
+      if (this.timing && !this.inDo) this.out.push(`Time: ${(0.412 + this.lastCost * 1000).toFixed(3)} ms`);
+      this.endStatement();
       return true;
-    } catch (e) { return fail(pgError(e, verb, targetOfAny(sql))); }
+    } catch (e) { return failWith(pgError(e, verb, target)); }
+  }
+  /**
+   * Prices a write that has just run: how long it waited for row locks and how long it took. A
+   * lock_timeout or statement_timeout it exceeds cancels it (the caller undoes it). Returns false
+   * when cancelled.
+   */
+  timed(table, changes, verb, failWith, returned = 0) {
+    const wait = table && changes ? this.conn.lockWait?.(table, changes) ?? 0 : 0;
+    const cost = (this.conn.cost?.(verb, table, changes, returned, this.inDo) ?? (this.inDo ? 0.0002 : 0.05) + Math.max(changes, returned) / 8000) + wait;
+    this.lastCost = cost;
+    const lockLimit = seconds(this.guc('lock_timeout')), statementLimit = seconds(this.guc('statement_timeout'));
+    if (lockLimit > 0 && wait > lockLimit) {
+      this.charge(lockLimit);
+      failWith(['ERROR:  canceling statement due to lock timeout', `CONTEXT:  while ${verb === 'DELETE' ? 'deleting' : 'updating'} tuple (${4000 + (changes * 7) % 90000},${1 + changes % 60}) in relation "${table}"`]);
+      return false;
+    }
+    if (statementLimit > 0 && cost > statementLimit) {
+      // It held the rows it had reached until it was cancelled.
+      if (table) this.hold(table, Math.round(changes * statementLimit / cost), 0);
+      this.charge(statementLimit);
+      failWith(['ERROR:  canceling statement due to statement timeout']);
+      return false;
+    }
+    if (table && changes) this.hold(table, changes, 0);
+    this.charge(cost);
+    return true;
+  }
+  hold(table, rows) { this.holding ??= { rows: {}, seconds: 0 }; this.holding.rows[table] = (this.holding.rows[table] ?? 0) + rows; }
+  /** An autocommit statement is its own transaction: it ends here. */
+  endStatement(committed = true) { if (this.txn === 'none' && !this.inDo) this.settle(committed); }
+  /**
+   * A `DO` block: the PL/pgSQL an operator writes for batched fixes. Run outside a transaction
+   * block it may COMMIT between batches; inside one (BEGIN, or several statements in one -c), a
+   * COMMIT fails with "invalid transaction termination", as in PostgreSQL.
+   */
+  doBlock(sql, fail, prefix) {
+    const m = /^\s*do\s+(?:language\s+\w+\s+)?(?:(\$\w*\$)([\s\S]*?)\1|'((?:[^']|'')*)')\s*(?:language\s+(\w+))?\s*$/i.exec(sql);
+    if (!m) return fail(['ERROR:  syntax error at or near "DO"']);
+    if (m[4] && !/^plpgsql$/i.test(m[4])) return fail([`ERROR:  language "${m[4]}" does not exist`]);
+    const body = m[2] ?? m[3].replace(/''/g, "'");
+    let program;
+    try { program = parsePlpgsql(body); }
+    catch (e) { return fail([`ERROR:  ${e.message}`, `CONTEXT:  invalid type name or syntax in PL/pgSQL function inline_code_block`]); }
+    const outer = this.txn;
+    const own = outer === 'none';
+    if (own) this.begin('implicit');
+    this.inDo = true;
+    const vars = new Map();
+    const lit = (v) => (v === null || v === undefined ? 'NULL' : typeof v === 'number' || typeof v === 'bigint' ? String(v) : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : `'${String(v).replace(/'/g, "''")}'`);
+    /** Variables and record fields become literals; quoted text and qualified names are left alone. */
+    const bind = (text) => {
+      const { code, literals } = protect(text);
+      const swapped = code.replace(/(?<![\w.$"])([a-z_][\w]*)(?:\.([a-z_][\w]*))?(?![\w"(])/gi, (whole, name, field) => {
+        const key = name.toLowerCase();
+        if (!vars.has(key)) return whole;
+        const v = vars.get(key);
+        if (field !== undefined) return v && typeof v === 'object' && field.toLowerCase() in v ? lit(v[field.toLowerCase()]) : whole;
+        return v && typeof v === 'object' ? whole : lit(v);
+      });
+      return restore(swapped, literals);
+    };
+    const value = (expr) => {
+      const stmt = this.db.prepare(translate(`SELECT (${bind(expr)}) AS v`));
+      const v = stmt.get()?.v;
+      return v;
+    };
+    const truthy = (expr) => { const v = value(expr); return v !== null && v !== undefined && v !== 0 && v !== '0' && v !== false; };
+    for (const d of program.declare) vars.set(d.name, d.init !== undefined ? value(d.init) : null);
+    class Exit { constructor(label) { this.label = label; } }
+    class Next { constructor(label) { this.label = label; } }
+    let iterations = 0;
+    const tick = () => { if (++iterations > 200000) throw new Error('canceling statement due to statement timeout'); };
+    const runSql = (text, line) => {
+      const before = this.out.length;
+      const ok = this.statement(text, '');
+      if (!ok) { const detail = this.out.splice(before); throw Object.assign(new Error('sql'), { detail, line }); }
+    };
+    const exec = (list) => {
+      for (const st of list) {
+        tick();
+        switch (st.kind) {
+          case 'assign': vars.set(st.name, value(st.expr)); break;
+          case 'if': { const branch = st.branches.find(b => truthy(b.cond)); exec(branch ? branch.body : st.otherwise ?? []); break; }
+          case 'loop': case 'while': case 'fori': case 'forq': {
+            const iterate = (fn) => { try { fn(); } catch (e) { if (e instanceof Next && (!e.label || e.label === st.label)) return true; throw e; } return true; };
+            try {
+              if (st.kind === 'loop') for (;;) { tick(); iterate(() => exec(st.body)); }
+              else if (st.kind === 'while') while (truthy(st.cond)) { tick(); iterate(() => exec(st.body)); }
+              else if (st.kind === 'fori') { const lo = Number(value(st.from)), hi = Number(value(st.to)); for (let i = st.reverse ? hi : lo; st.reverse ? i >= lo : i <= hi; i += st.reverse ? -1 : 1) { tick(); vars.set(st.name, i); iterate(() => exec(st.body)); } }
+              else {
+                const q = this.db.prepare(translate(bind(st.query)));
+                const rows = q.all();
+                for (const r of rows) { tick(); vars.set(st.name, Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toLowerCase(), v]))); iterate(() => exec(st.body)); }
+                this.charge(this.conn.cost?.('SELECT', null, 0, rows.length) ?? 0.05 + rows.length / 8000);
+              }
+            } catch (e) { if (e instanceof Exit && (!e.label || e.label === st.label)) break; throw e; }
+            break;
+          }
+          case 'exit': if (!st.cond || truthy(st.cond)) throw new Exit(st.label); break;
+          case 'continue': if (!st.cond || truthy(st.cond)) throw new Next(st.label); break;
+          case 'diag': for (const [name, item] of st.items) vars.set(name, /row_count/i.test(item) ? this.lastRowCount : null); break;
+          case 'raise': {
+            const args = st.args.map(a => value(a));
+            let k = 0;
+            const msg = st.format.replace(/%/g, () => { const v = args[k++]; return v === null || v === undefined ? '<NULL>' : String(v); });
+            if (st.level === 'exception') throw Object.assign(new Error('raise'), { detail: [`ERROR:  ${msg}`], line: st.line });
+            this.err.push(`${prefix}${st.level === 'warning' ? 'WARNING' : st.level === 'info' ? 'INFO' : 'NOTICE'}:  ${msg}`);
+            break;
+          }
+          case 'commit': case 'rollback': {
+            if (!own) throw Object.assign(new Error('txn'), { detail: ['ERROR:  invalid transaction termination'], line: st.line });
+            if (st.kind === 'commit') { this.db.exec('COMMIT'); this.flush(); } else { this.db.exec('ROLLBACK'); this.discard(); }
+            this.txn = 'none';
+            this.settle(st.kind === 'commit');
+            this.begin('implicit');
+            break;
+          }
+          case 'return': throw new Exit('__return');
+          case 'block': exec(st.body); break;
+          case 'into': {
+            const q = this.db.prepare(translate(bind(st.query)));
+            q.setReturnArrays(true);
+            const row = q.all()[0];
+            st.targets.forEach((t, k) => vars.set(t, row ? row[k] ?? null : null));
+            this.lastRowCount = row ? 1 : 0;
+            this.charge(0.05);
+            break;
+          }
+          case 'sql': {
+            if (['SELECT', 'WITH', 'VALUES', 'TABLE'].includes(verbOf(st.text)) && !/^\s*with\b[\s\S]*\b(update|insert|delete)\b/i.test(st.text)) throw Object.assign(new Error('sql'), { detail: ['ERROR:  query has no destination for result data', 'HINT:  If you want to discard the results of a SELECT, use PERFORM instead.'], line: st.line });
+            runSql(bind(st.text), st.line);
+            break;
+          }
+          default: break;
+        }
+      }
+    };
+    try {
+      exec(program.body);
+    } catch (e) {
+      if (!(e instanceof Exit)) {
+        this.inDo = false;
+        const detail = e.detail ?? [`ERROR:  ${e.message}`];
+        this.err.push(`${prefix}${detail[0]}`, ...detail.slice(1).filter(l => !/^CONTEXT:/.test(l)), `CONTEXT:  PL/pgSQL function inline_code_block line ${e.line ?? 1} at ${e.message === 'txn' ? 'COMMIT' : e.message === 'raise' ? 'RAISE' : 'SQL statement'}`);
+        if (own) { this.rollback(); }
+        else this.txn = 'aborted';
+        return false;
+      }
+    }
+    this.inDo = false;
+    if (own) { this.db.exec('COMMIT'); this.flush(); this.txn = 'none'; this.settle(true); }
+    this.tag('DO');
+    return true;
   }
   query(select) {
     const stmt = this.db.prepare(translate(select));
@@ -654,7 +999,8 @@ class Session {
         const pattern = arg ? new RegExp(`^${arg.replace(/^public\./, '').replace(/\*/g, '.*')}$`) : null;
         const list = tables().filter(t => !pattern || pattern.test(t));
         if (!list.length) { this.err.push(arg ? `Did not find any relation named "${arg}".` : 'Did not find any relations.'); return true; }
-        this.print(titled('List of relations', { columns: [{ label: 'Schema' }, { label: 'Name' }, { label: 'Type' }, { label: 'Owner' }], rows: list.map(t => ['public', t, 'table', ownerOf(this.conn, t)]) }));
+        if (cmd.endsWith('+')) this.print(titled('List of relations', { columns: ['Schema', 'Name', 'Type', 'Owner', 'Persistence', 'Access method', 'Size', 'Description'].map(l => ({ label: l })), rows: list.map(t => ['public', t, 'table', ownerOf(this.conn, t), 'permanent', 'heap', pretty(relationSize(this.conn, t, 1.05)), '']) }));
+        else this.print(titled('List of relations', { columns: [{ label: 'Schema' }, { label: 'Name' }, { label: 'Type' }, { label: 'Owner' }], rows: list.map(t => ['public', t, 'table', ownerOf(this.conn, t)]) }));
         return true;
       }
       case '\\di': {
@@ -819,7 +1165,158 @@ class Session {
     }
     if (this.txn === 'implicit') this.commit();
   }
-  close() { if (this.txn !== 'none') this.rollback(); }
+  close() {
+    if (this.txn !== 'none') this.rollback();
+    this.conn.close?.();
+    if (this.virtual && this.debt > 0) { const owed = this.debt; this.debt = 0; this.ctx.wait(owed); }
+  }
+}
+/**
+ * PL/pgSQL, the part operators write in a DO block, as a tree of statements. Statements are split
+ * on semicolons outside quotes and parentheses; blocks nest by their keywords.
+ */
+export function parsePlpgsql(src) {
+  let k = 0;
+  const lineAt = (i) => src.slice(0, i).split('\n').length;
+  const skip = () => { for (;;) { const m = /^(\s+|--[^\n]*|\/\*[\s\S]*?\*\/)/.exec(src.slice(k)); if (!m) return; k += m[0].length; } };
+  const peek = (re) => { skip(); return re.exec(src.slice(k)); };
+  const take = (re, what) => { const m = peek(re); if (!m) throw new Error(`syntax error at or near "${src.slice(k).trim().split(/\s+/)[0] ?? ''}"`); k += m[0].length; return m; };
+  /** Text up to the next top-level semicolon, or up to a keyword when one is given. */
+  const until = (stop) => {
+    skip();
+    let depth = 0, quote = null, i = k, dollar = null;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (dollar) { if (src.startsWith(dollar, i)) { i += dollar.length - 1; dollar = null; } continue; }
+      if (quote) { if (c === quote) { if (src[i + 1] === quote) i++; else quote = null; } continue; }
+      if (c === "'" || c === '"') { quote = c; continue; }
+      if (c === '$') { const d = /^\$\w*\$/.exec(src.slice(i)); if (d) { dollar = d[0]; i += d[0].length - 1; continue; } }
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+      else if (depth === 0 && c === ';' && !stop) break;
+      else if (depth === 0 && stop && /[\s)]/.test(src[i - 1] ?? ' ') && stop.test(src.slice(i))) break;
+    }
+    const text = src.slice(k, i).trim();
+    k = i;
+    return text;
+  };
+  const end = () => take(/^;/);
+  const TERM = /^(end\s+loop|end\s+if|end\b|elsif\b|elseif\b|else\b|exception\b)/i;
+  function list() {
+    const out = [];
+    for (;;) {
+      skip();
+      if (k >= src.length || TERM.test(src.slice(k))) return out;
+      out.push(statement());
+    }
+  }
+  function statement() {
+    skip();
+    const line = lineAt(k);
+    let label = null;
+    const lbl = peek(/^<<\s*(\w+)\s*>>/);
+    if (lbl) { k += lbl[0].length; label = lbl[1].toLowerCase(); skip(); }
+    if (peek(/^declare\b/i)) { // a nested block
+      k += 7;
+      const declare = declarations();
+      take(/^begin\b/i);
+      const body = list();
+      take(/^end\b/i); peek(/^\w+/) && !/^(loop|if)\b/i.test(src.slice(k)) && take(/^\w*/); end();
+      return { kind: 'block', body, declare, line };
+    }
+    if (peek(/^begin\b/i)) { k += 5; const body = list(); take(/^end\b/i); end(); return { kind: 'block', body, line }; }
+    if (peek(/^loop\b/i)) { k += 4; const body = list(); take(/^end\s+loop\b/i); peek(/^\w+/) && !src.slice(k).trimStart().startsWith(';') && take(/^\w+/); end(); return { kind: 'loop', body, label, line }; }
+    if (peek(/^while\b/i)) { k += 5; const cond = until(/^loop\b/i); take(/^loop\b/i); const body = list(); take(/^end\s+loop\b/i); end(); return { kind: 'while', cond, body, label, line }; }
+    if (peek(/^for\b/i)) {
+      k += 3;
+      const name = take(/^(\w+)/)[1].toLowerCase();
+      take(/^in\b/i);
+      const reverse = Boolean(peek(/^reverse\b/i)); if (reverse) k += 7;
+      const head = until(/^loop\b/i);
+      take(/^loop\b/i);
+      const body = list();
+      take(/^end\s+loop\b/i); end();
+      const range = /^([\s\S]+?)\.\.([\s\S]+)$/.exec(head);
+      if (range && !/^\s*(select|with)\b/i.test(head)) return { kind: 'fori', name, from: range[1], to: range[2], reverse, body, label, line };
+      return { kind: 'forq', name, query: head, body, label, line };
+    }
+    if (peek(/^if\b/i)) {
+      k += 2;
+      const branches = [];
+      let cond = until(/^then\b/i); take(/^then\b/i);
+      branches.push({ cond, body: list() });
+      let otherwise = null;
+      for (;;) {
+        if (peek(/^(elsif|elseif)\b/i)) { take(/^(elsif|elseif)\b/i); cond = until(/^then\b/i); take(/^then\b/i); branches.push({ cond, body: list() }); continue; }
+        if (peek(/^else\b/i)) { k += 4; otherwise = list(); }
+        break;
+      }
+      take(/^end\s+if\b/i); end();
+      return { kind: 'if', branches, otherwise, line };
+    }
+    let m;
+    if ((m = peek(/^(exit|continue)\b(?:\s+(?!when\b)(\w+))?/i))) {
+      k += m[0].length;
+      let cond = null;
+      if (peek(/^when\b/i)) { k += 4; cond = until(); }
+      end();
+      return { kind: m[1].toLowerCase(), label: m[2]?.toLowerCase() ?? null, cond, line };
+    }
+    if ((m = peek(/^get\s+(?:current\s+)?diagnostics\b/i))) {
+      k += m[0].length;
+      const items = until().split(',').map(p => { const q = /^\s*(\w+)\s*(?:=|:=)\s*(\w+)\s*$/.exec(p); if (!q) throw new Error('syntax error at or near "GET"'); return [q[1].toLowerCase(), q[2]]; });
+      end();
+      return { kind: 'diag', items, line };
+    }
+    if ((m = peek(/^raise\b(?:\s+(notice|warning|info|log|debug|exception))?/i))) {
+      k += m[0].length;
+      const text = until();
+      end();
+      const f = /^'((?:[^']|'')*)'\s*(?:,([\s\S]*))?$/.exec(text);
+      if (!f) throw new Error('syntax error at or near "RAISE"');
+      const args = [];
+      if (f[2]) { let depth = 0, cur = ''; for (const c of f[2]) { if (c === '(') depth++; if (c === ')') depth--; if (c === ',' && !depth) { args.push(cur); cur = ''; } else cur += c; } if (cur.trim()) args.push(cur); }
+      return { kind: 'raise', level: (m[1] ?? 'exception').toLowerCase() === 'log' || (m[1] ?? '').toLowerCase() === 'debug' ? 'info' : (m[1] ?? 'exception').toLowerCase(), format: f[1].replace(/''/g, "'"), args: args.map(a => a.trim()), line };
+    }
+    if ((m = peek(/^(commit|rollback)\b\s*(?:work\b|transaction\b)?\s*;/i))) { k += m[0].length; return { kind: m[1].toLowerCase(), line }; }
+    if ((m = peek(/^return\b/i))) { k += 6; until(); end(); return { kind: 'return', line }; }
+    if ((m = peek(/^null\s*;/i))) { k += m[0].length; return { kind: 'block', body: [], line }; }
+    if ((m = peek(/^perform\b/i))) { k += 7; const text = until(); end(); return { kind: 'into', query: `SELECT ${text}`, targets: [], line }; }
+    if ((m = peek(/^(\w+)\s*(?::=|=(?!=))/))) {
+      k += m[0].length;
+      const expr = until();
+      end();
+      return { kind: 'assign', name: m[1].toLowerCase(), expr, line };
+    }
+    const text = until();
+    end();
+    const into = /^(\s*(?:with\b[\s\S]*?)?select\b[\s\S]*?)\binto\s+(?:strict\s+)?([\w\s,]+?)\s+(from\b[\s\S]*)$/i.exec(text);
+    if (into) return { kind: 'into', query: `${into[1]} ${into[3]}`, targets: into[2].split(',').map(t => t.trim().toLowerCase()), line };
+    const tail = /^(\s*select\b[\s\S]*?)\binto\s+(?:strict\s+)?([\w\s,]+?)\s*$/i.exec(text);
+    if (tail) return { kind: 'into', query: tail[1], targets: tail[2].split(',').map(t => t.trim().toLowerCase()), line };
+    return { kind: 'sql', text, line };
+  }
+  function declarations() {
+    const out = [];
+    for (;;) {
+      skip();
+      if (peek(/^begin\b/i)) return out;
+      const d = until();
+      end();
+      const m = /^(\w+)\s+(?:constant\s+)?([\w\s.%()\[\]]+?)(?:\s+not\s+null)?(?:\s*(?::=|=|default)\s*([\s\S]+))?$/i.exec(d);
+      if (!m) throw new Error(`syntax error at or near "${d.split(/\s+/)[0]}"`);
+      out.push({ name: m[1].toLowerCase(), type: m[2].trim(), init: m[3] });
+    }
+  }
+  skip();
+  let declare = [];
+  if (peek(/^declare\b/i)) { k += 7; declare = declarations(); }
+  take(/^begin\b/i);
+  const body = list();
+  take(/^end\b/i);
+  skip();
+  if (src.slice(k).replace(/;/, '').trim()) throw new Error(`syntax error at or near "${src.slice(k).trim().split(/\s+/)[0]}"`);
+  return { declare, body };
 }
 function csvLines(result, options) {
   const csv = /\bcsv\b|format\s*\(?\s*csv/i.test(options ?? '');

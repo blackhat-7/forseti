@@ -12,7 +12,9 @@ export function makeCurl(ctx, routes) {
   return function curl(argv, io) {
     let silent = false, showError = false, fail = false, include = false, head = false, output = null, write = null, method = null, url = null, verbose = false, location = false;
     const headers = {};
-    let body = null;
+    let body = null, get = false;
+    const encoded = [];
+    const urlencode = (x) => { const eq = x.indexOf('='); return eq < 0 ? encodeURIComponent(x) : `${x.slice(0, eq)}=${encodeURIComponent(x.slice(eq + 1))}`; };
     for (let k = 0; k < argv.length; k++) {
       const a = argv[k];
       const next = () => argv[++k];
@@ -27,12 +29,15 @@ export function makeCurl(ctx, routes) {
       else if (a === '-w' || a === '--write-out') write = next();
       else if (a === '-X' || a === '--request') method = next();
       else if (a === '-H' || a === '--header') { const h = next() ?? ''; const c = h.indexOf(':'); if (c > 0) headers[h.slice(0, c).trim().toLowerCase()] = h.slice(c + 1).trim(); }
-      else if (a === '-d' || a === '--data' || a === '--data-raw' || a === '--data-binary') body = next();
+      else if (a === '-d' || a === '--data' || a === '--data-raw' || a === '--data-binary') encoded.push(next() ?? '');
+      else if (a === '--data-urlencode') encoded.push(urlencode(next() ?? ''));
+      else if (a.startsWith('--data-urlencode=')) encoded.push(urlencode(a.slice(17)));
+      else if (a === '-G' || a === '--get') get = true;
       else if (a === '-m' || a === '--max-time' || a === '--connect-timeout' || a === '-u' || a === '--user' || a === '-A' || a === '--user-agent' || a === '--retry') next();
       else if (a === '-k' || a === '--insecure' || a === '--compressed') { /* no effect here */ }
       else if (/^-[a-zA-Z]{2,}$/.test(a)) {
         for (const ch of a.slice(1)) {
-          if (ch === 's') silent = true; else if (ch === 'S') showError = true; else if (ch === 'f') fail = true; else if (ch === 'i') include = true; else if (ch === 'I') head = true; else if (ch === 'L') location = true; else if (ch === 'v') verbose = true; else if (ch === 'k') { /* insecure */ }
+          if (ch === 'G') get = true; else if (ch === 's') silent = true; else if (ch === 'S') showError = true; else if (ch === 'f') fail = true; else if (ch === 'i') include = true; else if (ch === 'I') head = true; else if (ch === 'L') location = true; else if (ch === 'v') verbose = true; else if (ch === 'k') { /* insecure */ }
           else return { err: [`curl: option ${a}: is unknown`, "curl: try 'curl --help' or 'curl --manual' for more information"], code: 2 };
         }
       }
@@ -41,6 +46,9 @@ export function makeCurl(ctx, routes) {
     }
     void location;
     if (!url) return { err: ["curl: try 'curl --help' or 'curl --manual' for more information"], code: 2 };
+    // -G sends the data as the query string of a GET; otherwise it is the body, joined with &.
+    if (encoded.length && get) url += (url.includes('?') ? '&' : '?') + encoded.join('&');
+    else if (encoded.length) body = encoded.join('&');
     const m = /^(?:(https?):\/\/)?([^/:?#]+)(?::(\d+))?([^?#]*)(?:\?([^#]*))?/.exec(url);
     if (!m) return { err: [`curl: (3) URL using bad/illegal format or missing URL`], code: 3 };
     const [, , host, , rawPath, query = ''] = m;

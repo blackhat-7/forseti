@@ -8,3 +8,4 @@ data:
   CDN_BASE_URL: "https://cdn.quillmart.com"
   MAX_UPLOAD_MB: "25"
   SIGNED_URL_TTL: "15m"
+  DOWNLOAD_URL_TTL: "168h"

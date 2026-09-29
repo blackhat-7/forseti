@@ -1,0 +1,67 @@
+# Service catalogue. Keep owners current: PagerDuty routing reads this file.
+services:
+  - name: edge-gateway
+    namespace: edge
+    owner: platform
+    tier: 0
+    slack: "#platform"
+    runbook: runbooks/incident-process.md
+  - name: legacy-auth-proxy
+    namespace: platform
+    owner: identity-team        # team disbanded 2023-11; platform pages for it
+    tier: 0
+    slack: "#identity"         # archived
+    notes: Verifies the session JWT and sets X-User-Id for everything behind it. Do not bypass.
+  - name: web-bff
+    namespace: web
+    owner: web-platform
+    tier: 1
+    slack: "#web-platform"
+  - name: search-api
+    namespace: search
+    owner: search
+    tier: 1
+    slack: "#search"
+    depends_on: [pricing-api, recs-api]
+  - name: checkout-api
+    namespace: checkout
+    owner: checkout
+    tier: 0
+    slack: "#checkout"
+    depends_on: [pricing-api, cart-api, inventory-api]
+    runbook: runbooks/storefront-latency.md
+  - name: cart-api
+    namespace: cart
+    owner: checkout
+    tier: 1
+  - name: inventory-api
+    namespace: inventory
+    owner: supply
+    tier: 1
+  - name: pricing-api
+    namespace: pricing
+    owner: pricing
+    tier: 0
+    slack: "#pricing"
+    depends_on: [pricing-cache (Memorystore 10.30.0.5), promo-engine]
+    runbook: runbooks/pricing.md
+  - name: promo-engine
+    namespace: promo
+    owner: pricing
+    tier: 1
+    depends_on: [promo-pg (Cloud SQL)]
+  - name: recs-api
+    namespace: recs
+    owner: recs
+    tier: 2
+    slack: "#recs"
+  - name: order-projector
+    namespace: payments
+    owner: orders
+    tier: 2
+    notes: Consumes orders-events (order-projector-sub) into the read model.
+  - name: reporting-exporter
+    namespace: data
+    owner: data-platform
+    tier: 3
+    notes: Nightly exports via the orders API.

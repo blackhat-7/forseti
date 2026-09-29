@@ -76,6 +76,16 @@ class Parser {
   expect(s) { if (!this.eat(s)) throw new Error(`syntax error, expected '${s}'`); }
   pipe() {
     let left = this.comma();
+    // `expr as $name | body`: body runs once per value of expr, with $name bound to it.
+    if (this.word('as')) {
+      this.ws();
+      if (this.src[this.k] !== '$') throw new Error(`syntax error, unexpected '${this.src[this.k] ?? 'end of file'}', expecting '$' or '[' or '{'`);
+      this.k++;
+      const name = /^[A-Za-z_]\w*/.exec(this.src.slice(this.k))[0];
+      this.k += name.length;
+      this.expect('|');
+      return { t: 'bind', source: left, name, body: this.pipe() };
+    }
     while (this.peekOp('|')) { this.k++; left = { t: 'pipe', left, right: this.comma() }; }
     return left;
   }
@@ -111,7 +121,12 @@ class Parser {
     let node = this.primary();
     for (;;) {
       if (this.src[this.k] === '.' && /[A-Za-z_"]/.test(this.src[this.k + 1] ?? '')) { this.k++; node = { t: 'pipe', left: node, right: this.field() }; continue; }
-      if (this.src[this.k] === '[') { node = { t: 'pipe', left: node, right: this.bracket() }; continue; }
+      if (this.src[this.k] === '[') {
+        // In `x[expr]` the subscript is computed from the input, as jq does, not from `x`.
+        const b = this.bracket();
+        node = b.t === 'index' ? { t: 'subscript', target: node, index: b.index } : { t: 'pipe', left: node, right: b };
+        continue;
+      }
       if (this.src[this.k] === '?') { this.k++; node = { t: 'try', body: node }; continue; }
       return node;
     }
@@ -127,6 +142,33 @@ class Parser {
     while (end < this.src.length && this.src[end] !== '"') { if (this.src[end] === '\\') { s += JSON.parse(`"${this.src.slice(end, end + 2)}"`); end += 2; continue; } s += this.src[end++]; }
     this.k = end + 1;
     return s;
+  }
+  /** A string literal, with `\\(expr)` interpolation as jq has it. */
+  interpolated() {
+    const parts = [];
+    let k = this.k + 1, text = '';
+    while (k < this.src.length && this.src[k] !== '"') {
+      if (this.src[k] === '\\' && this.src[k + 1] === '(') {
+        let depth = 1, j = k + 2, quote = false;
+        for (; j < this.src.length && depth; j++) {
+          const ch = this.src[j];
+          if (quote) { if (ch === '\\') j++; else if (ch === '"') quote = false; continue; }
+          if (ch === '"') quote = true; else if (ch === '(') depth++; else if (ch === ')') depth--;
+        }
+        if (text) parts.push({ t: 'literal', value: text });
+        text = '';
+        parts.push(new Parser(this.src.slice(k + 2, j - 1)).parse());
+        k = j;
+        continue;
+      }
+      if (this.src[k] === '\\') { text += JSON.parse(`"${this.src.slice(k, k + 2)}"`); k += 2; continue; }
+      text += this.src[k++];
+    }
+    if (k >= this.src.length) throw new Error('syntax error, unexpected end of file, expecting QQSTRING_TEXT or QQSTRING_INTERP_START or QQSTRING_END');
+    this.k = k + 1;
+    if (parts.every(p => p.t === 'literal') && !parts.length) return { t: 'literal', value: text };
+    if (text) parts.push({ t: 'literal', value: text });
+    return parts.length === 1 && parts[0].t === 'literal' ? parts[0] : { t: 'format', parts };
   }
   bracket() {
     this.expect('[');
@@ -145,7 +187,7 @@ class Parser {
       if (/[A-Za-z_"]/.test(this.src[this.k] ?? '')) return this.field();
       return { t: 'identity' };
     }
-    if (c === '"') return { t: 'literal', value: this.string() };
+    if (c === '"') return this.interpolated();
     if (c === '(') { this.k++; const node = this.pipe(); this.expect(')'); return node; }
     if (c === '[') { this.k++; if (this.eat(']')) return { t: 'array', body: null }; const body = this.pipe(); this.expect(']'); return { t: 'array', body }; }
     if (c === '{') return this.object();
@@ -204,6 +246,14 @@ function* evaluate(node, input, vars) {
     case 'identity': yield input; return;
     case 'recurse': yield* recurse(input); return;
     case 'literal': yield node.value; return;
+    case 'format': {
+      let results = [''];
+      for (const part of node.parts) {
+        const values = part.t === 'literal' ? [part.value] : [...evaluate(part, input, vars)].map(v => (typeof v === 'string' && part.t !== 'literal' ? v : part.t === 'literal' ? v : JSON.stringify(v)));
+        results = results.flatMap(r => values.map(v => r + v));
+      }
+      yield* results; return;
+    }
     case 'var': if (!(node.name in vars)) throw new Error(`$${node.name} is not defined`); yield vars[node.name]; return;
     case 'field':
       if (input === null) { yield null; return; }
@@ -227,6 +277,10 @@ function* evaluate(node, input, vars) {
       yield input?.slice(from ?? 0, to ?? undefined) ?? null; return;
     }
     case 'pipe': for (const v of evaluate(node.left, input, vars)) yield* evaluate(node.right, v, vars); return;
+    case 'subscript':
+      for (const i of evaluate(node.index, input, vars)) for (const target of evaluate(node.target, input, vars)) yield* evaluate({ t: 'index', index: { t: 'literal', value: i } }, target, vars);
+      return;
+    case 'bind': for (const v of evaluate(node.source, input, vars)) yield* evaluate(node.body, input, { ...vars, [node.name]: v }); return;
     case 'comma': yield* evaluate(node.left, input, vars); yield* evaluate(node.right, input, vars); return;
     case 'try': try { yield* [...evaluate(node.body, input, vars)]; } catch { /* `?` drops errors */ } return;
     case 'alt': {

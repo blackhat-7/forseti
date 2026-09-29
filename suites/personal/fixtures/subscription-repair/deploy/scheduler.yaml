@@ -7,6 +7,10 @@
   schedule: "15,45 * * * *"
   target: run-service/mailer POST /dispatch
   service_account: mailer-invoker@quillmart-prod.iam.gserviceaccount.com
+- name: billing-renewals
+  schedule: "30 * * * *"
+  target: run-service/billing-api POST /internal/renew-due
+  service_account: billing-invoker@quillmart-prod.iam.gserviceaccount.com
 - name: billing-retry
   schedule: "5 * * * *"
   target: run-service/billing-api POST /internal/retry-failed-payments

@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: refund-worker
+  namespace: payments
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: refund-worker
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/refund-worker:v0.4.7
+          env:
+            - name: SUBSCRIPTION
+              value: "refunds-sub"
+            - name: PSP_URL
+              value: "https://api.paystream.example/v1"

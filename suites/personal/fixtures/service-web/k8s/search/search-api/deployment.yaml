@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: search-api
+  namespace: search
+spec:
+  replicas: 10
+  template:
+    spec:
+      containers:
+        - name: search-api
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/search-api:v5.14.0
+          env:
+            # TODO(SRCH-440): switch to pricing-api.pricing.svc once mTLS to pricing is sorted.
+            - name: PRICING_ADDR
+              value: "10.52.14.9:8080"
+            - name: PRICING_TIMEOUT_MS
+              value: "800"
+            - name: PRICING_RETRIES
+              value: "2"
+            - name: RECS_URL
+              value: "http://recs-api.recs.svc.cluster.local:8080"
+            - name: RECS_TIMEOUT_MS
+              value: "80"
+            - name: RANKER
+              value: "v2"
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi

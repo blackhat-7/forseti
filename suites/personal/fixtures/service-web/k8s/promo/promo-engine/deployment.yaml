@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: promo-engine
+  namespace: promo
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+        - name: promo-engine
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/promo-engine:v1.33.0
+          env:
+            - name: DB_HOST
+              value: "127.0.0.1"
+            - name: DB_POOL_SIZE
+              value: "20"
+            - name: MAX_INFLIGHT    # sheds with 503 past this
+              value: "100"
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi

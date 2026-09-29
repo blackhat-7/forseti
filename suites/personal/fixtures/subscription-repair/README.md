@@ -8,6 +8,7 @@ Billing backend for Quillmart Plus: subscriptions, renewals, dunning and custome
 | `mailer/` | Outbox dispatcher (Cloud Run service `mailer`) |
 | `db/` | Schema and migrations for the `core` database on Cloud SQL instance `core-pg` |
 | `deploy/` | Cloud Run and Cloud Scheduler definitions |
+| `docs/` | How billing works, and the Payrift integration |
 | `runbooks/` | On-call notes |
 
 Production lives in GCP project `quillmart-prod`, region `us-central1`.

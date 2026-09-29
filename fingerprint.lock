@@ -1,7 +1,7 @@
 {
   "scheme": 2,
-  "harness": "764bf8c2c34e250ba7587b301d432a68421d3a0c3a353e49220dc27ff7f07264",
-  "grading": "4914a729a71f6962d0c0e0b3ec16e389414ad77733968c87bfa56a29331cf654",
+  "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
+  "grading": "c30afb7b27991a4caa28465ef0bd114dabcc63c6d728565aa8d6af86a286254f",
   "files": [
     "adapter.ts",
     "auth.ts",
@@ -30,31 +30,37 @@
     "types.ts",
     "world.ts"
   ],
-  "note": "A task may raise its own tool-call budget (task.tools); the ops tasks use 120. Tasks without it keep 64 and identical arguments in both lanes.",
+  "note": "World tasks receive a per-try seed (variant) and report their harm; only world tasks reach this code.",
   "equivalent": [
     {
       "was": "e9ef57a27baa290ca498be82e674e01d1fafb18b95b0ccbf4655d8f8d80d1404",
-      "harness": "764bf8c2c34e250ba7587b301d432a68421d3a0c3a353e49220dc27ff7f07264",
-      "grading": "4914a729a71f6962d0c0e0b3ec16e389414ad77733968c87bfa56a29331cf654",
+      "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
+      "grading": "c30afb7b27991a4caa28465ef0bd114dabcc63c6d728565aa8d6af86a286254f",
       "note": "The try path before grade.ts existed (commit b333ddc to b0c9210). Splitting grading out moved code without changing it; adding world tasks changed nothing for tasks without one. Tries recorded then are current for both parts."
     },
     {
       "was": "27bfe2fa281d1b839700337f025f0451e7cace3edda0b8ca8cf96eb3bbb9e195",
-      "harness": "764bf8c2c34e250ba7587b301d432a68421d3a0c3a353e49220dc27ff7f07264",
-      "grading": "4914a729a71f6962d0c0e0b3ec16e389414ad77733968c87bfa56a29331cf654",
+      "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
+      "grading": "c30afb7b27991a4caa28465ef0bd114dabcc63c6d728565aa8d6af86a286254f",
       "note": "Adding world tasks changed the try and grading code only on paths a task without `world` never takes (checked: every existing task's fingerprint is unchanged, and its tools, prompts, MCP server and workspace are identical). So tries recorded before are current for both parts."
     },
     {
       "was": "4e1a097b5ee714941d43897420b0a4e36865d11ad8c720c6cacf9e95bd71cef1",
-      "harness": "764bf8c2c34e250ba7587b301d432a68421d3a0c3a353e49220dc27ff7f07264",
-      "grading": "4914a729a71f6962d0c0e0b3ec16e389414ad77733968c87bfa56a29331cf654",
+      "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
+      "grading": "c30afb7b27991a4caa28465ef0bd114dabcc63c6d728565aa8d6af86a286254f",
       "note": "Building a real git repository for a world task's checkout runs only for tasks with a world, and no world task has a recorded try. Tries recorded before are current for both parts."
     },
     {
       "was": "941ad889367faafb88d744d77536bf6f8d02dfe28e4303c2b0d54f1caef64f4b",
-      "harness": "764bf8c2c34e250ba7587b301d432a68421d3a0c3a353e49220dc27ff7f07264",
-      "grading": "4914a729a71f6962d0c0e0b3ec16e389414ad77733968c87bfa56a29331cf654",
+      "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
+      "grading": "c30afb7b27991a4caa28465ef0bd114dabcc63c6d728565aa8d6af86a286254f",
       "note": "The per-task tool budget only changes tries of tasks that set `tools` (the ops tasks); every other task keeps 64 calls and identical tool-server arguments. Their fingerprints are unchanged."
+    },
+    {
+      "was": "764bf8c2c34e250ba7587b301d432a68421d3a0c3a353e49220dc27ff7f07264",
+      "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
+      "grading": "c30afb7b27991a4caa28465ef0bd114dabcc63c6d728565aa8d6af86a286254f",
+      "note": "Seeds and harm figures reach only tasks with a world; every other task's fingerprint, tools and arguments are unchanged."
     }
   ]
 }

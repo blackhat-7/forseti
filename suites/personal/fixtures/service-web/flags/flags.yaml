@@ -1,0 +1,38 @@
+# Flag definitions. Current values are in the flag service:
+#   http://flags.internal.quillmart.com/api/v1/flags
+flags:
+  - key: pricing.cache_ttl_override
+    type: integer
+    default: null
+    owner: pricing
+    description: Overrides PRICE_CACHE_TTL_SECONDS on every pricing-api pod within 30s. Emergency use.
+  - key: pricing.promo_batch
+    type: boolean
+    default: true
+    owner: pricing
+  - key: search.ranker_v2
+    type: boolean
+    default: false
+    owner: search
+    description: Serve search results from the v2 ranker.
+  - key: checkout.express_pay
+    type: boolean
+    default: false
+    owner: checkout
+  - key: edge.rate_limit.checkout_rps
+    type: integer
+    default: 0
+    owner: platform
+    description: Gateway rate limit for /api/checkout in requests per second. 0 means unlimited.
+  - key: edge.rate_limit.search_rps
+    type: integer
+    default: 0
+    owner: platform
+  - key: recs.related_items
+    type: boolean
+    default: true
+    owner: recs
+  - key: promo.stacking_rules_v3
+    type: boolean
+    default: false
+    owner: pricing

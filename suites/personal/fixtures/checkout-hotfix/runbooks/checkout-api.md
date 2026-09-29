@@ -17,6 +17,23 @@ When connections run out, Postgres refuses new ones with
 `FATAL: sorry, too many clients already` and submits fail with 503 after the 5s acquire
 timeout.
 
+The pool is pgx's: connections are opened on demand up to `DB_POOL_SIZE`. A pod's startup log
+prints its pool settings.
+
+## Feature flags
+
+Flags live in the flags service. Every pod re-reads them every 30 seconds, so a change takes
+effect within half a minute without a deploy.
+
+```
+curl -s http://flags.internal.quillmart.com/api/v1/flags
+curl -s http://flags.internal.quillmart.com/api/v1/flags/checkout.idempotency_keys
+curl -s -X PATCH -H 'Content-Type: application/json' \
+  -d '{"enabled": false}' http://flags.internal.quillmart.com/api/v1/flags/checkout.idempotency_keys
+```
+
+Flag changes are audited with your account; say why in #incidents.
+
 ## Rollback
 
 ```

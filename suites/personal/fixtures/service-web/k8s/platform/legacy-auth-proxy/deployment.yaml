@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-auth-proxy
+  namespace: platform
+spec:
+  replicas: 4
+  template:
+    spec:
+      containers:
+        - name: legacy-auth-proxy
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/legacy-auth-proxy:v0.9.14
+          env:
+            - name: UPSTREAM
+              value: "web-bff.web.svc.cluster.local:8080"
+            - name: JWKS_URL
+              value: "https://auth.quillmart.com/.well-known/jwks.json"
+            - name: SESSION_COOKIE
+              value: "qm_s"

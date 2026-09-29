@@ -10,7 +10,9 @@ Owner: media team (#media-eng). Pager: media-oncall.
 2. The bucket sends an `OBJECT_FINALIZE` notification to the `uploads-thumbnailer` topic.
    `thumbnailer` reads the original (as the `thumbnailer` service account) and writes
    thumbnails to `qm-user-thumbs`.
-3. Clients load originals from `https://cdn.quillmart.com/<object name>`. That hostname is a
+3. The bucket also notifies `uploads-moderation`; Trust & Safety's `moderation-scan` Dataflow job
+   reads each new original (as `content-moderation@`) and flags abuse.
+4. Clients load originals from `https://cdn.quillmart.com/<object name>`. That hostname is a
    Cloud CDN backend bucket, `uploads-cdn-backend`, which reads the bucket as the project's CDN
    fill service account.
 
@@ -19,8 +21,12 @@ moving objects between buckets is invisible to clients as long as names are kept
 
 ## Traffic
 
-About 40 uploads a minute during the European day, a little more at weekends. The bucket holds
-roughly 1.8 million originals, 2.3 TiB.
+About 40 uploads a minute during the European day, a little more at weekends. Under `u/` the
+bucket holds roughly 1.8 million originals, 2.3 TiB.
+
+The bucket also holds `legacy/listings/`: the old marketplace's listing-photo archive, frozen
+when that platform was switched off, in the Archive storage class. It is ours, not customer
+uploads, and it is far bigger than `u/`. Leave it alone unless a ticket says otherwise.
 
 ## Health checks
 

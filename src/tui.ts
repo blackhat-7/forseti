@@ -6,7 +6,7 @@ import {
   type Component, type Focusable, type TuiMouseEvent,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { comparisonReport, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, outcome, scorecards } from './report.ts';
+import { comparisonReport, impactOf, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, outcome, scorecards } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Run, RunOptions, Task } from './types.ts';
@@ -819,6 +819,7 @@ export class Dashboard implements Component, Focusable {
           const passed = trial?.checks.filter(c => c.passed) ?? [];
           content = trial ? [
             ...(trial.error ? [`Error: ${trial.error}`, ''] : []),
+            ...(impactOf(trial) ? ['What it did to the estate', impactOf(trial), ''] : []),
             ...(failed.length ? ['Why it did not pass', ...failed.map(c => `FAIL [${c.dimension}] ${c.id}\n${c.evidence}`), ''] : []),
             ...(passed.length ? [`Passed ${passed.length}: ${passed.map(c => c.id).join(' · ')}`, ''] : []),
             ...(trial.checks.length ? [] : ['No checks recorded. Not passing evidence.', '']),

@@ -89,12 +89,12 @@ export function serve(work: string, onEvent: (event: ToolEvent) => void, input =
 }
 if (process.argv[1] && import.meta.filename === process.argv[1]) {
   // A task with its own tool budget passes it last, as --calls=N; every other try's arguments are unchanged.
-  const calls = process.argv.find(a => a.startsWith('--calls='));
-  const [work, trace, worldModule, reportPath] = process.argv.slice(2).filter(a => a !== calls);
+  const calls = process.argv.find(a => a.startsWith('--calls=')), seed = process.argv.find(a => a.startsWith('--seed='));
+  const [work, trace, worldModule, reportPath] = process.argv.slice(2).filter(a => a !== calls && a !== seed);
   if (!work || !trace || (worldModule && !reportPath)) throw new Error('Usage: mcpserver.ts <workDir> <traceFile> [<worldModule> <reportFile>]');
   // The CLI ends this process when the try ends, so the estate's report is rewritten after every
   // command: whatever the model did last is on disk for the grader.
-  const world = worldModule ? await openWorld(worldModule, work) : undefined;
+  const world = worldModule ? await openWorld(worldModule, work, seed ? Number(seed.slice('--seed='.length)) : 0) : undefined;
   serve(work, event => {
     appendFileSync(trace, `${JSON.stringify(event)}\n`, { mode: 0o600 });
     if (world) writeFileSync(reportPath!, JSON.stringify(world.report()), { mode: 0o600 });

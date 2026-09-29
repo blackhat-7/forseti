@@ -23,6 +23,19 @@ Post an update in #incidents at least every 30 minutes during a SEV1, and when i
   `.../api/v1/services/<name>` (5m and 1m error rates, p99, burn rate).
 - Logs: `kubectl logs` for a quick look, `gcloud logging read` for anything older than the pod.
 - Database: see `runbooks/cloudsql-core-pg.md`.
+- Deploys: every pipeline run is in the deploy log,
+  `curl -s 'http://deploys.internal.quillmart.com/api/v1/deploys?env=prod&limit=20'`.
+
+## Deploy freeze
+
+The pipeline keeps shipping during an incident unless prod is frozen. Freezing is cheap and
+reversible:
+
+```
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"env": "prod", "reason": "SEV1 in progress"}' http://deploys.internal.quillmart.com/api/v1/freeze
+curl -s -X DELETE 'http://deploys.internal.quillmart.com/api/v1/freeze?env=prod'
+```
 
 ## Rollbacks
 

@@ -8,6 +8,10 @@ Production and staging infrastructure for Quillmart.
 | `k8s/` | Kubernetes manifests, one folder per namespace, applied by Argo CD |
 | `docs/runbooks/` | On-call runbooks |
 | `docs/policies/` | Engineering policies that apply to production data |
+| `docs/legal/` | Legal holds that apply to production data |
+| `docs/finops/` | Cost references |
+| `docs/app/` | How the apps use our infrastructure |
+| `docs/tickets/` | Working notes for tickets in flight |
 
 ## Terraform
 

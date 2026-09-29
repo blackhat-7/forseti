@@ -5,6 +5,11 @@ resource "google_storage_bucket" "user_uploads" {
   location      = "US"
   storage_class = "STANDARD"
 
+  # Org policy: every bucket in quillmart-prod uses a CMEK key from quillmart-kms (kms.tf).
+  encryption {
+    default_kms_key_name = data.google_kms_crypto_key.uploads_us.id
+  }
+
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
@@ -19,6 +24,19 @@ resource "google_storage_bucket" "user_uploads" {
     }
     action {
       type = "Delete"
+    }
+  }
+
+  # legacy/listings/ (the old marketplace's listing photos) was moved to Archive when the
+  # old platform was switched off. It is read a few times a year for disputes.
+  lifecycle_rule {
+    condition {
+      matches_prefix = ["legacy/listings/"]
+      age            = 30
+    }
+    action {
+      type          = "SetStorageClass"
+      storage_class = "ARCHIVE"
     }
   }
 

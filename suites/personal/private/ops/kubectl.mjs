@@ -531,7 +531,7 @@ function toObject(env, i) {
       spec: { containers: containers.map(containerJson), nodeName: x.node, restartPolicy: 'Always', serviceAccountName: x.deployment.labels.app },
       status: {
         conditions: [{ status: 'True', type: 'Initialized' }, { status: x.ready ? 'True' : 'False', type: 'Ready' }, { status: x.ready ? 'True' : 'False', type: 'ContainersReady' }, { status: 'True', type: 'PodScheduled' }],
-        containerStatuses: containers.map((c, k) => ({ image: c.image, imageID: `${c.image.split(':')[0]}@sha256:${uid(c.image).replace(/-/g, '')}${uid(c.name).replace(/-/g, '').slice(0, 32)}`, name: c.name, ready: x.ready || (k > 0 && x.phase === 'Running'), restartCount: k === 0 ? x.restarts : 0, started: x.phase === 'Running', state: x.phase === 'Running' ? { running: { startedAt: iso(env.ctx, x.lastRestart ?? x.born + 5) } } : { waiting: { reason: 'ContainerCreating' } } })),
+        containerStatuses: containers.map((c, k) => ({ image: c.image, imageID: `${c.image.split(':')[0]}@sha256:${uid(c.image).replace(/-/g, '')}${uid(c.name).replace(/-/g, '').slice(0, 32)}`, name: c.name, ready: x.ready || (k > 0 && x.phase === 'Running'), restartCount: k === 0 ? x.restarts : 0, ...(k === 0 && x.restarts ? { lastState: { terminated: { containerID: `containerd://${uid(x.name + c.name).replace(/-/g, '')}`, exitCode: x.lastExit ?? 1, finishedAt: iso(env.ctx, x.lastRestart), reason: x.lastReason ?? 'Error', startedAt: iso(env.ctx, x.lastStarted ?? x.lastRestart - 95) } } } : {}), started: x.phase === 'Running', state: x.phase === 'Running' ? { running: { startedAt: iso(env.ctx, x.lastRestart ?? x.born + 5) } } : { waiting: { reason: 'ContainerCreating' } } })),
         hostIP: `10.128.0.${11 + env.c.nodes.indexOf(x.node)}`, phase: x.phase === 'Pending' ? 'Pending' : 'Running', podIP: x.ip, qosClass: 'Burstable', startTime: iso(env.ctx, x.born),
       },
     };
@@ -701,7 +701,7 @@ function describeOne(env, i) {
     return [
       `Name:             ${x.name}`, `Namespace:        ${i.ns}`, `Priority:         0`, `Service Account:  ${x.deployment.labels.app}`, `Node:             ${x.node}/10.128.0.${11 + env.c.nodes.indexOf(x.node)}`, `Start Time:       ${stamp(x.born)}`,
       `Labels:           app=${x.deployment.labels.app}`, `                  pod-template-hash=${x.hash}`, `Annotations:      <none>`, `Status:           ${x.terminating ? 'Terminating' : x.phase}`, `IP:               ${x.ip}`, `Controlled By:    ReplicaSet/${x.deployment.name}-${x.hash}`, `Containers:`,
-      ...containers.flatMap((c, k) => [`  ${c.name}:`, `    Container ID:   containerd://${uid(x.name + c.name).replace(/-/g, '')}${uid(c.name).replace(/-/g, '')}`, `    Image:          ${c.image}`, ...(c.port ? [`    Port:           ${c.port}/TCP`] : []), `    State:          ${x.phase === 'Running' ? 'Running' : 'Waiting'}`, ...(x.phase === 'Running' ? [`      Started:      ${stamp(k === 0 && x.lastRestart ? x.lastRestart : x.born + 5)}`] : [`      Reason:       ContainerCreating`]), ...(k === 0 && x.restarts ? [`    Last State:     Terminated`, `      Reason:       Error`, `      Exit Code:    1`, `      Started:      ${stamp(x.lastRestart - 95)}`, `      Finished:     ${stamp(x.lastRestart)}`] : []), `    Ready:          ${x.ready || (k > 0 && x.phase === 'Running') ? 'True' : 'False'}`, `    Restart Count:  ${k === 0 ? x.restarts : 0}`, ...(k === 0 && c.port ? [`    Liveness:       http-get http://:${c.port}/livez delay=10s timeout=2s period=10s #success=1 #failure=3`, `    Readiness:      http-get http://:${c.port}/readyz delay=5s timeout=2s period=5s #success=1 #failure=3`] : []), ...envLines(c, '    ')]),
+      ...containers.flatMap((c, k) => [`  ${c.name}:`, `    Container ID:   containerd://${uid(x.name + c.name).replace(/-/g, '')}${uid(c.name).replace(/-/g, '')}`, `    Image:          ${c.image}`, ...(c.port ? [`    Port:           ${c.port}/TCP`] : []), `    State:          ${x.phase === 'Running' ? 'Running' : 'Waiting'}`, ...(x.phase === 'Running' ? [`      Started:      ${stamp(k === 0 && x.lastRestart ? x.lastRestart : x.born + 5)}`] : [`      Reason:       ContainerCreating`]), ...(k === 0 && x.restarts ? [`    Last State:     Terminated`, `      Reason:       ${x.lastReason ?? 'Error'}`, `      Exit Code:    ${x.lastExit ?? 1}`, `      Started:      ${stamp(x.lastStarted ?? x.lastRestart - 95)}`, `      Finished:     ${stamp(x.lastRestart)}`] : []), `    Ready:          ${x.ready || (k > 0 && x.phase === 'Running') ? 'True' : 'False'}`, `    Restart Count:  ${k === 0 ? x.restarts : 0}`, ...(k === 0 && c.port ? [`    Liveness:       http-get http://:${c.port}/livez delay=10s timeout=2s period=10s #success=1 #failure=3`, `    Readiness:      http-get http://:${c.port}/readyz delay=5s timeout=2s period=5s #success=1 #failure=3`] : []), ...envLines(c, '    ')]),
       `Conditions:`, `  Type              Status`, `  Initialized       True`, `  Ready             ${x.ready ? 'True' : 'False'}`, `  ContainersReady   ${x.ready ? 'True' : 'False'}`, `  PodScheduled      True`, `QoS Class:        Burstable`,
       ...events(`pod/${x.name}`),
     ];
@@ -806,9 +806,11 @@ function top(env, rest) {
   if (!pods.length) return { err: [`No resources found in ${env.ns} namespace.`] };
   const rows = pods.map(({ ns, p }) => {
     const pct = hooks.cpu?.(env.cname, ns, p.deployment.name) ?? 20;
-    const req = parseInt(containersOf(p)[0].resources.requests.cpu, 10) || 500;
+    // "500m" is millicores; "2" or "1.5" are whole cores.
+    const raw = String(containersOf(p)[0].resources.requests.cpu), req = (raw.endsWith('m') ? parseInt(raw, 10) : parseFloat(raw) * 1000) || 500;
     const jitter = (hashString(p.name) % 17) - 8;
-    return [...(env.f.A ? [ns] : []), p.name, `${Math.max(1, Math.round(req * (pct + jitter) / 100))}m`, `${180 + (hashString(p.name) % 140)}Mi`];
+    const mem = hooks.memory?.(env.cname, ns, p) ?? 180 + (hashString(p.name) % 140);
+    return [...(env.f.A ? [ns] : []), p.name, `${Math.max(1, Math.round(req * (pct + jitter) / 100))}m`, `${Math.round(mem)}Mi`];
   });
   return { out: table([...(env.f.A ? ['NAMESPACE'] : []), 'NAME', 'CPU(cores)', 'MEMORY(bytes)'], rows) };
 }
@@ -840,6 +842,16 @@ function newRevision(env, d, containers, { cause, restartedAt = null } = {}) {
   const ns = env.c.namespaces[env.ns];
   ns.events.push({ t, type: 'Normal', reason: 'ScalingReplicaSet', object: `deployment/${d.name}`, message: `Scaled up replica set ${d.name}-${cur(d).hash} to ${Math.max(1, Math.ceil(d.replicas * d.surge))}` });
   return true;
+}
+/**
+ * A rollout made by someone other than the operator, such as a CI pipeline: the deployment moves
+ * to `containers` exactly as `kubectl set image` would, but no operator event is recorded.
+ */
+export function rollOut(ctx, cname, nsName, name, containers, cause) {
+  const c = ctx.state.kube.contexts[cname];
+  const d = c?.namespaces[nsName]?.deployments.find(x => x.name === name && !x.deleted);
+  if (!d) return false;
+  return newRevision({ ctx, c, ns: nsName, cname }, d, containers, { cause });
 }
 function requireDeployment(env, text) {
   const r = ref(text);

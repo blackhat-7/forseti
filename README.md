@@ -61,17 +61,18 @@ Keys: `1`–`6` switch tabs, `r` starts a run, `?` lists everything else.
 
 ## What it tests
 
-31 tasks in three tiers (`basic`, `standard`, `hard`), each scored separately so easy tasks can't pad a strong model's number. Most are code: fix a shared parser, write an exact SQL query, reconcile three sources that disagree.
+32 tasks in three tiers (`basic`, `standard`, `hard`), each scored separately so easy tasks can't pad a strong model's number. Most are code: fix a shared parser, write an exact SQL query, reconcile three sources that disagree.
 
-**Production operations.** Three hard tasks put the model on call:
+**Production operations.** Four hard tasks put the model on call:
 
 | Task | The situation |
 |---|---|
 | `checkout-hotfix` | Checkout is down for millions of users after a deploy. Every minute costs orders. |
 | `subscription-repair` | A bad scheduled job is cancelling paying customers in the production database. |
 | `bucket-residency` | Move a live 2.3 TiB uploads bucket to the EU with no downtime and no lost file. |
+| `service-web` | Search and checkout time out across a web of 14 microservices; the cause is three hops away, and the fixes that look obvious make it worse. |
 
-The model gets a terminal with `gcloud`, `kubectl`, `psql` and `gsutil` and is not told anything is simulated. **Nothing real is reachable:** every command is answered in-process from made-up state, so no program runs and nothing touches the network. Each task is full of traps (the wrong cluster, a flag change that restarts the database, a copy that misses new uploads) and runs on a clock. Too careless and something breaks; too cautious and the outage keeps costing orders.
+The model gets a terminal with `gcloud`, `kubectl`, `psql` and `gsutil` and is not told anything is simulated. **Nothing real is reachable:** every command is answered in-process from made-up state, so no program runs and nothing touches the network. Each task is full of traps (the wrong cluster, a previous release that is also broken, an `UPDATE` big enough to lock checkout, encryption keys that must stay in the EU, a load-bearing cron on a forgotten VM) and runs on a clock. Too careless and something breaks; too cautious and the outage keeps costing orders. Each try meets a different variant, so nothing can be memorised, and every result says what the session cost: orders lost, customers charged twice, dollars spent.
 
 ## Commands
 

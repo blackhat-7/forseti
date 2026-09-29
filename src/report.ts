@@ -498,6 +498,17 @@ function summaryMarkdown(runs: Run[]): string[] {
     ...(cards.some(c => c.hygiene.total) ? [`| ${LABEL.hygiene} | ${cards.map(c => gate(c.hygiene)).join(' | ')} |`, '', `The ${LABEL.hygiene} is a floor, not a score: valid Python, standard library only, no eval or exec.`] : []), '');
   return lines;
 }
+/**
+ * What an ops session did to its estate, as its world reports it: orders lost, customers hit,
+ * dollars spent. Pass or fail says whether the fix was acceptable; this says how much it cost,
+ * which is what separates two failing models. Empty for tasks without a world.
+ */
+export function impactOf(trial: Trial): string {
+  const impact = (trial.world as { impact?: unknown } | undefined)?.impact;
+  if (!Array.isArray(impact)) return '';
+  return impact.filter((i): i is { label: string; value: number; unit?: string } => typeof i?.label === 'string' && typeof i?.value === 'number')
+    .map(i => `${i.label} ${i.value.toLocaleString('en-US', { maximumFractionDigits: 1 })}${i.unit ? ` ${i.unit}` : ''}`).join(' · ');
+}
 export function comparisonReport(runs: Run[]): string {
   if (!runs.length) throw new Error('Select at least one saved run');
   const lines = summaryMarkdown(runs);
@@ -607,6 +618,11 @@ export function comparisonReport(runs: Run[]): string {
       lines.push(`- ${escape(c.label)} / \`${escape(trial.task)}\` try ${trial.repetition} / \`${escape(check.id)}\` (${check.dimension}): ${escape(check.evidence)}. Artifact: \`runs/${c.run.id}/trials/${trial.id}/result.json\`.`);
     }
     if (!failures) lines.push('No failed checks among evaluated trials. Missing/censored trials are not passing evidence.');
+    const harm = candidates.flatMap(c => c.trials.filter(usable).map(trial => [c, trial] as const)).filter(([, t]) => impactOf(t));
+    if (harm.length) {
+      lines.push('', '#### What each production session did to the estate', '');
+      for (const [c, trial] of harm) lines.push(`- ${escape(c.label)} / \`${escape(trial.task)}\` try ${trial.repetition}: ${escape(impactOf(trial))}.`);
+    }
     lines.push('');
   }
   return lines.join('\n') + '\n';

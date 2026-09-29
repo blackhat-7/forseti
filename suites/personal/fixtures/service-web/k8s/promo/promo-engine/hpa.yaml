@@ -1,0 +1,21 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: promo-engine
+  namespace: promo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: promo-engine
+  minReplicas: 3
+  # PROMO-208: promo-pg max_connections is sized for this. 20 connections per pod;
+  # don't go above 6 pods without raising the promo-pg tier first.
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

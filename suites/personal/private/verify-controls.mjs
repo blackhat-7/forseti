@@ -33,8 +33,9 @@ function tree(dir, prefix = '') {
  * A task with a simulated estate: its controls are shell sessions, not files. The reference must
  * pass every check and the baseline must fail one, graded on the estate each session left behind.
  */
-async function verifyWorld(task, grader, name, control) {
-  assert(Array.isArray(control.commands) && typeof control.answer === 'string', `${task.id} ${name}: a world control is {commands, answer}`);
+async function verifyWorld(task, grader, name, control, seed) {
+  const commands = typeof control.commands === 'function' ? control.commands(seed) : control.commands;
+  assert(Array.isArray(commands) && typeof control.answer === 'string', `${task.id} ${name}: a world control is {commands, answer}, commands a list or a function of the seed`);
   const files = tree(join(suiteDir, task.fixture));
   const {createWorld, directory} = await import(new URL(task.world, new URL('../', import.meta.url)));
   assert(typeof directory === 'string' && /^[\w.-]+$/.test(directory), `${task.id}: the world names the folder it is checked out in`);
@@ -42,19 +43,20 @@ async function verifyWorld(task, grader, name, control) {
     read: p => { if (!Object.hasOwn(files, p)) throw Error('missing'); return files[p]; },
     write: (p, t) => { files[p] = t; }, list: () => Object.keys(files), remove: p => { delete files[p]; },
   };
-  const world = createWorld({home:`/tmp/ws-control/${directory}`, fs});
-  for (const command of control.commands) {
+  const world = createWorld({home:`/tmp/ws-control/${directory}`, fs, seed});
+  for (const command of commands) {
     const r = await world.exec(command);
     assert(typeof r.output === 'string' && Number.isInteger(r.code), `${task.id} ${name}: exec returns {output, code}`);
   }
   const report = JSON.parse(JSON.stringify(world.report()));
-  const trace = control.commands.map(command => ({tool:'bash',args:{command},ok:true,ms:1,output:''}));
+  const trace = commands.map(command => ({tool:'bash',args:{command},ok:true,ms:1,output:''}));
   const checks = await grader.grade({answer:control.answer,files,trace,world:report,python:async () => { throw Error('no interpreter for world tasks'); },lane:'tools',control:true});
   assert(checks.length > 0 && checks.every(c => typeof c.passed === 'boolean' && task.dimensions.includes(c.dimension)), `${task.id}: undeclared rubric`);
   assert(task.dimensions.every(d => checks.some(c => c.dimension === d)), `${task.id}: missing declared rubric`);
-  if (name === 'reference') assert(checks.every(c => c.passed), `${task.id} reference: ${JSON.stringify(checks.filter(c => !c.passed))}`);
-  else assert(checks.some(c => !c.passed && c.dimension === 'correctness'), `${task.id} baseline must fail substantively`);
-  return {task:task.id,control:name,checks:checks.length,passed:checks.filter(c => c.passed).length};
+  if (name === 'reference') assert(checks.every(c => c.passed), `${task.id} reference, seed ${seed}: ${JSON.stringify(checks.filter(c => !c.passed))}`);
+  else assert(checks.some(c => !c.passed && c.dimension === 'correctness'), `${task.id} baseline must fail substantively, seed ${seed}`);
+  if (report.impact !== undefined) assert(Array.isArray(report.impact) && report.impact.every(i => typeof i.label === 'string' && typeof i.value === 'number'), `${task.id}: impact is [{label, value, unit}]`);
+  return {task:task.id,control:name,seed,checks:checks.length,passed:checks.filter(c => c.passed).length};
 }
 // ONLY=<task id> verifies one task's controls, for work on a single task.
 for (const task of suite.tasks.filter(t => !process.env.ONLY || t.id === process.env.ONLY)) {
@@ -71,7 +73,8 @@ for (const task of suite.tasks.filter(t => !process.env.ONLY || t.id === process
   for (const name of ['reference', 'baseline']) {
     const control = grader[name];
     assert(control, `${task.id} lacks ${name}`);
-    if (task.world) { results.push(await verifyWorld(task, grader, name, control)); continue; }
+    // A world varies by seed; its controls must hold on more than the canonical variant.
+    if (task.world) { for (const seed of [0, 1, 2]) results.push(await verifyWorld(task, grader, name, control, seed)); continue; }
     const files = {...fixture(task.id), ...control.files};
     const dir = mkdtempSync(join(tmp, 'personal-control-'));
     try {

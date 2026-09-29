@@ -20,6 +20,15 @@ Current connections by client:
 psql -c "select application_name, count(*) from pg_stat_activity group by 1 order by 2 desc"
 ```
 
+Sessions holding locks or stuck in a transaction:
+
+```
+psql -c "select pid, application_name, state, xact_start, wait_event_type, left(query, 60) from pg_stat_activity where state <> 'idle' order by xact_start"
+```
+
+`pg_terminate_backend(pid)` closes a session and rolls back its transaction; the client
+reconnects on its next query.
+
 ## Flags
 
 Flags are managed in `terraform/cloudsql.tf`. Changing a flag like `max_connections` restarts

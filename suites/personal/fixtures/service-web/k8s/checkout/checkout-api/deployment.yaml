@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: checkout
+spec:
+  replicas: 8
+  template:
+    spec:
+      containers:
+        - name: checkout-api
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/checkout-api:v3.11.2
+          env:
+            - name: PRICING_URL
+              value: "http://pricing-api.pricing.svc.cluster.local:8080"
+            - name: PRICING_TIMEOUT_MS
+              value: "2000"
+            - name: PRICING_RETRIES   # PLAT-377: should be 0 now that the mesh retries
+              value: "3"
+            - name: CART_URL
+              value: "http://cart-api.cart.svc.cluster.local:8080"
+            - name: INVENTORY_URL
+              value: "http://inventory-api.inventory.svc.cluster.local:8080"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: checkout-api
+  namespace: checkout
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: checkout-api
+  minReplicas: 8
+  maxReplicas: 24
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65

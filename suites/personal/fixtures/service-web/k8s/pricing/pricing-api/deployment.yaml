@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pricing-api
+  namespace: pricing
+  labels:
+    app: pricing-api
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: pricing-api
+  template:
+    metadata:
+      labels:
+        app: pricing-api
+    spec:
+      containers:
+        - name: pricing-api
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/pricing-api:v6.4.1
+          envFrom:
+            - configMapRef:
+                name: pricing-config
+          env:
+            - name: PROMO_ADDR
+              value: "promo-engine.promo.svc.cluster.local:8080"
+            - name: PROMO_TIMEOUT_MS
+              value: "400"
+            - name: PROMO_RETRIES
+              value: "1"
+            - name: REDIS_ADDR
+              value: "10.30.0.5:6379"
+            - name: FLAGS_URL
+              value: "http://flags.flags.svc.cluster.local"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              memory: 1Gi

@@ -30,9 +30,14 @@ spec:
                 - name: GRACE_DAYS
                   value: "3"
                 - name: BATCH_SIZE
-                  value: "500"
+                  value: "4800"
                 - name: DATABASE_URL
                   valueFrom:
                     secretKeyRef:
                       name: plus-renewal-sync-database-url
+                      key: latest
+                - name: PAYRIFT_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: payrift-api-key
                       key: latest

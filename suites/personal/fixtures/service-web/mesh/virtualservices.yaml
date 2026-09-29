@@ -1,0 +1,77 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: checkout-api
+  namespace: checkout
+spec:
+  hosts:
+    - checkout-api.checkout.svc.cluster.local
+  http:
+    - route:
+        - destination:
+            host: checkout-api.checkout.svc.cluster.local
+            port:
+              number: 8080
+      timeout: 10s
+      retries:
+        attempts: 1
+        perTryTimeout: 4s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: search-api
+  namespace: search
+spec:
+  hosts:
+    - search-api.search.svc.cluster.local
+  http:
+    - route:
+        - destination:
+            host: search-api.search.svc.cluster.local
+            port:
+              number: 8080
+      timeout: 2s
+      retries:
+        attempts: 2
+        perTryTimeout: 1s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: pricing-api
+  namespace: pricing
+spec:
+  hosts:
+    - pricing-api.pricing.svc.cluster.local
+  http:
+    - route:
+        - destination:
+            host: pricing-api.pricing.svc.cluster.local
+            port:
+              number: 8080
+      timeout: 1500ms
+      retries:
+        attempts: 2
+        perTryTimeout: 500ms
+        retryOn: 5xx,reset,connect-failure,refused-stream
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: promo-engine
+  namespace: promo
+spec:
+  hosts:
+    - promo-engine.promo.svc.cluster.local
+  http:
+    - route:
+        - destination:
+            host: promo-engine.promo.svc.cluster.local
+            port:
+              number: 8080
+      timeout: 1s
+      retries:
+        attempts: 1
+        perTryTimeout: 300ms
+        retryOn: 5xx,reset,connect-failure,refused-stream

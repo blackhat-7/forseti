@@ -381,9 +381,22 @@ export class Shell {
     return 0;
   }
   pipeline({ cmds, negate }, stdin, out, err) {
+    // Each part of a real pipeline runs in a subshell: variables and cd inside it do not survive.
+    if (cmds.length > 1) {
+      const env = { ...this.env }, cwd = this.cwd;
+      try { return this.pipe(cmds, negate, stdin, out, err); }
+      finally { this.env = env; this.cwd = cwd; }
+    }
+    return this.pipe(cmds, negate, stdin, out, err);
+  }
+  pipe(cmds, negate, stdin, out, err) {
     let input = stdin, status = 0;
     for (const [k, cmd] of cmds.entries()) {
       const last = k === cmds.length - 1;
+      // A plain program in the middle of a pipe hands its output on as it produces it, so
+      // `gsutil ls -r gs://b | wc -l` over millions of objects never holds them all at once.
+      const lazy = !last && this.streamable(cmd);
+      if (lazy) { const r = this.start(cmd, input, err); status = r.code; input = r.out; continue; }
       const lines = [];
       const sink = last ? out : { write: (l) => lines.push(l) };
       status = this.command(cmd, input, sink, err);
@@ -474,6 +487,24 @@ export class Shell {
       try { return this.exec(argv, i, o, e); }
       finally { if (Object.keys(assigned).length) { for (const k of Object.keys(assigned)) { if (k in saved) this.env[k] = saved[k]; else delete this.env[k]; } } }
     });
+  }
+  streamable(cmd) {
+    if (cmd.kind !== 'simple' || cmd.redirects.length || cmd.assigns.length || !cmd.words.length) return false;
+    const [name] = this.expandWord(cmd.words[0], true);
+    return Boolean(name) && !BUILTINS[name] && Boolean(this.programs[name] ?? TOOLS[name]);
+  }
+  /** Runs a program for a pipe and returns its output unread: whatever reads it pulls lines as needed. */
+  start(cmd, stdin, err) {
+    const [name, ...args] = cmd.words.flatMap(w => this.expandWord(w, true));
+    const program = this.programs[name] ?? TOOLS[name];
+    let result;
+    try { result = program(args, { stdin, env: this.env, sh: this, name }); }
+    catch (e) {
+      if (e instanceof UsageError) { err.write(e.message); return { code: e.code, out: [] }; }
+      throw e;
+    }
+    for (const line of result.err ?? []) err.write(line);
+    return { code: result.code ?? 0, out: result.out ?? [] };
   }
   exec(argv, stdin, out, err) {
     const [name, ...args] = argv;
@@ -667,6 +698,23 @@ const BUILTINS = {
     return {};
   },
   pwd(_a, { sh }) { return { out: [sh.env.PWD] }; },
+  /** One line of input into variables, so `... | while read -r a b; do` loops work. */
+  read(args, { stdin, sh }) {
+    const names = [];
+    let array = null;
+    for (let k = 0; k < args.length; k++) {
+      if (args[k] === '-a') { array = args[++k]; continue; }
+      if (['-p', '-d', '-n', '-t', '-u'].includes(args[k])) { k++; continue; }
+      if (!args[k].startsWith('-')) names.push(args[k]);
+    }
+    const line = nextLine(stdin);
+    if (line === undefined) return { code: 1 };
+    const fields = line.trim().split(/\s+/).filter(Boolean);
+    if (array) { sh.env[array] = fields.join(' '); return {}; }
+    const vars = names.length ? names : ['REPLY'];
+    vars.forEach((name, k) => { sh.env[name] = k === vars.length - 1 ? (names.length ? fields.slice(k).join(' ') : line) : fields[k] ?? ''; });
+    return {};
+  },
   /** Waits, on the virtual clock, for the background jobs to finish. */
   wait(_a, { sh }) {
     const end = Math.max(sh.clock(), ...sh.jobs.map(j => j.end));
@@ -756,6 +804,14 @@ function testExpr(a) {
   }
 }
 
+/** Input read a line at a time keeps its place, so each `read` in a loop gets the next line. */
+const cursors = new WeakMap();
+function nextLine(stdin) {
+  if (!stdin) return undefined;
+  if (!cursors.has(stdin)) cursors.set(stdin, stdin[Symbol.iterator]());
+  const next = cursors.get(stdin).next();
+  return next.done ? undefined : next.value;
+}
 /** Reads a program's input: the files it names, or stdin. */
 function inputs(files, io, name) {
   if (!files.length || (files.length === 1 && files[0] === '-')) return { lines: io.stdin ?? [], err: [] };
@@ -846,6 +902,26 @@ export const TOOLS = {
       }
     };
     const prefix = (label, k, text, sep) => `${many && label ? `${label}${sep}` : ''}${set.has('n') ? `${k + 1}${sep}` : ''}${text}`;
+    const context = v.A !== undefined || v.B !== undefined || v.C !== undefined;
+    if (!operands.length && !context && !set.has('c') && !set.has('q') && !set.has('l')) {
+      // Piped input without context lines streams: matches go on as they are found.
+      const stdin = io.stdin ?? [];
+      const stream = function* () {
+        let k = 0, n = 0;
+        for (const line of stdin) {
+          if (re.test(line) !== set.has('v')) {
+            if (v.m && ++n > Number(v.m)) return;
+            if (set.has('o')) { for (const m of line.matchAll(new RegExp(re.source, `g${re.flags}`))) yield prefix('', k, m[0], ':'); }
+            else yield prefix('', k, line, ':');
+          }
+          k++;
+        }
+      };
+      // grep's exit status depends on whether anything matched, so peek at the first match.
+      const lines = stream();
+      const first = lines.next();
+      return { out: first.done ? [] : (function* () { yield first.value; yield* lines; })(), code: first.done ? 1 : 0 };
+    }
     if (!operands.length) scan([...(io.stdin ?? [])], '');
     else for (const f of operands) {
       const rel = io.sh.relative(f);
@@ -1033,7 +1109,15 @@ export const TOOLS = {
     return {};
   },
   date(args, io) {
-    const now = io.sh.now();
+    let now = io.sh.now();
+    const dIdx = args.findIndex(a => a === '-d' || a === '--date' || a.startsWith('--date='));
+    if (dIdx >= 0) {
+      const spec = args[dIdx].startsWith('--date=') ? args[dIdx].slice(7) : args[dIdx + 1] ?? '';
+      const parsed = parseDate(spec, now);
+      if (!parsed) return { err: [`date: invalid date '${spec}'`], code: 1 };
+      now = parsed;
+      args = args.filter((_, k) => k !== dIdx && !(k === dIdx + 1 && !args[dIdx].startsWith('--date=')));
+    }
     const iso = args.find(a => a.startsWith('-I') || a.startsWith('--iso'));
     const plus = args.find(a => a.startsWith('+'));
     if (iso) return { out: [now.toISOString().replace(/\.\d+Z$/, '+00:00')] };
@@ -1168,6 +1252,21 @@ function toJsRegex(pattern, extended) {
 }
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** What `date -d` accepts in practice: "now", "@1700000000", ISO dates, "-3 hours", "3 hours ago", "yesterday". */
+function parseDate(spec, now) {
+  const s = spec.trim().toLowerCase();
+  if (!s || s === 'now') return now;
+  if (/^@\d+$/.test(s)) return new Date(Number(s.slice(1)) * 1000);
+  if (s === 'today') return now;
+  if (s === 'yesterday') return new Date(now.getTime() - 86400000);
+  if (s === 'tomorrow') return new Date(now.getTime() + 86400000);
+  const unit = { sec: 1, second: 1, min: 60, minute: 60, hour: 3600, day: 86400, week: 604800 };
+  let total = 0, matched = false;
+  for (const m of s.matchAll(/([+-]?\s*\d+)\s*(sec|second|min|minute|hour|day|week)s?/g)) { total += Number(m[1].replace(/\s/g, '')) * unit[m[2]]; matched = true; }
+  if (matched) { if (/\bago\b/.test(s)) total = -Math.abs(total); return new Date(now.getTime() + total * 1000); }
+  const iso = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(spec) || !/\d:\d/.test(spec) ? spec : `${spec}Z`);
+  return Number.isNaN(iso) ? null : new Date(iso);
+}
 export function strftime(format, d) {
   const p = (n, w = 2) => String(n).padStart(w, '0');
   return format.replace(/%([a-zA-Z%])/g, (_, c) => ({

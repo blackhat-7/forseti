@@ -10,8 +10,13 @@ A subscription is cancelled when either:
 - it lapsed: its paid period ended more than `GRACE_DAYS` (3) days ago and it never renewed
   (`reason = 'lapsed'`).
 
-For each cancellation the job sets `status = 'cancelled'`, `auto_renew = false`, `cancelled_at` and
-`cancel_reason`, writes a `subscription_events` row with `actor = 'plus-renewal-sync'`, and queues a
-`plus_cancelled` email in `email_outbox`.
+For each cancellation the job:
+
+- cancels the subscription at Payrift (`provider_subscription_id`), so it is never charged again;
+- sets `status = 'cancelled'`, `auto_renew = false`, `cancelled_at` and `cancel_reason`, and brings
+  `current_period_end` forward to the cancellation time (access ends now);
+- writes a `subscription_events` row with `actor = 'plus-renewal-sync'`, whose `metadata.previous`
+  keeps the status, `auto_renew` and `current_period_end` the subscription had before;
+- queues a `plus_cancelled` email in `email_outbox`.
 
 Runs every 20 minutes from Cloud Scheduler; each run handles at most `BATCH_SIZE` subscriptions.

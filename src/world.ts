@@ -17,7 +17,7 @@ import { files, inside, localDir, put, readText } from './files.ts';
 export type World = { exec(command: string): { output: string; code: number } | Promise<{ output: string; code: number }>; report(): unknown; repository?(): Repository | undefined };
 /** The checkout's history as the world's `git` shows it, newest first. See `repository` below. */
 type Repository = { branch: string; remote: string; commits: { sha: string; author: string; email: string; t: number; subject: string; body?: string }[]; at(t: number): string; user(): { name: string; email: string } };
-type WorldModule = { directory: string; createWorld(options: { home: string; fs: WorldFs }): World };
+type WorldModule = { directory: string; createWorld(options: { home: string; fs: WorldFs; seed: number }): World };
 type WorldFs = { read(path: string): string; write(path: string, text: string): void; list(): string[]; remove(path: string): void };
 
 /** Name, description and schema shared by both lanes, so neither is told more than the other. */
@@ -52,8 +52,15 @@ export function workspaceFs(work: string): WorldFs {
     remove: path => unlinkSync(inside(work, path)),
   };
 }
-export async function openWorld(modulePath: string, work: string): Promise<World> {
-  const world = (await loadWorldModule(modulePath)).createWorld({ home: work, fs: workspaceFs(work) });
+/**
+ * Which variant of the estate a try meets: the task's details (versions, counts, names) differ by
+ * seed while the problem stays the same, so a model cannot pass by remembering an earlier try.
+ * Every model's first try meets variant 0, its second variant 1, and so on, so tries compare like
+ * for like across models.
+ */
+export const worldSeed = (repetition: number) => Math.max(0, repetition - 1);
+export async function openWorld(modulePath: string, work: string, seed = 0): Promise<World> {
+  const world = (await loadWorldModule(modulePath)).createWorld({ home: work, fs: workspaceFs(work), seed });
   repository(work, world);
   return world;
 }

@@ -41,3 +41,22 @@ resource "google_storage_bucket_iam_member" "cdn_fill_thumbs" {
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:service-${var.project_number}@cloud-cdn-fill.iam.gserviceaccount.com"
 }
+
+# Trust & Safety's moderation pipeline reads each new original (dataflow.tf).
+resource "google_service_account" "moderation" {
+  account_id   = "content-moderation"
+  display_name = "Dataflow moderation-scan"
+}
+
+resource "google_storage_bucket_iam_member" "moderation_reader" {
+  bucket = google_storage_bucket.user_uploads.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.moderation.email}"
+}
+
+# BigQuery object table over the uploads (bigquery.tf) reads through its connection's account.
+resource "google_storage_bucket_iam_member" "bq_objects_reader" {
+  bucket = google_storage_bucket.user_uploads.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_bigquery_connection.media_gcs.cloud_resource[0].service_account_id}"
+}

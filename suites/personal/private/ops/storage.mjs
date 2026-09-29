@@ -52,21 +52,50 @@ export function makeCatalog({ from, to, total, cutoff, seed = 7 }) {
   const days = counts.map((count, d) => {
     const date = new Date(start + d * 86400000);
     const key = `${date.getUTCFullYear()}/${String(date.getUTCMonth() + 1).padStart(2, '0')}/${String(date.getUTCDate()).padStart(2, '0')}`;
-    return { d, key, count, epoch: (start + d * 86400000) / 1000, span: d === n - 1 ? cutoff : 86400 };
+    return { d, key, count, epoch: (start + d * 86400000) / 1000, span: d === n - 1 ? cutoff : 86400, root: 'u/' };
   });
   return { days, total, seed, index: new Map(days.map(x => [x.key, x])), reverse: new Map() };
+}
+/**
+ * Another run of day partitions in the same catalog, under its own root (`legacy/listings/`) and
+ * storage class, e.g. an archive the bucket also holds. Its objects are `kind` 'bundle': large
+ * archive files rather than photos. Returns the new days.
+ */
+export function addSeries(catalog, { from, to, total, root, cls, kind = 'bundle' }) {
+  const start = Date.parse(`${from}T00:00:00Z`), end = Date.parse(`${to}T00:00:00Z`);
+  const n = Math.round((end - start) / 86400000) + 1;
+  const base = catalog.days.length;
+  const weights = Array.from({ length: n }, (_, d) => 0.6 + (mix(catalog.seed + 31, d) % 8000) / 10000);
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const counts = weights.map(w => Math.floor((w / sum) * total));
+  let short = total - counts.reduce((a, b) => a + b, 0);
+  for (let d = 0; short > 0; d = (d + 1) % n) { counts[d]++; short--; }
+  const days = counts.map((count, d) => {
+    const date = new Date(start + d * 86400000);
+    const key = `${date.getUTCFullYear()}/${String(date.getUTCMonth() + 1).padStart(2, '0')}/${String(date.getUTCDate()).padStart(2, '0')}`;
+    return { d: base + d, key, count, epoch: (start + d * 86400000) / 1000, span: 86400, root, cls, kind };
+  });
+  catalog.days.push(...days);
+  return days;
 }
 /** The i-th object of day `day`: name relative to its block, size, creation instant, identity. */
 export function baseObject(catalog, day, i) {
   const h1 = mix(catalog.seed * 7919 + day.d, i), h2 = mix(h1, day.d + 17);
-  const ext = EXT[h2 % EXT.length];
+  const ext = day.kind === 'bundle' ? 'tar.zst' : EXT[h2 % EXT.length];
   return {
     rest: `${hex8(h1)}${hex8(h2)}.${ext}`,
-    size: 40_000 + (mix(h2, 3) % 2_666_000),
+    size: sizeOf(day, h2),
     created: day.epoch + Math.floor((i / Math.max(1, day.count)) * day.span) + (h1 % 40),
     id: `b:${day.d}:${i}`,
-    type: TYPES[ext],
+    type: day.kind === 'bundle' ? 'application/zstd' : TYPES[ext],
   };
+}
+/** Photos are 40 KB to 2.7 MB; archive bundles 2 to 38 MB. */
+const sizeOf = (day, h2) => (day.kind === 'bundle' ? 2_000_000 + (mix(h2, 3) % 36_000_000) : 40_000 + (mix(h2, 3) % 2_666_000));
+/** Just the size, without building the name: sums over millions of objects stay fast. */
+function baseSize(catalog, day, i) {
+  const h1 = mix(catalog.seed * 7919 + day.d, i);
+  return sizeOf(day, mix(h1, day.d + 17));
 }
 function dayNames(catalog, day) {
   const out = [];
@@ -113,7 +142,7 @@ function defaultPolicy(number, project) {
   ];
 }
 const blockKey = (prefix, cut, d) => `${prefix}\u0000${cut}\u0000${d}`;
-const dayPath = (day) => `u/${day.key}/`;
+const dayPath = (day) => `${day.root ?? 'u/'}${day.key}/`;
 const blockStart = (b) => b.prefix + dayPath(b.day).slice(b.cut);
 /**
  * One way to write each set of names: "u/2026/" + "09/29/" and "" + "u/2026/09/29/" are the same
@@ -127,13 +156,15 @@ function canon(day, prefix, cut) {
 /** Whole virtual seconds, at least one: a call to the API is never free. */
 const pause = (ctx, seconds) => ctx.wait(Math.max(1, Math.round(seconds)));
 /** Puts a whole day into a bucket, under `prefix`, lacking the indices in `removed`. */
-export function addBlock(bucket, day, prefix = '', cut = 0, removed = new Set()) {
+export function addBlock(bucket, day, prefix = '', cut = 0, removed = new Set(), cls = day.cls ?? null) {
   ({ prefix, cut } = canon(day, prefix, cut));
   const key = blockKey(prefix, cut, day.d);
   const existing = bucket.blocks.get(key);
   if (existing) { for (const i of [...existing.removed]) if (!removed.has(i)) existing.removed.delete(i); return; }
-  bucket.blocks.set(key, { day, prefix, cut, removed: new Set(removed) });
+  bucket.blocks.set(key, { day, prefix, cut, removed: new Set(removed), cls });
 }
+/** An object's storage class: its own, or the class its bucket gives new objects. */
+export const classOf = (o, bucket) => o.cls ?? o.block?.cls ?? bucket.storageClass;
 export const blockCount = (b) => b.day.count - b.removed.size;
 export function countObjects(bucket) {
   let n = bucket.objects.size;
@@ -141,10 +172,10 @@ export function countObjects(bucket) {
   return n;
 }
 /** Bytes are summed once per block and kept, because a day's sizes never change. */
-function blockBytes(catalog, b) {
+export function blockBytes(catalog, b) {
   if (b.bytes === undefined || b.bytesRemoved !== b.removed.size) {
     let total = 0;
-    for (let i = 0; i < b.day.count; i++) if (!b.removed.has(i)) total += baseObject(catalog, b.day, i).size;
+    for (let i = 0; i < b.day.count; i++) if (!b.removed.has(i)) total += baseSize(catalog, b.day, i);
     b.bytes = total; b.bytesRemoved = b.removed.size;
   }
   return b.bytes;
@@ -164,7 +195,7 @@ function* blockObjects(catalog, b) {
   for (const [rest, i] of dayNames(catalog, b.day)) {
     if (b.removed.has(i)) continue;
     const o = baseObject(catalog, b.day, i);
-    yield { name: start + rest, size: o.size, created: o.created, id: o.id, type: o.type, generation: generation(o.created, i), index: i, block: b };
+    yield { name: start + rest, size: o.size, created: o.created, id: o.id, type: o.type, generation: generation(o.created, i), index: i, block: b, cls: b.cls ?? undefined };
   }
 }
 const generation = (seconds, salt) => String(seconds * 1_000_000 + (mix(seconds, salt) % 1_000_000));
@@ -210,12 +241,16 @@ export function lookup(catalog, bucket, name) {
     const i = indexOf(catalog, b.day, name.slice(start.length));
     if (i === undefined || b.removed.has(i)) continue;
     const o = baseObject(catalog, b.day, i);
-    return { name, size: o.size, created: o.created, id: o.id, type: o.type, generation: generation(o.created, i), index: i, block: b };
+    return { name, size: o.size, created: o.created, id: o.id, type: o.type, generation: generation(o.created, i), index: i, block: b, cls: b.cls ?? undefined };
   }
   return undefined;
 }
-/** Deletes one object found by lookup. Returns its size. */
+/** A hold on `name`, if any: held objects cannot be deleted or overwritten. */
+export const holdOf = (bucket, name) => bucket.holds?.get(name);
+const holdMessage = (bucket, name) => { const h = holdOf(bucket, name); return `Object '${bucket.name}/${name}' is under active ${h?.temporary ? 'Temporary' : 'Event-Based'} hold and cannot be deleted, overwritten or archived until hold is removed.`; };
+/** Deletes one object found by lookup. Returns its size, or -1 when a hold keeps it. */
 function removeObject(bucket, o) {
+  if (holdOf(bucket, o.name)) return -1;
   if (o.block) o.block.removed.add(o.index);
   else bucket.objects.delete(o.name);
   bucket.deleted.live++;
@@ -223,12 +258,23 @@ function removeObject(bucket, o) {
   if (bucket.deleted.names.length < 50) bucket.deleted.names.push(o.name);
   return o.size;
 }
-/** Deletes every object under `prefix`. Returns { count, bytes, sample }. */
+/** Deletes every object under `prefix`, except held ones. Returns { count, bytes, sample, held }. */
 function removePrefix(catalog, bucket, prefix) {
   let count = 0, bytes = 0;
-  const sample = [];
+  const sample = [], held = [];
+  const heldNames = [...(bucket.holds?.keys() ?? [])].filter(n => n.startsWith(prefix));
   for (const [key, b] of [...bucket.blocks]) {
     const start = blockStart(b);
+    const keep = heldNames.filter(n => n.startsWith(start));
+    if (keep.length && (start.startsWith(prefix) || prefix.startsWith(start))) {
+      // A block holding a held object is emptied one object at a time around it.
+      for (const o of [...blockObjects(catalog, b)]) {
+        if (!o.name.startsWith(prefix)) continue;
+        if (keep.includes(o.name)) { held.push(o.name); continue; }
+        count++; bytes += o.size; b.removed.add(o.index); bucket.deleted.live++; if (sample.length < 400) sample.push(o);
+      }
+      continue;
+    }
     if (start.startsWith(prefix)) {
       const n = blockCount(b);
       count += n; bytes += blockBytes(catalog, b);
@@ -239,10 +285,14 @@ function removePrefix(catalog, bucket, prefix) {
       for (const o of [...blockObjects(catalog, b)]) if (o.name.startsWith(prefix)) { count++; bytes += o.size; b.removed.add(o.index); bucket.deleted.live++; if (sample.length < 400) sample.push(o); }
     }
   }
-  for (const [name, o] of [...bucket.objects]) if (name.startsWith(prefix)) { count++; bytes += o.size; bucket.objects.delete(name); bucket.deleted.live++; if (sample.length < 400) sample.push({ name, ...o }); }
+  for (const [name, o] of [...bucket.objects]) {
+    if (!name.startsWith(prefix)) continue;
+    if (holdOf(bucket, name)) { held.push(name); continue; }
+    count++; bytes += o.size; bucket.objects.delete(name); bucket.deleted.live++; if (sample.length < 400) sample.push({ name, ...o });
+  }
   bucket.deleted.bytes += bytes;
   for (const o of sample) if (bucket.deleted.names.length < 50) bucket.deleted.names.push(o.name);
-  return { count, bytes, sample };
+  return { count, bytes, sample, held };
 }
 function* take(it, n) { let k = 0; for (const x of it) { if (k++ >= n) return; yield x; } }
 
@@ -254,7 +304,10 @@ function* take(it, n) { let k = 0; for (const x of it) { if (k++ >= n) return; y
  */
 export function transfer(ctx, src, srcPrefix, dst, dstPrefix, { sync = false, prune = false, dryRun = false, asOf = Infinity } = {}) {
   const catalog = ctx.state.storage.catalog;
-  const result = { copied: 0, bytes: 0, skipped: 0, deleted: 0, deletedBytes: 0, listedSrc: 0, listedDst: 0, copySample: [], deleteSample: [] };
+  // `classBytes` / `classCount`: what was copied, by the storage class it was read from, which is
+  // what retrieval fees are charged on. `held`: destination objects a hold kept from change.
+  const result = { copied: 0, bytes: 0, skipped: 0, deleted: 0, deletedBytes: 0, listedSrc: 0, listedDst: 0, copySample: [], deleteSample: [], classBytes: {}, classCount: {}, held: [] };
+  const counted = (cls, n, bytes) => { result.classCount[cls] = (result.classCount[cls] ?? 0) + n; result.classBytes[cls] = (result.classBytes[cls] ?? 0) + bytes; };
   const rename = (name) => dstPrefix + name.slice(srcPrefix.length);
   const plan = [];
   for (const b of src.blocks.values()) {
@@ -280,13 +333,18 @@ export function transfer(ctx, src, srcPrefix, dst, dstPrefix, { sync = false, pr
       const existing = dst.blocks.get(key);
       let missing = 0, bytes = 0;
       const sample = [];
-      for (let i = 0; i < step.b.day.count; i++) {
+      if (!(sync && existing)) {
+        // The whole day goes: its size is already known, so millions of objects cost nothing to plan.
+        missing = blockCount(step.b); bytes = blockBytes(catalog, step.b);
+        for (let i = 0; i < step.b.day.count && sample.length < 3; i++) if (!step.b.removed.has(i)) sample.push(step.prefix + dayPath(step.b.day).slice(step.cut) + baseObject(catalog, step.b.day, i).rest);
+      } else for (let i = 0; i < step.b.day.count; i++) {
         if (step.b.removed.has(i)) continue;
-        if (sync && existing && !existing.removed.has(i)) { result.skipped++; continue; }
-        const o = baseObject(catalog, step.b.day, i);
-        missing++; bytes += o.size;
-        if (sample.length < 3) sample.push(step.prefix + dayPath(step.b.day).slice(step.cut) + o.rest);
+        if (!existing.removed.has(i)) { result.skipped++; continue; }
+        const size = baseSize(catalog, step.b.day, i);
+        missing++; bytes += size;
+        if (sample.length < 3) sample.push(step.prefix + dayPath(step.b.day).slice(step.cut) + baseObject(catalog, step.b.day, i).rest);
       }
+      counted(step.b.cls ?? step.b.day.cls ?? src.storageClass, missing, bytes);
       // Anything tracked one by one under the same names is superseded by the block copy.
       result.copied += missing; result.bytes += bytes;
       for (const s of sample) note(result.copySample, s);
@@ -294,7 +352,8 @@ export function transfer(ctx, src, srcPrefix, dst, dstPrefix, { sync = false, pr
       if (!dryRun) {
         if (existing) for (const i of [...existing.removed]) { if (!step.b.removed.has(i)) existing.removed.delete(i); }
         else {
-          addBlock(dst, step.b.day, step.prefix, step.cut, step.b.removed);
+          // A copy takes the destination bucket's default class, whatever it was read from.
+          addBlock(dst, step.b.day, step.prefix, step.cut, step.b.removed, dst.storageClass);
           const start = step.prefix + dayPath(step.b.day).slice(step.cut);
           for (const name of [...dst.objects.keys()]) if (name.startsWith(start) && dst.objects.get(name).id?.startsWith(`b:${step.b.day.d}:`)) dst.objects.delete(name);
         }
@@ -304,9 +363,11 @@ export function transfer(ctx, src, srcPrefix, dst, dstPrefix, { sync = false, pr
       if (prune) srcNames.add(name);
       const have = lookup(catalog, dst, name);
       if (sync && have && have.id === o.id) { result.skipped++; continue; }
+      if (have && holdOf(dst, name)) { result.held.push(name); continue; }
       result.copied++; result.bytes += o.size;
+      counted(o.cls ?? o.block?.cls ?? src.storageClass, 1, o.size);
       note(result.copySample, name);
-      if (!dryRun) dst.objects.set(name, { size: o.size, created: Math.floor(ctx.at().getTime() / 1000), id: o.id, type: o.type ?? 'image/jpeg', generation: generation(Math.floor(ctx.at().getTime() / 1000), result.copied) });
+      if (!dryRun) dst.objects.set(name, { size: o.size, created: Math.floor(ctx.at().getTime() / 1000), id: o.id, type: o.type ?? 'image/jpeg', generation: generation(Math.floor(ctx.at().getTime() / 1000), result.copied), cls: dst.storageClass });
     }
   }
   if (prune) {
@@ -318,8 +379,17 @@ export function transfer(ctx, src, srcPrefix, dst, dstPrefix, { sync = false, pr
         const source = plan.find(s => s.b && blockKey(s.prefix, s.cut, s.b.day.d) === key).b;
         for (const i of source.removed) if (!b.removed.has(i)) {
           const o = baseObject(catalog, b.day, i);
+          if (holdOf(dst, start + o.rest)) { result.held.push(start + o.rest); continue; }
           result.deleted++; result.deletedBytes += o.size; note(result.deleteSample, start + o.rest);
           if (!dryRun) { b.removed.add(i); dst.deleted.live++; dst.deleted.bytes += o.size; }
+        }
+        continue;
+      }
+      if ([...(dst.holds?.keys() ?? [])].some(n => n.startsWith(start))) {
+        for (const o of [...blockObjects(catalog, b)]) {
+          if (holdOf(dst, o.name)) { result.held.push(o.name); continue; }
+          result.deleted++; result.deletedBytes += o.size; note(result.deleteSample, o.name);
+          if (!dryRun) { b.removed.add(o.index); dst.deleted.live++; dst.deleted.bytes += o.size; }
         }
         continue;
       }
@@ -330,6 +400,7 @@ export function transfer(ctx, src, srcPrefix, dst, dstPrefix, { sync = false, pr
     }
     for (const [name, o] of [...dst.objects]) {
       if (!name.startsWith(dstPrefix) || srcNames.has(name) || o.created > asOf) continue;
+      if (holdOf(dst, name)) { result.held.push(name); continue; }
       result.deleted++; result.deletedBytes += o.size; note(result.deleteSample, name);
       if (!dryRun) removeObject(dst, { name, ...o });
     }
@@ -376,6 +447,42 @@ function storage(ctx) {
   const listTime = (n) => Math.ceil(n / 1000) * 0.12;
   return { st, bucket, time, listTime };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Customer-managed encryption keys, as Cloud Storage checks them.
+
+const KMS_NAME = /^projects\/([^/]+)\/locations\/([^/]+)\/keyRings\/([^/]+)\/cryptoKeys\/([^/]+)$/;
+export const ENCRYPTER = 'roles/cloudkms.cryptoKeyEncrypterDecrypter';
+/**
+ * Whether a bucket in `location` may use `key` as its default key. ctx.state.kms holds
+ * { keys: { [resourceName]: { location, iam } }, requireCmek, keyProjects, serviceAgent }; without
+ * it, keys are not modelled and any well-formed name is accepted. Returns { code, message } or null.
+ */
+export function keyProblem(ctx, key, location) {
+  const kms = ctx.state.kms;
+  if (!key) return kms?.requireCmek ? { code: 412, message: "Request violates constraint 'constraints/gcp.restrictNonCmekServices'" } : null;
+  const m = KMS_NAME.exec(key);
+  if (!m) return { code: 400, message: `Invalid argument: '${key}' is not a valid Cloud KMS CryptoKey resource name.` };
+  if (!kms) return null;
+  if (kms.keyProjects && !kms.keyProjects.includes(m[1])) return { code: 412, message: "Request violates constraint 'constraints/gcp.restrictCmekCryptoKeyProjects'" };
+  const k = kms.keys[key];
+  if (!k) return { code: 404, message: `Cloud KMS key ${key} not found.` };
+  const loc = String(location).toLowerCase(), kl = k.location;
+  if (!(loc === kl || (loc === 'eu' && kl === 'europe') || (loc === 'us' && kl === 'us'))) return { code: 400, message: `The location of the Cloud KMS key (${kl}) must match the location of the bucket (${loc}).` };
+  if (!k.iam.some(x => x.role === ENCRYPTER && x.members.includes(`serviceAccount:${kms.serviceAgent}`))) return { code: 403, message: 'Permission denied on Cloud KMS key. Please ensure that your Cloud Storage service account has been authorized to use this key.' };
+  return null;
+}
+/** Grants the Cloud Storage service agent use of a key, as `gsutil kms authorize` does. */
+export function authorizeKey(ctx, key) {
+  const kms = ctx.state.kms, k = kms?.keys[key];
+  if (!k) return false;
+  let binding = k.iam.find(x => x.role === ENCRYPTER);
+  if (!binding) { binding = { role: ENCRYPTER, members: [] }; k.iam.push(binding); }
+  const member = `serviceAccount:${kms.serviceAgent}`;
+  if (!binding.members.includes(member)) { binding.members.push(member); binding.members.sort(); ctx.event('kms.iam.bind', { key, member, role: ENCRYPTER }); }
+  return true;
+}
+const HTTP_EXC = { 400: 'BadRequestException', 403: 'AccessDeniedException', 404: 'NotFoundException', 409: 'ServiceException', 412: 'PreconditionException' };
 
 // ---------------------------------------------------------------------------------------------
 // Permission model, used by the scenario too.
@@ -448,7 +555,7 @@ export function makeGsutil(ctx) {
       return { out };
     },
     mb(args) {
-      let location = 'US', cls = 'STANDARD', ubla = false, proj = project(), pap = 'inherited';
+      let location = 'US', cls = 'STANDARD', ubla = false, proj = project(), pap = 'inherited', kmsKey;
       const urls = [];
       for (let k = 0; k < args.length; k++) {
         const a = args[k];
@@ -458,7 +565,8 @@ export function makeGsutil(ctx) {
         else if (a === '-p') proj = args[++k];
         else if (a === '--pap') pap = args[++k] === 'enforced' ? 'enforced' : 'inherited';
         else if (a === '--autoclass') { /* a switch */ }
-        else if (a === '-k' || a === '--placement' || a === '--retention' || a === '--rpo') k++;
+        else if (a === '-k') kmsKey = args[++k];
+        else if (a === '--placement' || a === '--retention' || a === '--rpo') k++;
         else if (a.startsWith('-')) return { err: ['CommandException: Incorrect option(s) specified. Usage:', '', '  gsutil mb [-b (on|off)] [-c <class>] [-k <key>] [-l <location>] [-p <project>]', '            [--autoclass] [--retention <time>] [--pap <setting>]', '            [--placement <region1>,<region2>]', '            [--rpo {ASYNC_TURBO|DEFAULT}] gs://<bucket_name>...', '', 'For additional help run:', '  gsutil help mb'], code: 1 };
         else urls.push(a);
       }
@@ -466,7 +574,7 @@ export function makeGsutil(ctx) {
       for (const url of urls) {
         const u = parseUrl(url);
         err.push(`Creating gs://${u?.bucket ?? url}/...`);
-        const made = createBucket(u?.bucket, { location, cls, ubla, project: proj, pap }, 'gsutil');
+        const made = createBucket(u?.bucket, { location, cls, ubla, project: proj, pap, kmsKey }, 'gsutil');
         if (made.error) return { err: [...err, made.error], code: 1 };
       }
       return { out, err };
@@ -503,7 +611,7 @@ export function makeGsutil(ctx) {
             // One level only: objects directly under prefix, which here never exist.
             const direct = [...listObjects(catalog(), b, prefix)].filter(o => !o.name.slice(prefix.length).includes('/'));
             if (!direct.length) { err.push(`CommandException: No URLs matched: ${url}`); code = 1; continue; }
-            for (const o of direct) { err.push(`Removing gs://${b.name}/${o.name}...`); removeObject(b, o); total++; }
+            for (const o of direct) { err.push(`Removing gs://${b.name}/${o.name}...`); if (removeObject(b, o) < 0) { err.push(`AccessDeniedException: 403 ${holdMessage(b, o.name)}`); code = 1; } else total++; }
             ctx.event('storage.objects.delete', { bucket: b.name, count: direct.length, prefix });
             continue;
           }
@@ -515,7 +623,7 @@ export function makeGsutil(ctx) {
           if (!o) { err.push(`CommandException: No URLs matched: ${url}`); code = 1; continue; }
           time(0.15);
           err.push(`Removing gs://${b.name}/${o.name}#${o.generation}...`);
-          removeObject(b, o);
+          if (removeObject(b, o) < 0) { err.push(`AccessDeniedException: 403 ${holdMessage(b, o.name)}`); code = 1; continue; }
           total++;
           ctx.event('storage.objects.delete', { bucket: b.name, count: 1, prefix: o.name });
           continue;
@@ -526,9 +634,11 @@ export function makeGsutil(ctx) {
         time(r.count / (parallel ? 900 : 45));
         if (r.count > 400) err.push(...(parallel ? [] : GSUTIL_NOTE_M));
         for (const o of r.sample.slice(-300)) err.push(`Removing gs://${b.name}/${o.name}#${o.generation ?? generation(o.created, 1)}...`);
-        err.push(`/ [${shortCount(r.count)}/${shortCount(r.count)} objects] 100% Done`, `Operation completed over ${shortCount(r.count)} objects.`);
+        for (const name of r.held) err.push(`AccessDeniedException: 403 ${holdMessage(b, name)}`);
+        err.push(`/ [${shortCount(r.count)}/${shortCount(r.count + r.held.length)} objects] ${r.held.length ? Math.floor(100 * r.count / (r.count + r.held.length)) : 100}% Done`, `Operation completed over ${shortCount(r.count)} objects.`);
         total += r.count;
-        ctx.event('storage.objects.delete', { bucket: b.name, count: r.count, bytes: r.bytes, prefix, before });
+        ctx.event('storage.objects.delete', { bucket: b.name, count: r.count, bytes: r.bytes, prefix, before, held: r.held.length });
+        if (r.held.length) { err.push(`CommandException: ${r.held.length} files/objects could not be removed.`); code = 1; continue; }
         if (removeBucket) { err.push(`Removing gs://${b.name}/...`); deleteBucket(b); }
       }
       void total;
@@ -661,10 +771,66 @@ export function makeGsutil(ctx) {
       }
       return { err: [`CommandException: Invalid subcommand "${verb}" for the "versioning" command.`], code: 1 };
     },
-    retention(args) {
+    retention(args, io) {
       const [verb, ...rest] = args;
       if (verb === 'get') { const b = bucket(parseUrl(rest[0] ?? '')?.bucket); if (!b) return missingBucket(rest[0]); return { out: [`gs://${b.name}/ has no Retention Policy.`] }; }
+      if (verb === 'temp' || verb === 'event') {
+        const [action, ...rawTargets] = rest;
+        if (action !== 'set' && action !== 'release') return { err: [`CommandException: Invalid subcommand "${action}" for the "retention ${verb}" command.`], code: 1 };
+        const targets = rawTargets.includes('-I') ? [...(io?.stdin ?? [])].map(l => l.trim()).filter(Boolean) : rawTargets.filter(a => !a.startsWith('-'));
+        if (!targets.length) return { err: ['CommandException: Wrong number of arguments for "retention" command.'], code: 1 };
+        const err = [];
+        let code = 0;
+        for (const url of targets) {
+          const u = parseUrl(url);
+          const b = u && bucket(u.bucket);
+          if (!b) { err.push(`BucketNotFoundException: 404 gs://${u?.bucket ?? url} bucket does not exist.`); code = 1; continue; }
+          const names = u.wildcard ? [...listObjects(st.catalog, b, u.path.replace(/\*+$/, ''))].map(o => o.name) : lookup(st.catalog, b, u.path) ? [u.path] : [];
+          if (!names.length) { err.push(`CommandException: No URLs matched: ${url}`); code = 1; continue; }
+          for (const name of names) {
+            const o = lookup(st.catalog, b, name);
+            err.push(`${action === 'set' ? 'Setting' : 'Releasing'} ${verb === 'temp' ? 'Temporary' : 'Event-Based'} Hold on gs://${b.name}/${name}#${o.generation}...`);
+            setHold(b, name, verb === 'temp' ? 'temporary' : 'eventBased', action === 'set');
+          }
+          time(0.2 * names.length);
+        }
+        return { err, code };
+      }
       return { err: [`CommandException: Invalid subcommand "${verb}" for the "retention" command.`], code: 1 };
+    },
+    kms(args) {
+      const [verb, ...rest] = args;
+      const opt = (f) => { const k = rest.indexOf(f); return k >= 0 ? rest[k + 1] : undefined; };
+      const kms = ctx.state.kms;
+      const agent = kms?.serviceAgent ?? `service-${st.projectNumber}@gs-project-accounts.iam.gserviceaccount.com`;
+      if (verb === 'serviceaccount') { time(0.4); return { out: [agent] }; }
+      if (verb === 'authorize') {
+        const key = opt('-k');
+        if (!key) return { err: ['CommandException: "authorize" subcommand requires a key to be specified with -k'], code: 1 };
+        if (!KMS_NAME.test(key)) return { err: [`CommandException: The provided key "${key}" is not a valid Cloud KMS key name.`], code: 1 };
+        if (kms && !kms.keys[key]) return { err: [`NotFoundException: 404 KMS key ${key} not found.`], code: 1 };
+        if (kms?.keys[key] && !kms.keys[key].writable) return { err: [`AccessDeniedException: 403 Permission 'cloudkms.cryptoKeys.setIamPolicy' denied on resource '${key}' (or it may not exist).`], code: 1 };
+        const already = kms?.keys[key]?.iam.some(x => x.role === ENCRYPTER && x.members.includes(`serviceAccount:${agent}`));
+        authorizeKey(ctx, key);
+        time(1.1);
+        return { out: already ? [`Project "${opt('-p') ?? project()}" already authorized to use key:`, key] : [`Authorized project ${opt('-p') ?? project()} to encrypt and decrypt with key:`, key] };
+      }
+      if (verb === 'encryption') {
+        const url = rest.find(a => a.startsWith('gs://'));
+        const b = url && bucket(parseUrl(url).bucket);
+        if (!b) return missingBucket(parseUrl(url ?? '')?.bucket ?? url);
+        const key = opt('-k');
+        if (rest.includes('-d')) { const problem = keyProblem(ctx, undefined, b.location); if (problem) return { err: [`${HTTP_EXC[problem.code]}: ${problem.code} ${problem.message}`], code: 1 }; delete b.kmsKey; ctx.event('storage.bucket.update', { bucket: b.name, kmsKey: null }); return { err: [`Clearing default encryption key for gs://${b.name}...`] }; }
+        if (key) {
+          const problem = keyProblem(ctx, key, b.location);
+          if (problem) return { err: [`${HTTP_EXC[problem.code]}: ${problem.code} ${problem.message}`], code: 1 };
+          b.kmsKey = key; b.metageneration++;
+          ctx.event('storage.bucket.update', { bucket: b.name, kmsKey: key });
+          return { err: [`Setting default KMS key for bucket gs://${b.name}/...`] };
+        }
+        return { out: b.kmsKey ? [`Default encryption key for gs://${b.name}:`, b.kmsKey] : [`Bucket gs://${b.name} has no default encryption key`] };
+      }
+      return { err: [`CommandException: Invalid subcommand "${verb}" for the "kms" command.`], code: 1 };
     },
     lifecycle(args) {
       const [verb, ...rest] = args;
@@ -705,7 +871,8 @@ export function makeGsutil(ctx) {
         const o = lookup(catalog(), b, u.path);
         if (!o) return { out, err: [`No URLs matched ${url}`], code: 1 };
         time(0.2);
-        out.push(`${url}:`, `    Creation time:          ${GMT(o.created)}`, `    Update time:            ${GMT(o.created)}`, `    Storage class:          ${b.storageClass}`, `    Content-Length:         ${o.size}`, `    Content-Type:           ${o.type ?? 'image/jpeg'}`, `    Hash (crc32c):          ${crc(o.id)}`, `    Hash (md5):             ${md5(o.id)}`, `    ETag:                   ${Buffer.from(o.generation).toString('base64').slice(0, 14)}EAE=`, `    Generation:             ${o.generation}`, `    Metageneration:         1`);
+        const h = holdOf(b, o.name);
+        out.push(`${url}:`, `    Creation time:          ${GMT(o.created)}`, `    Update time:            ${GMT(h?.at ?? o.created)}`, `    Storage class:          ${classOf(o, b)}`, ...(b.kmsKey ? [`    KMS key:                ${b.kmsKey}/cryptoKeyVersions/1`] : []), ...(h?.temporary ? ['    Temporary Hold:         Enabled'] : []), ...(h?.eventBased ? ['    Event-Based Hold:       Enabled'] : []), `    Content-Length:         ${o.size}`, `    Content-Type:           ${o.type ?? 'image/jpeg'}`, `    Hash (crc32c):          ${crc(o.id)}`, `    Hash (md5):             ${md5(o.id)}`, `    ETag:                   ${Buffer.from(o.generation).toString('base64').slice(0, 14)}EAE=`, `    Generation:             ${o.generation}`, `    Metageneration:         ${h ? 2 : 1}`);
       }
       return { out };
     },
@@ -727,7 +894,7 @@ export function makeGsutil(ctx) {
     for (const url of args.filter(a => !a.startsWith('-')).slice(0, -1)) {
       const u = parseUrl(url), b = u && bucket(u.bucket);
       const o = b && !u.wildcard && lookup(st.catalog, b, u.path);
-      if (o) { removeObject(b, o); err.push(`Removing ${url}...`); ctx.event('storage.objects.delete', { bucket: b.name, count: 1, prefix: o.name, via: 'mv' }); }
+      if (o) { err.push(`Removing ${url}...`); if (removeObject(b, o) < 0) err.push(`AccessDeniedException: 403 ${holdMessage(b, o.name)}`); else ctx.event('storage.objects.delete', { bucket: b.name, count: 1, prefix: o.name, via: 'mv' }); }
       else err.push(...(commands.rm(['-r', url], io, parallel).err ?? []));
     }
     return { ...r, err };
@@ -808,7 +975,9 @@ export function makeGsutil(ctx) {
       if (flags.has('L')) {
         yield `gs://${b.name}/${o.name}:`;
         yield `    Creation time:          ${GMT(o.created)}`;
-        yield `    Storage class:          ${b.storageClass}`;
+        yield `    Storage class:          ${classOf(o, b)}`;
+        if (holdOf(b, o.name)?.temporary) yield '    Temporary Hold:         Enabled';
+        if (holdOf(b, o.name)?.eventBased) yield '    Event-Based Hold:       Enabled';
         yield `    Content-Length:         ${o.size}`;
         yield `    Content-Type:           ${o.type ?? 'image/jpeg'}`;
         yield `    Generation:             ${o.generation}`;
@@ -843,7 +1012,7 @@ export function makeGsutil(ctx) {
       `	Lifecycle configuration:	${b.lifecycle.length ? 'Present' : 'None'}`,
       '	Requester Pays enabled:		None',
       ...(Object.keys(b.labels).length ? ['	Labels:', ...JSON.stringify(b.labels, null, 2).split('\n').map(l => `		${l}`)] : ['	Labels:				None']),
-      '	Default KMS key:		None',
+      `	Default KMS key:		${b.kmsKey ?? 'None'}`,
       `	Time created:			${GMT(b.created)}`,
       `	Time updated:			${GMT(b.updated)}`,
       `	Metageneration:			${b.metageneration}`,
@@ -901,10 +1070,12 @@ export function makeGsutil(ctx) {
         if (exact) {
           const name = d.path === '' || d.path.endsWith('/') ? dstDir + s.path.split('/').pop() : d.path;
           time(0.4);
-          dst.objects.set(name, { size: exact.size, created: Math.floor(ctx.at().getTime() / 1000), id: exact.id, type: exact.type, generation: generation(Math.floor(ctx.at().getTime() / 1000), 5) });
+          if (holdOf(dst, name) && lookup(st.catalog, dst, name)) { err.push(tool === 'gsutil' ? `AccessDeniedException: 403 ${holdMessage(dst, name)}` : `ERROR: (gcloud.storage.cp) HTTPError 403: ${holdMessage(dst, name)}`); code = 1; continue; }
+          dst.objects.set(name, { size: exact.size, created: Math.floor(ctx.at().getTime() / 1000), id: exact.id, type: exact.type, generation: generation(Math.floor(ctx.at().getTime() / 1000), 5), cls: dst.storageClass });
           err.push(tool === 'gsutil' ? `Copying ${src} [Content-Type=${exact.type}]...` : `Copying ${src} to gs://${dst.name}/${name}`);
           copied++; bytes += exact.size;
-          ctx.event('storage.copy', { src: sb.name, dst: dst.name, count: 1, bytes: exact.size, srcPrefix: s.path, dstPrefix: name });
+          const srcCls = classOf(exact, sb);
+          ctx.event('storage.copy', { src: sb.name, dst: dst.name, count: 1, bytes: exact.size, srcPrefix: s.path, dstPrefix: name, classBytes: { [srcCls]: exact.size }, classCount: { [srcCls]: 1 }, dstClass: dst.storageClass });
           continue;
         }
         if (!recursive) { err.push(tool === 'gsutil' ? `Omitting prefix "gs://${sb.name}/${s.path}". (Did you mean to do cp -r?)` : `ERROR: (gcloud.storage.cp) Source URL gs://${sb.name}/${s.path} is a bucket or directory. Use --recursive.`); code = 1; continue; }
@@ -921,7 +1092,7 @@ export function makeGsutil(ctx) {
       const r = planned;
       ctx.after(Math.max(1, Math.round(listTime(planned.listedSrc) + copyTime(planned.copied, planned.bytes, parallel))), () => {
         const done = transfer(ctx, sb, srcPrefix, dst, dstPrefix, { asOf });
-        ctx.event('storage.copy', { src: sb.name, dst: dst.name, count: done.copied, bytes: done.bytes, srcPrefix, dstPrefix });
+        ctx.event('storage.copy', { src: sb.name, dst: dst.name, count: done.copied, bytes: done.bytes, srcPrefix, dstPrefix, classBytes: done.classBytes, classCount: done.classCount, dstClass: dst.storageClass, held: done.held.length });
       });
       copied += r.copied; bytes += r.bytes;
       for (const name of r.copySample) sample.push([sb.name, name.slice(dstPrefix.length), name]);
@@ -990,7 +1161,7 @@ export function makeGsutil(ctx) {
     if (dryRun) time(took);
     else ctx.after(Math.max(1, Math.round(took)), () => {
       const done = transfer(ctx, sb, srcPrefix, db, dstPrefix, { sync: true, prune, asOf });
-      ctx.event('storage.rsync', { src: sb.name, dst: db.name, srcPrefix, dstPrefix, count: done.copied, bytes: done.bytes, deleted: done.deleted, recursive: true, prune, dryRun });
+      ctx.event('storage.rsync', { src: sb.name, dst: db.name, srcPrefix, dstPrefix, count: done.copied, bytes: done.bytes, deleted: done.deleted, recursive: true, prune, dryRun, classBytes: done.classBytes, classCount: done.classCount, dstClass: db.storageClass, held: done.held.length });
       if (done.deleted) ctx.event('storage.objects.delete', { bucket: db.name, count: done.deleted, bytes: done.deletedBytes, prefix: dstPrefix, via: 'rsync' });
     });
     if (tool === 'gsutil') {
@@ -1013,7 +1184,7 @@ export function makeGsutil(ctx) {
   /** Server-side rewrites: about 1,200 objects a second in parallel, one at a time about 12. */
   const copyTime = (n, bytes, parallel) => (parallel ? Math.max(n / 1200, bytes / 1.6e9) : Math.max(n / 12, bytes / 6.4e7));
 
-  function createBucket(name, { location, cls, ubla, project: proj, pap }, tool) {
+  function createBucket(name, { location, cls, ubla, project: proj, pap, kmsKey }, tool) {
     const fail = (message) => ({ error: tool === 'gsutil' ? message.gsutil : message.gcloud });
     if (!name || !VALID_NAME.test(name) || name.includes('..') || name.startsWith('goog')) return fail({ gsutil: `BadRequestException: 400 Invalid bucket name: '${name}'`, gcloud: `ERROR: (gcloud.storage.buckets.create) HTTPError 400: Invalid bucket name: '${name}'` });
     if (st.buckets[name] || st.taken.has(name)) return fail({ gsutil: `ServiceException: 409 A Cloud Storage bucket named '${name}' already exists. Try another name. Bucket names must be globally unique across all Google Cloud projects, including those outside of your organization.`, gcloud: `ERROR: (gcloud.storage.buckets.create) HTTPError 409: The requested bucket name is not available. The bucket namespace is shared by all users of the system. Please select a different name and try again.` });
@@ -1022,11 +1193,22 @@ export function makeGsutil(ctx) {
     // The organization enforces uniform bucket-level access and public access prevention.
     if (!ubla) return fail({ gsutil: `PreconditionException: 412 Request violates constraint 'constraints/storage.uniformBucketLevelAccess'`, gcloud: `ERROR: (gcloud.storage.buckets.create) HTTPError 412: Request violates constraint 'constraints/storage.uniformBucketLevelAccess'` });
     if (proj !== ctx.state.gcloud.project && !ctx.state.gcloud.projects.some(p => p.id === proj)) return fail({ gsutil: `AccessDeniedException: 403 ${ctx.state.gcloud.account} does not have storage.buckets.create access to the Google Cloud project. Permission 'storage.buckets.create' denied on resource (or it may not exist).`, gcloud: `ERROR: (gcloud.storage.buckets.create) HTTPError 403: ${ctx.state.gcloud.account} does not have storage.buckets.create access to the Google Cloud project. Permission 'storage.buckets.create' denied on resource (or it may not exist).` });
+    const keyError = keyProblem(ctx, kmsKey, loc);
+    if (keyError) return fail({ gsutil: `${HTTP_EXC[keyError.code]}: ${keyError.code} ${keyError.message}`, gcloud: `ERROR: (gcloud.storage.buckets.create) HTTPError ${keyError.code}: ${keyError.message}` });
     const b = makeBucket(ctx, { name, project: proj, location: loc, storageClass: cls || 'STANDARD', ubla: true, pap: pap === 'enforced' ? 'enforced' : 'enforced' });
+    if (kmsKey) b.kmsKey = kmsKey;
     st.buckets[name] = b;
-    ctx.event('storage.bucket.create', { bucket: name, location: loc, project: proj });
+    ctx.event('storage.bucket.create', { bucket: name, location: loc, project: proj, kmsKey: kmsKey ?? null, storageClass: b.storageClass });
     time(1.5);
     return { bucket: b };
+  }
+  function setHold(b, name, kind, on) {
+    b.holds ??= new Map();
+    const h = b.holds.get(name) ?? { temporary: false, eventBased: false };
+    if (h[kind] === on) return;
+    h[kind] = on; h.at = Math.floor(ctx.at().getTime() / 1000);
+    if (h.temporary || h.eventBased) b.holds.set(name, h); else b.holds.delete(name);
+    ctx.event(on ? 'storage.hold.set' : 'storage.hold.release', { bucket: b.name, name, kind });
   }
   function deleteBucket(b) {
     delete st.buckets[b.name];
@@ -1099,7 +1281,7 @@ export function makeGsutil(ctx) {
       return { err: ['ServiceException: 503 We encountered an internal error. Please try again.'], code: 1 };
     }
   };
-  return { gsutil, commands, internals: { createBucket, deleteBucket, bind, unbind, policyJson, setPolicy, addNotification, copy, sync, listing, childNames, countUnder, bucketLong, roleAlias } };
+  return { gsutil, commands, internals: { createBucket, deleteBucket, bind, unbind, policyJson, setPolicy, addNotification, copy, sync, listing, childNames, countUnder, bucketLong, roleAlias, setHold } };
 }
 /** The rest of the project's Compute Engine inventory, for the `list` commands an operator looks around with. */
 const ZONES = ['us-central1-a', 'us-central1-b', 'us-central1-c', 'us-central1-f', 'us-east1-b', 'us-east1-c', 'us-east1-d', 'us-west1-a', 'us-west1-b', 'europe-west1-b', 'europe-west1-c', 'europe-west1-d', 'europe-west2-a', 'europe-west3-a', 'europe-west4-a', 'asia-east1-a'];
@@ -1131,7 +1313,7 @@ export function makeStorageGroups(ctx) {
   const st = ctx.state.storage;
   const bucketOf = (url) => st.buckets[parseUrl(url ?? '')?.bucket ?? ''];
   const describe = (b) => ({
-    creation_time: ISO_OFF(b.created), default_storage_class: b.storageClass, location: b.location, location_type: b.locationType,
+    creation_time: ISO_OFF(b.created), ...(b.kmsKey ? { default_kms_key: b.kmsKey } : {}), default_storage_class: b.storageClass, location: b.location, location_type: b.locationType,
     metageneration: b.metageneration, name: b.name, public_access_prevention: b.pap,
     soft_delete_policy: { effectiveTime: ISOZ(b.created), retentionDurationSeconds: String(b.softDelete) },
     storage_url: `gs://${b.name}/`, uniform_bucket_level_access: b.ubla, update_time: ISO_OFF(b.updated),
@@ -1161,7 +1343,7 @@ export function makeStorageGroups(ctx) {
       }
       if (verb === 'create') {
         const name = parseUrl(target ?? '')?.bucket;
-        const r = internals.createBucket(name, { location: g.flag('location') ?? g.flag('l') ?? 'US', cls: String(g.flag('default-storage-class') ?? 'STANDARD').toUpperCase(), ubla: g.has('uniform-bucket-level-access') || g.has('b'), project: g.project, pap: g.flag('public-access-prevention') }, 'gcloud');
+        const r = internals.createBucket(name, { location: g.flag('location') ?? g.flag('l') ?? 'US', cls: String(g.flag('default-storage-class') ?? g.flag('c') ?? g.flag('s') ?? 'STANDARD').toUpperCase(), ubla: g.has('uniform-bucket-level-access') || g.has('b'), project: g.project, pap: g.flag('public-access-prevention'), kmsKey: typeof g.flag('default-encryption-key') === 'string' ? g.flag('default-encryption-key') : typeof g.flag('k') === 'string' ? g.flag('k') : undefined }, 'gcloud');
         if (r.error) return { err: [`Creating gs://${name}/...`, r.error], code: 1 };
         return { err: [`Creating gs://${name}/...`] };
       }
@@ -1178,6 +1360,17 @@ export function makeStorageGroups(ctx) {
         if (g.has('versioning')) b.versioning = true;
         if (g.has('no-versioning')) b.versioning = false;
         if (g.has('uniform-bucket-level-access')) b.ubla = true;
+        if (typeof g.flag('default-encryption-key') === 'string') {
+          const problem = keyProblem(ctx, g.flag('default-encryption-key'), b.location);
+          if (problem) return { err: [`Updating gs://${b.name}/...`, `ERROR: (gcloud.storage.buckets.update) HTTPError ${problem.code}: ${problem.message}`], code: 1 };
+          b.kmsKey = g.flag('default-encryption-key');
+        }
+        if (g.has('clear-default-encryption-key')) {
+          const problem = keyProblem(ctx, undefined, b.location);
+          if (problem) return { err: [`Updating gs://${b.name}/...`, `ERROR: (gcloud.storage.buckets.update) HTTPError ${problem.code}: ${problem.message}`], code: 1 };
+          delete b.kmsKey;
+        }
+        if (typeof g.flag('default-storage-class') === 'string') b.storageClass = g.flag('default-storage-class').toUpperCase();
         if (typeof g.flag('update-labels') === 'string') for (const pair of g.flag('update-labels').split(',')) { const [k, v] = pair.split('='); b.labels[k] = v; }
         if (g.has('location')) return g.error('unrecognized arguments: --location');
         b.metageneration++;
@@ -1231,6 +1424,19 @@ export function makeStorageGroups(ctx) {
         }
       }
       return g.error(`Invalid choice: '${verb ?? ''}'.`, 2);
+    }
+    if (sub === 'service-agent') {
+      const kms = ctx.state.kms;
+      const agent = kms?.serviceAgent ?? `service-${st.projectNumber}@gs-project-accounts.iam.gserviceaccount.com`;
+      const key = g.flag('authorize-cmek');
+      if (typeof key === 'string') {
+        if (kms && !kms.keys[key]) return g.error(`HTTPError 404: KMS key ${key} not found.`);
+        if (kms?.keys[key] && !kms.keys[key].writable) return g.error(`HTTPError 403: Permission 'cloudkms.cryptoKeys.setIamPolicy' denied on resource '${key}' (or it may not exist).`);
+        authorizeKey(ctx, key);
+        pause(ctx, 1);
+        return { err: [`Authorized project ${g.project} to encrypt and decrypt with key:`, key] };
+      }
+      return { out: [agent] };
     }
     if (sub === 'ls') {
       const urls = pos.filter(a => a.startsWith('gs://'));
@@ -1289,20 +1495,56 @@ export function makeStorageGroups(ctx) {
     }
     if (sub === 'objects') {
       const [verb] = rest;
-      const url = pos.slice(1).find(a => a.startsWith('gs://'));
+      const url = pos.slice(1).find(a => a.startsWith('gs://')) ?? Object.values(g.flags).find(v => typeof v === 'string' && v.startsWith('gs://'));
       const u = parseUrl(url ?? '');
       const b = u && st.buckets[u.bucket];
       if (!b) return g.error(`gs://${u?.bucket ?? ''} not found: 404.`);
-      const toDoc = (o) => ({ bucket: b.name, content_type: o.type ?? 'image/jpeg', crc32c_hash: crc(o.id), creation_time: ISO_OFF(o.created), generation: o.generation, md5_hash: md5(o.id), metageneration: 1, name: o.name, size: o.size, storage_class: b.storageClass, storage_url: `gs://${b.name}/${o.name}#${o.generation}`, update_time: ISO_OFF(o.created) });
+      const toDoc = (o) => ({ bucket: b.name, content_type: o.type ?? 'image/jpeg', crc32c_hash: crc(o.id), creation_time: ISO_OFF(o.created), ...(holdOf(b, o.name)?.eventBased ? { event_based_hold: true } : {}), generation: o.generation, ...(b.kmsKey ? { kms_key: `${b.kmsKey}/cryptoKeyVersions/1` } : {}), md5_hash: md5(o.id), metageneration: holdOf(b, o.name) ? 2 : 1, name: o.name, size: o.size, storage_class: classOf(o, b), storage_url: `gs://${b.name}/${o.name}#${o.generation}`, ...(holdOf(b, o.name)?.temporary ? { temporary_hold: true } : {}), update_time: ISO_OFF(holdOf(b, o.name)?.at ?? o.created) });
       if (verb === 'describe') {
         const o = lookup(st.catalog, b, u.path);
         if (!o) return g.error(`gs://${b.name}/${u.path} not found: 404.`);
         return g.print(toDoc(o));
       }
+      if (verb === 'update') {
+        // gcloud's parser here does not know the hold switches take no value, so a URL written
+        // after one of them arrives as that flag's value; it is still an operand.
+        const HOLD_FLAGS = ['temporary-hold', 'no-temporary-hold', 'event-based-hold', 'no-event-based-hold'];
+        const urls = [...pos.slice(1).filter(a => a.startsWith('gs://')), ...HOLD_FLAGS.map(f => g.flag(f)).filter(v => typeof v === 'string' && v.startsWith('gs://'))];
+        const err = [];
+        for (const url of urls) {
+          const t = parseUrl(url), tb = st.buckets[t.bucket];
+          if (!tb) return g.error(`gs://${t.bucket} not found: 404.`);
+          const names = t.wildcard ? [...listObjects(st.catalog, tb, t.path.replace(/\*+$/, ''))].map(o => o.name) : lookup(st.catalog, tb, t.path) ? [t.path] : [];
+          if (!names.length) return g.error(`The following URLs matched no objects or files:\n-${url}`);
+          for (const name of names) {
+            const o = lookup(st.catalog, tb, name);
+            err.push(`Patching gs://${tb.name}/${name}#${o.generation}...`);
+            if (g.has('temporary-hold')) internals.setHold(tb, name, 'temporary', true);
+            if (g.has('no-temporary-hold')) internals.setHold(tb, name, 'temporary', false);
+            if (g.has('event-based-hold')) internals.setHold(tb, name, 'eventBased', true);
+            if (g.has('no-event-based-hold')) internals.setHold(tb, name, 'eventBased', false);
+          }
+          pause(ctx, 0.2 * names.length);
+        }
+        err.push(`  Completed ${urls.length}`);
+        return { err };
+      }
       if (verb === 'list') {
         const prefix = u.path.replace(/\*+$/, '');
         const n = internals.countUnder(b, prefix).next().value;
         pause(ctx, Math.ceil(n / 1000) * 0.12);
+        const filter = g.flag('filter');
+        if (typeof filter === 'string') {
+          // Filtered on the server's side of this model: only matches are ever built, and a hold
+          // filter only has the held objects to look at.
+          const keep = filterOf(filter);
+          if (keep.error) return g.error(keep.error);
+          const pool = /hold/.test(filter) ? [...(b.holds?.keys() ?? [])].filter(nm => nm.startsWith(prefix)).sort().map(nm => lookup(st.catalog, b, nm)).filter(Boolean) : listObjects(st.catalog, b, prefix);
+          const matched = [];
+          for (const o of pool) { const d = toDoc(o); if (keep(d)) matched.push(d); }
+          if (g.flag('format')) return g.print(matched);
+          return { out: matched.flatMap((d, k) => [...(k ? ['---'] : []), ...yaml(d)]) };
+        }
         const limit = Number(g.flag('limit') ?? Infinity);
         const selected = take(listObjects(st.catalog, b, prefix), limit);
         if (g.flag('format')) return g.print([...selected].map(toDoc));

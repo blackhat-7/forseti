@@ -190,7 +190,7 @@ export function classify(text: string, exitCode: number | null): Trial['status']
 export async function runClaudeCode(
   work: string, scratch: string, model: ModelConfig, task: Task, options: RunOptions, trial: Trial,
   signal: AbortSignal, notify: (phase: string) => void, record: (event: unknown) => void, live: (event: LiveEvent) => void = () => {},
-  world?: { module: string; report: string },
+  world?: { module: string; report: string; seed: number },
 ): Promise<void> {
   const root = realpathSync(work);
   // Both files live beside the workspace, never inside it: anything under `work` is part of the
@@ -201,7 +201,7 @@ export async function runClaudeCode(
   const server = world ? TERMINAL.server : MCP_SERVER;
   writeFileSync(configPath, JSON.stringify({ mcpServers: { [server]: {
     command: process.execPath,
-    args: [fileURLToPath(new URL('mcpserver.ts', import.meta.url)), root, tracePath, ...(world ? [world.module, world.report] : []), ...(task.tools ? [`--calls=${toolLimit(task)}`] : [])],
+    args: [fileURLToPath(new URL('mcpserver.ts', import.meta.url)), root, tracePath, ...(world ? [world.module, world.report, `--seed=${world.seed}`] : []), ...(task.tools ? [`--calls=${toolLimit(task)}`] : [])],
   } } }), { mode: 0o600 });
   const prompt = world ? task.prompt : `${task.prompt}\n\nWork only inside this directory. Public files:\n${Object.keys(files(root)).join('\n') || '(empty)'}`;
   const args = claudeCodeArgs(model.model, options.maxTurns, configPath, world ? `Read,Write,Edit,Glob,Grep,mcp__${TERMINAL.server}__${TERMINAL.name}` : CLAUDE_CODE_ALLOWED);

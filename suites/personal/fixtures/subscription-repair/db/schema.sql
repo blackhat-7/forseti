@@ -5,6 +5,7 @@ CREATE TABLE accounts (
     email       text NOT NULL UNIQUE,
     name        text,
     country     text,
+    provider_customer_id  text UNIQUE,
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 
@@ -19,6 +20,7 @@ CREATE TABLE subscriptions (
     current_period_end  timestamptz NOT NULL,
     cancelled_at        timestamptz,
     cancel_reason       text,
+    provider_subscription_id  text UNIQUE,
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now()
 );
@@ -32,6 +34,7 @@ CREATE TABLE subscription_events (
     from_status      text,
     to_status        text NOT NULL,
     reason           text,
+    metadata         jsonb,
     created_at       timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX subscription_events_subscription_id_idx ON subscription_events (subscription_id);
@@ -49,6 +52,23 @@ CREATE TABLE email_outbox (
     sent_at          timestamptz
 );
 CREATE INDEX email_outbox_status_created_at_idx ON email_outbox (status, created_at);
+
+CREATE TABLE charges (
+    id                 bigserial PRIMARY KEY,
+    account_id         bigint NOT NULL REFERENCES accounts(id),
+    subscription_id    bigint NOT NULL REFERENCES subscriptions(id),
+    amount_cents       integer NOT NULL,
+    currency           text NOT NULL DEFAULT 'usd',
+    status             text NOT NULL CONSTRAINT charges_status_check
+                       CHECK (status IN ('succeeded', 'failed', 'refunded')),
+    provider_charge_id text,
+    failure_code       text,
+    period_start       timestamptz,
+    period_end         timestamptz,
+    created_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX charges_subscription_id_idx ON charges (subscription_id);
+CREATE INDEX charges_created_at_idx ON charges (created_at);
 
 CREATE TABLE schema_migrations (
     version     text PRIMARY KEY,

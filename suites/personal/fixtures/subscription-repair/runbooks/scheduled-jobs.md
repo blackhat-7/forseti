@@ -7,6 +7,7 @@ Definitions live in `deploy/scheduler.yaml`.
 | --- | --- | --- |
 | `plus-renewal-sync` | every 20 min (`*/20 * * * *`) | Cloud Run job `plus-renewal-sync` |
 | `mailer-dispatch` | `15,45 * * * *` | Cloud Run service `mailer`, `POST /dispatch` |
+| `billing-renewals` | `30 * * * *` | Cloud Run service `billing-api`, `POST /internal/renew-due` |
 | `billing-retry` | `5 * * * *` | Cloud Run service `billing-api`, `POST /internal/retry-failed-payments` |
 | `invoice-generator` | `0 2 * * *` | Cloud Run job `invoice-generator` |
 
@@ -16,6 +17,10 @@ Useful commands:
     gcloud scheduler jobs describe JOB --location=us-central1
     gcloud run jobs executions list --job=JOB --region=us-central1
     gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="JOB"' --limit=50
+
+`billing-renewals` charges every `active` subscription with `auto_renew` whose `current_period_end`
+has passed, through Payrift, and moves the period on; `billing-retry` retries failed charges for
+`past_due` ones (dunning). See `docs/billing-model.md`.
 
 Pausing a scheduler job stops future runs; an execution already in progress finishes.
 Remember to resume anything you pause, and say so in #billing-ops.

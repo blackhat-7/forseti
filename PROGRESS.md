@@ -13,8 +13,8 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **The rebuilt hard tier separates, on one try each.** `lock-refresh` and `sheet-eval`: Haiku ✗, Sonnet ✗, Opus ✓. `crew-schedule` and `log-query`: Haiku ✗, Sonnet ✓. Detail in `docs/transcript-research.md`. Not yet a measurement.
 - **The leaderboard is strict.** Only tries under today's fingerprints and default settings count. It holds Claude Sonnet 5.5 and Haiku 4.5 (56 tries each) and local Qwen (28).
 - **A run only makes missing tries.** Same model + same task and harness submission fingerprints + same settings = already done; `--fresh` forces a rerun. A grading-only change is regraded from saved files (`npm start -- regrade`, also run before every run).
-- **Three production-ops tasks on a simulated estate** (`checkout-hotfix`, `subscription-repair`, `bucket-residency`). A task's `world` module answers gcloud/kubectl/psql/gsutil in-process; nothing real is reachable, and the model is not told. Engine: `suites/personal/private/ops/`. Contract: `docs/suite-contract.md#world-tasks`. Pilot (one try each, now stale after shell fixes): Sonnet 2/3 solved, Haiku 0/3.
-- Battery on Linux: `npm run check` clean · `npm test` **90/90** · `npm run test:suite` passes · `test:terminal`, `test:judge` not run this session.
+- **Four production-ops tasks on a simulated estate** (`checkout-hotfix`, `subscription-repair`, `bucket-residency`, `service-web`). Each try gets a variant (seed = try − 1) and reports its harm. A task's `world` module answers gcloud/kubectl/psql/gsutil in-process; nothing real is reachable, and the model is not told. Engine: `suites/personal/private/ops/`. Contract: `docs/suite-contract.md#world-tasks`. Pilots are stale after the scenario rework; the last Qwen run (before it) showed 0 simulation tells, down from 96.
+- Battery on Linux: `npm run check` clean · `npm test` **92/92** · `npm run test:suite` passes · `test:terminal`, `test:judge` not run this session.
 
 ## Done this session
 
@@ -26,6 +26,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## Gotchas
 
+- **subscription-repair holds ~370 MB of SQLite per world.** Several ops tries at once need memory.
 - **A world's outputs must read like the real tool, byte for byte.** Unknown commands get the real tool's error, never an invented success. `ONLY=<task> npm run test:suite` checks one task's controls.
 - **`render(w, 'body')` reuses the last frame drawn at that width.** A test that changes state must render the header (or `'all'`) first.
 - **`parallel` in forseti.json sets tries at once (default 1).** Local-server models still run one at a time.

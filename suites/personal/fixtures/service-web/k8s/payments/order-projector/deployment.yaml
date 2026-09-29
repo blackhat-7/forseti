@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-projector
+  namespace: payments
+  annotations:
+    # ORD-331: rollout paused at 50% until the orders-events backfill has rewritten the
+    # schema v3 messages still in the subscription. v1.8.2 pods read v3; v1.9.0 pods read v4 only.
+    # Do not resume or restart until orders confirms the backfill is done.
+    quillmart.com/rollout-note: "paused, see ORD-331"
+spec:
+  replicas: 6
+  paused: true
+  template:
+    spec:
+      containers:
+        - name: order-projector
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/order-projector:v1.9.0
+          env:
+            - name: SUBSCRIPTION
+              value: "order-projector-sub"
+            - name: MAX_SCHEMA
+              value: "4"

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-bff
+  namespace: web
+spec:
+  replicas: 10
+  template:
+    spec:
+      containers:
+        - name: web-bff
+          image: us-central1-docker.pkg.dev/quillmart-prod/services/web-bff:v8.3.1
+          env:
+            - name: CHECKOUT_URL
+              value: "http://checkout-api.checkout.svc.cluster.local:8080"
+            - name: SEARCH_URL
+              value: "http://search-api.search.svc.cluster.local:8080"
+            - name: UPSTREAM_TIMEOUT_MS
+              value: "8000"
+            - name: UPSTREAM_RETRIES
+              value: "1"
