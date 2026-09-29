@@ -1,361 +1,23 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { stripVTControlCharacters } from 'node:util';
 import {
   Input, SelectList, ProcessTerminal, TuiAltScreen, Text, ScrollView, VStack,
   matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi,
-  type Component, type Focusable,
+  type Component, type Focusable, type TuiMouseEvent,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { FINISHED, comparisonReport, levelsNote, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
+import { FINISHED, comparisonReport, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, outcome, scorecards } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { activeRunId, readRun } from './runner.ts';
 import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
+export { terminalText, terminalReport } from './ui/kit.ts';
+import { terminalText, plain, terminalReport, BACKDROP, accent, teal, green, amber, rose, muted, faint, SERIES, bold, theme, tabs, GRADED_ON, THINKING, JUDGE_FIELDS, LOCAL_ROW, TIMEOUTS, TURNS, PARALLEL, dot, nick, remaining, CARD, pill, cards, keyHints, padTo, duration, authLine, field, creditLine, count, tries, width_, pct, rateInk, MAX_TEXT, LIST_WIDTH, twoColumn, table } from './ui/kit.ts';
+import { comparisonPage, runLine } from './ui/board.ts';
+import { type Line, piChat, claudeChat } from './ui/live.ts';
 
-// Strip whole terminal strings first, then remaining controls (including bidi).
-export function terminalText(value: unknown): string {
-  return stripVTControlCharacters(String(value)
-    .replace(/(?:\x1b[P_^X]|[\x90\x98\x9e\x9f])[\s\S]*?(?:\x1b\\|\x9c|$)/g, ''))
-    .replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, '');
-}
-const plain = (value: unknown) => terminalText(value).replace(/\n/g, ' ');
-export function terminalReport(markdown: string): string {
-  let headers: string[] = [];
-  return terminalText(markdown).split('\n').flatMap(line => {
-    if (!line.startsWith('|')) { headers = []; return [line]; }
-    const cells = line.split(/(?<!\\)\|/).slice(1, -1).map(cell => cell.trim().replaceAll('\\|', '|'));
-    if (!headers.length) { headers = cells; return []; }
-    if (cells.every(cell => /^[-:]+$/.test(cell))) return [];
-    return [cells[0], ...cells.slice(1).map((cell, i) => `  ${headers[i + 1]}: ${cell}`), ''];
-  }).join('\n');
-}
-// Kanagawa Dragon: one dark base, one accent for anything interactive, and colour only where it
-// carries meaning. The variable names are the roles; the comments are the palette's own names.
-const ink = (r: number, g: number, b: number) => (s: string) => `\x1b[38;2;${r};${g};${b}m${s}\x1b[39m`;
-const BACKDROP = '\x1b[48;2;24;22;22m\x1b[38;2;197;201;197m'; // dragonBlack3 on dragonWhite
-const accent = ink(139, 164, 176); // dragonBlue2
-const teal = ink(142, 164, 162); // dragonAqua
-const green = ink(135, 169, 135); // dragonGreen2
-const amber = ink(196, 178, 138); // dragonYellow
-const rose = ink(196, 116, 110); // dragonRed
-const muted = ink(166, 166, 156); // dragonGray
-const faint = ink(115, 124, 115); // dragonAsh
-// One colour per model on the comparison chart, so a model reads as the same bar in every group.
-const SERIES = [accent, ink(137, 146, 167) /* dragonViolet */, green, ink(182, 146, 123) /* dragonOrange */, teal, rose];
-const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
-const theme = { selectedPrefix: accent, selectedText: accent, description: muted, scrollInfo: faint, noMatch: amber };
-const tabs = ['Home', 'Models', 'Tests', 'Runs', 'Settings'];
-/** Plain names for what a test is graded on; the dimension ids are rubric vocabulary. */
-const GRADED_ON: Record<Task['dimensions'][number], string> = { correctness: 'correct answer', instructions: 'output format', tools: 'tool use', design: 'code design', hygiene: 'safe-code gate' };
-const THINKING: ModelConfig['thinking'][] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-const JUDGE_FIELDS = ['Reviewer', 'Model', 'Thinking', 'Rounds'];
-/** Settings rows: the reviewer fields, then the local server address. */
-const LOCAL_ROW = JUDGE_FIELDS.length;
-/** Per-trial time limit. A ladder rather than free entry: these are the values worth choosing. */
-const TIMEOUTS = [30, 60, 90, 120, 180, 300, 600];
-/** Tool-call turns per trial. Too low censors outcomes; too high spends plan quota on stragglers. */
-const TURNS = [6, 12, 20, 30, 50];
-/** Tries a run makes at once. Saved to your config; local-server models still go one at a time. */
-const PARALLEL = [1, 2, 4, 8];
-const dot = (on: boolean) => (on ? green('●') : faint('○'));
-/** "2026-09-20T14-31-08-443Z-6d55ccee" reads as "09-20 14:31"; anything else is shown as it is. */
-const runWhen = (id: string) => (/^\d{4}-\d{2}-\d{2}T/.test(id) ? `${id.slice(5, 10)} ${id.slice(11, 13)}:${id.slice(14, 16)}` : id);
-/** "Claude sonnet · via Claude Code / 14-31-08" is provenance; a column needs "Claude sonnet". */
-const nick = (label: string) => plain(label).split(' / ')[0]!.split(' · ')[0]!.trim();
-/** One line of a try's conversation: something the model said, or a tool it called and how that went. */
-type Line = { say?: string; tool?: string; target?: string; failed?: boolean };
-/** The file, command or pattern a tool call was about, in a few words. */
-function target(input: Record<string, unknown> = {}): string {
-  const value = input.file_path ?? input.path ?? input.command ?? input.pattern ?? input.code ?? input.source ?? '';
-  const text = plain(String(value)).trim();
-  return /^[\w./-]+$/.test(text) && text.includes('/') ? text.split('/').at(-1)! : text.split('\n')[0]!;
-}
-/** The Pi agent logs each reply and each tool call to the trial's events.jsonl as they happen. */
-function piChat(events: { type?: string; text?: string; event?: { tool?: string; args?: Record<string, unknown>; ok?: boolean } }[]): Line[] {
-  return events.flatMap((e): Line[] => e.type === 'assistant' && e.text?.trim() ? [{ say: e.text.trim() }]
-    : e.type === 'tool' && e.event?.tool ? [{ tool: e.event.tool, target: target(e.event.args), failed: e.event.ok === false }] : []);
-}
-/**
- * Claude Code writes its own session transcript, keyed by the working folder, while it works; the
- * trial's own log has only its start and end. Read-only, and only to show the owner their run.
- */
-function claudeChat(work: string): Line[] {
-  const folder = join(process.env.CLAUDE_CONFIG_DIR ?? join(process.env.HOME ?? '', '.claude'), 'projects', work.replace(/[^A-Za-z0-9]/g, '-'));
-  try {
-    const file = readdirSync(folder).filter(f => f.endsWith('.jsonl')).map(f => join(folder, f)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
-    if (!file) return [];
-    const lines: Line[] = [];
-    for (const raw of readFileSync(file, 'utf8').split('\n')) {
-      let entry: { type?: string; message?: { content?: unknown } };
-      try { entry = JSON.parse(raw); } catch { continue; }
-      if (!Array.isArray(entry.message?.content)) continue;
-      for (const block of entry.message.content as { type: string; text?: string; name?: string; input?: Record<string, unknown>; is_error?: boolean }[]) {
-        if (entry.type === 'assistant' && block.type === 'text' && block.text?.trim()) lines.push({ say: block.text.trim() });
-        else if (entry.type === 'assistant' && block.type === 'tool_use') lines.push({ tool: (block.name ?? '').replace(/^mcp__\w+__/, ''), target: target(block.input) });
-        else if (block.type === 'tool_result' && block.is_error) { const last = lines.findLast(l => l.tool); if (last) last.failed = true; }
-      }
-    }
-    return lines;
-  } catch { return []; }
-}
-/** "under a minute", "46 min", "1 h 20 min": an estimate, so no false precision. */
-function remaining(ms: number): string {
-  const m = Math.round(ms / 60_000);
-  return m < 1 ? 'under a minute' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
-}
-/** Marks a line as the start of a card: its title and right-hand note follow. Never printed. */
-const CARD = '\u0000card\u0000';
-const pill = (s: string) => `\x1b[48;2;139;164;176m\x1b[38;2;24;22;22m\x1b[1m${s}\x1b[22m\x1b[39m\x1b[49m`;
-/**
- * Draws a rounded card around each section a heading opened, trimming blank lines at its edges
- * and leaving one blank line between cards. Lines outside any card pass through unchanged.
- */
-function cards(lines: string[], outer: number, boxed = true): string[] {
-  const out: string[] = [];
-  let open: { title: string; right: string; body: string[] } | undefined;
-  const edge = (s: string) => faint(s);
-  const flush = () => {
-    if (!open) return;
-    const body = open.body.slice(open.body.findIndex(l => width_(l) > 0));
-    while (body.length && !width_(body.at(-1)!)) body.pop();
-    if (!open.body.some(l => width_(l) > 0)) body.length = 0;
-    while (out.length && !width_(out.at(-1)!)) out.pop();
-    if (out.length) out.push('');
-    if (!boxed) {
-      out.push(truncateToWidth(bold(accent(open.title)) + (open.right ? faint(`  ${open.right}`) : ''), outer), ...body);
-      open = undefined;
-      return;
-    }
-    let title = truncateToWidth(open.title, Math.max(1, outer - 8)), right = open.right;
-    if (width_(title) + width_(right) + 9 > outer) right = '';
-    const fill = Math.max(1, outer - 5 - width_(title) - (right ? width_(right) + 2 : 0) - 1);
-    out.push(edge('╭─ ') + bold(accent(title)) + edge(` ${'─'.repeat(fill)}`) + (right ? ` ${muted(right)} ` : '') + edge('╮'));
-    for (const line of body) { const t = truncateToWidth(line, outer - 4); out.push(`${edge('│')} ${t}${' '.repeat(Math.max(0, outer - 4 - width_(t)))} ${edge('│')}`); }
-    out.push(edge(`╰${'─'.repeat(Math.max(0, outer - 2))}╯`));
-    open = undefined;
-  };
-  for (const line of lines) {
-    if (line.startsWith(CARD)) { flush(); const [title = '', right = ''] = line.slice(CARD.length).split('\u0000'); open = { title, right, body: [] }; }
-    else if (open) open.body.push(line);
-    else out.push(line);
-  }
-  flush();
-  return out;
-}
-/** "r run   P at once" → each key in the accent, its meaning faint, so the eye finds keys first. */
-function keyHints(text: string, width: number): string {
-  const items = text.split(/ {3,}/).filter(Boolean).map(item => { const [key = '', ...rest] = item.split(/ (?=[a-z(])/); return rest.length ? `${accent(key)} ${faint(rest.join(' '))}` : faint(key); });
-  let out = '';
-  for (const item of items) { const next = out ? `${out}   ${item}` : item; if (width_(next) > width) break; out = next; }
-  return out;
-}
-/** Truncates or pads to a column, so feed rows line up at any width. */
-function padTo(text: string, w: number): string {
-  const t = truncateToWidth(text, Math.max(1, w - 1));
-  return t + ' '.repeat(Math.max(0, w - width_(t)));
-}
-/** "45s", "4.2m", "1h 20m": short enough for a feed column, exact enough to plan around. */
-function duration(ms: number): string {
-  const s = ms / 1000;
-  return s < 60 ? `${Math.max(1, Math.round(s))}s` : s < 3600 ? `${(s / 60).toFixed(1)}m` : `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
-}
-function statusInk(status: string): (s: string) => string {
-  if (['passed', 'completed'].includes(status)) return green;
-  if (['failed', 'cancelled', 'interrupted'].includes(status)) return amber;
-  if (status === 'running') return accent;
-  return muted;
-}
-function billingInk(billing: AuthInfo['billing']): string {
-  if (billing === 'subscription') return teal('subscription');
-  if (billing === 'control') return faint('synthetic control');
-  if (billing === 'local') return teal('no charge');
-  return amber(billing);
-}
-/** Controls already say "synthetic control" in their mode; never print it twice. */
-function authLine(auth: AuthInfo): string {
-  const pill = auth.ready ? green('READY') : rose('NOT READY');
-  return auth.billing === 'control' ? `${pill}   ${faint(plain(auth.mode))}` : `${pill}   ${muted(plain(auth.mode))}   ${billingInk(auth.billing)}`;
-}
-/** Fixed label/value/hint columns so settings read as a table instead of ad-hoc spacing. */
-function field(label: string, value: string, hint: string): string {
-  const pad = (n: number) => ' '.repeat(Math.max(2, n));
-  return `${muted(label)}${pad(14 - label.length)}${value}${pad(14 - width_(value))}${faint(hint)}`;
-}
-/**
- * States in one line which credential every call will use. An API key is never implied: if one
- * would be used it is named here, before anything runs, and it still has to clear the billing
- * prompt afterwards.
- */
-function creditLine(entries: { label: string; auth: AuthInfo }[]): string {
-  const live = entries.filter(e => e.auth.billing !== 'control');
-  if (!live.length) return faint('Synthetic controls only. No model is called and no credential is used.');
-  const keyed = live.filter(e => ['metered', 'unknown'].includes(e.auth.billing));
-  if (!keyed.length) {
-    const local = live.filter(e => e.auth.billing === 'local').length;
-    const who = local === live.length ? 'Your own local server only' : local ? 'Subscription logins and your own local server' : 'Subscription logins only';
-    return teal(`${who} (${count(live.length, 'call site')}). No API key will be used.`);
-  }
-  return amber(`${count(keyed.length, 'call site')} would use a metered API key: ${keyed.map(e => e.label).join(', ')}`);
-}
-const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const tries = (n: number) => `${n} ${n === 1 ? 'try' : 'tries'}`;
-const width_ = (s: string) => visibleWidth(stripVTControlCharacters(s));
-const pct = (rate: number | null) => (rate === null ? 'n/a' : `${Math.round(rate * 100)}%`);
-const rateInk = (rate: number | null) => (rate === null ? faint : rate === 1 ? green : rate >= 0.5 ? amber : rose);
-/** Long prose stays readable on ultrawide terminals instead of running the full width. */
-const MAX_TEXT = 94;
-const LIST_WIDTH = 44;
-/** Side-by-side panes on wide terminals; stacked when there is not room for both. */
-function twoColumn(left: string[], right: string[], inner: number, leftWidth: number): string[] {
-  if (!right.length) return left;
-  if (inner < leftWidth + 32) return [...left, '', ...right];
-  return Array.from({ length: Math.max(left.length, right.length) }, (_, i) => {
-    // A faint rule between the list and its details keeps two columns from reading as one.
-    const cell = truncateToWidth(left[i] ?? '', leftWidth - 3);
-    return `${cell}${' '.repeat(Math.max(1, leftWidth - 2 - width_(cell)))}${faint('│')} ${right[i] ?? ''}`;
-  });
-}
-/**
- * Every table in the UI: a left-aligned name column, then right-aligned figures. Numbers in one
- * column line up under their heading, which is what makes three models readable at a glance.
- */
-function table(rows: string[][], widths: number[]): string[] {
-  return rows.map(cells => cells.map((cell, i) => {
-    const text = truncateToWidth(cell, widths[i]!);
-    const pad = ' '.repeat(Math.max(0, widths[i]! - width_(text)));
-    return i === 0 ? text + pad : pad + text;
-  }).join('  ').trimEnd());
-}
-/**
- * The comparison page. One page that answers, top to bottom: who is best, which gaps are real, and
- * where each model is strong or weak. Every table has the models as columns in rank order, so a
- * model is read down one column and a task or skill across one row.
- */
-function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnly = false): string[] {
-  const { cards: all, tasks, mixed } = scorecards(runs);
-  const ranked = ranking(all), cards = ranked.map(r => r.card);
-  const rivals = ranked.filter(r => r.rank !== null).map(r => r.card);
-  const tagged = harnesses(cards).length > 1;
-  const names = cards.map(c => plain(c.label));
-  const out: string[] = [];
-  const row = (text = '') => out.push(text);
-  const prose = (text: string, paint: (s: string) => string = s => s) =>
-    out.push(...new Text(terminalText(text), 0, 0).render(Math.max(12, Math.min(width, MAX_TEXT))).map(paint));
-  const pad = (text: string, w: number) => { const t = truncateToWidth(text, Math.max(1, w - 1)); return t + ' '.repeat(Math.max(0, w - width_(t))); };
-
-  // One line of context; the harness caveat is a clause on it, not a paragraph above the chart.
-  const caveat = tagged ? ' · different harnesses, so each gap includes the harness' : mixed ? ' · runs differ in settings, so not one controlled comparison' : '';
-  row(muted(`${cards.some(c => !c.synthetic) ? count(cards.filter(c => !c.synthetic).length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}`) + amber(caveat));
-  row();
-
-  // One chart answers the page's question: who is ahead, by how much, and at which difficulty.
-  // Coverage shows only where tasks are missing, so a full row stays just a bar and a number.
-  const cover = (n: number, total: number) => (n < total ? faint(` ${n}/${total}`) : '');
-  const nameW = Math.max(8, Math.min(34, Math.max(...names.map(width_)) + 2));
-  // A bar too short to read is dropped, so the percentage itself stays on screen on a narrow terminal.
-  const room = Math.min(30, width - 4 - nameW - 18), barW = room < 6 ? 0 : room;
-  const barLine = (i: number, lead: string, rate: number | null, tail: string) =>
-    lead + pad(names[i]!, nameW) + (barW ? (cards[i]!.synthetic ? faint : SERIES[i % SERIES.length]!)(bar(rate, barW)) + ' ' : '') + bold(pct(rate).padStart(4)) + tail;
-  const levels = levelsNote(cards);
-  row(bold('Overall') + (levels ? faint(`   ${levels}`) : ''));
-  for (const [i, { card, rank }] of ranked.entries()) {
-    // A control's answers are fixed, so a rerun spread would be a number about nothing.
-    // A rerun spread means nothing for a control, or for a model not ranked yet.
-    const error = card.synthetic || rank === null ? null : scoreError(card), graded = card.tasks.filter(t => t.rate !== null).length;
-    row(barLine(i, muted(String(rank ?? '–').padStart(2)) + '  ', card.score, faint(error === null ? '' : ` ±${Math.round(error * 100)}`)
-      + cover(graded, card.tasks.length) + (rank === null && !card.synthetic ? faint(' · too few tasks to rank') : '') + (card.notRun ? amber(` · ${card.notRun} not run`) : '')));
-  }
-  const tiers = cards.map(c => byTier(c, tasks));
-  for (const [t, { tier, ids }] of (tiers[0]?.length ? tierSlices(tasks) : []).entries()) {
-    row(bold(TIER_NAME[tier]) + faint(` · ${count(ids.size, 'task')}`));
-    for (const [i, rows] of tiers.entries()) row(barLine(i, '    ', rows[t]!.rate, cover(rows[t]!.tasks, rows[t]!.total)));
-  }
-  if (chartOnly) return out;
-  const calls = verdicts(ranked), stalls = cards.map(stallNote).filter(n => n !== null);
-  if (calls.length || stalls.length) {
-    out.push(`${CARD}Verdict\u0000a gap counts only when it beats two standard errors`);
-    for (const call of calls) prose(call);
-    for (const note of stalls) prose(note, amber);
-  }
-  row();
-
-  // One column per model, wide enough for "0/3 ✗ (33%)"; a long model name wraps in its heading.
-  // When there is no room for a label beside the columns, every label gets its own line above its
-  // cells, so the figures keep their alignment at any width.
-  const colW = Math.max(6, Math.min(11, Math.floor((width - 2) / Math.max(1, cards.length)) - 2));
-  const labelW = Math.max(0, Math.min(48, width - cards.length * (colW + 2)));
-  const narrow = labelW < 14;
-  const widths = [narrow ? 0 : labelW, ...cards.map(() => colW)];
-  const heads = names.map(n => wrapTextWithAnsi(n, colW));
-  const columns = () => out.push(...table(Array.from({ length: Math.max(...heads.map(h => h.length)) }, (_, i) => ['', ...heads.map(h => muted(h[i] ?? ''))]), widths));
-  const line = (label: string, cells: string[], paint: (s: string) => string = s => s) => {
-    // A long label is shortened, not wrapped, so every row keeps to one line.
-    if (narrow) { row(paint(label)); out.push(...table([['', ...cells]], widths)); }
-    else if (width_(label) > labelW) out.push(...table([[paint(truncateToWidth(label, labelW - 1)), ...cells]], widths));
-    else out.push(...table([[paint(label), ...cells]], widths));
-  };
-  const rates = (values: (number | null)[]) => values.map(v => rateInk(v)(pct(v)));
-  const skills = cards.map(c => byCapability(c, tasks));
-  if (skills[0]?.length) {
-    out.push(`${CARD}By skill\u0000share of tasks fully solved`);
-    columns();
-    for (const [i, { capability, ids }] of skillSlices(tasks).entries()) {
-      line(`${SKILL_NAME[capability]} (${ids.size})`, skills.map(rows => rows[i]!).map(r => (r.rate === null ? faint('–') : rateInk(r.rate)(pct(r.rate)) + (colW >= 10 ? cover(r.tasks, r.total) : ''))));
-    }
-    row();
-  }
-  out.push(`${CARD}Per task\u0000hardest first`);
-  prose('Tries solved out of tries finished. ✓ all, ✗ none, (80%) checks passed when not solved, out×2 ran out of turns or time, · no try.', faint);
-  columns();
-  const paint = { solved: green, partly: amber, unsolved: rose, none: faint };
-  const order = taskOrder(cards, tasks);
-  // A cell too wide for its column keeps the tries first: "0/2 ✗ · ran out ×2" → "0/2 ✗ out×2" → "0/2 ✗".
-  const fit = (text: string) => [text, text.replace(' · ran out ×', ' out×'), text.replace(/ (\(\d+%\)| · ran out ×\d+)$/, '')].find(t => width_(t) <= colW) ?? text;
-  for (const tier of [...new Set(order.map(i => tasks[i]!.tier ?? 'unrated'))]) {
-    const group = order.filter(i => (tasks[i]!.tier ?? 'unrated') === tier);
-    if (tasks.some(t => t.tier)) row(muted(TIER_NAME[tier]));
-    // Rows every model fully solved say nothing about the difference, so they fold into one line.
-    const everyone = everyTask ? [] : group.filter(i => cards.every(c => c.tasks[i]!.rate === 1));
-    for (const i of group.filter(i => !everyone.includes(i))) {
-      const cells = cards.map(c => taskCell(c.tasks[i]!));
-      const same = cells.every(x => x.text === cells[0]!.text);
-      line(plain(tasks[i]!.title), cells.map(x => paint[x.kind](fit(x.text))), same ? faint : s => s);
-    }
-    if (everyone.length) prose(`${count(everyone.length, 'task')} every model solved: ${everyone.map(i => plain(tasks[i]!.title)).join(', ')} · a shows them`, faint);
-  }
-  row();
-
-  // Signals that describe how a model worked, never part of the rank.
-  const partial = cards.some(c => c.checkScore !== null && c.checkScore !== c.score);
-  const signals = (['instructions', 'tools', 'design'] as const).filter(d => cards.some(c => c.dimensions[d] !== null));
-  const gated = cards.some(c => c.hygiene.total);
-  if (partial || signals.length || gated) {
-    out.push(`${CARD}Other signals\u0000never part of the rank`);
-    columns();
-    if (partial) line(LABEL.checks, rates(cards.map(c => c.checkScore)));
-    for (const d of signals) line(LABEL[d], rates(cards.map(c => c.dimensions[d])));
-    // A gate, never a bar or a percentage: its checks have never failed in any recorded run,
-    // so a 100% beside the score would read as praise for an unmeasured thing.
-    if (gated) {
-      line(LABEL.hygiene, cards.map(c => (!c.hygiene.total ? faint : c.hygiene.passed === c.hygiene.total ? green : rose)(gate(c.hygiene))));
-      prose('Safe-code gate: valid Python, standard library only, no eval — a floor, not a score.', faint);
-    }
-  }
-  // How to read the page comes last: the numbers first, the fine print after.
-  out.push(`${CARD}How to read this\u0000`);
-  prose(`${weighting(tasks)}. A shared rank means this run cannot tell those models apart; ± is how far a rerun could move a score; 12/14 means only 12 of 14 tasks have a finished try.${ranked.some(r => r.rank === null && !r.card.synthetic) ? ' A model with finished tries on fewer than half the tasks is not ranked.' : ''}`, faint);
-  if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
-  if (cards.some(c => c.notRun)) prose('Not run = lost to login, quota, crash or cancellation. It never counts against a model.', faint);
-  return out;
-}
-/** One line per run, wherever runs are listed: when, how each model did, and the run's shape. */
-function runLine(run: Run): string {
-  const live = ['running', 'interrupted', 'cancelled'].includes(run.status);
-  const scores = scorecards([run]).cards.map(c => `${nick(c.label)} ${rateInk(c.score)(pct(c.score))}`).join(faint(' · '));
-  const state = run.status === 'completed' ? '' : `  ${statusInk(run.status)(plain(run.status))}${live ? faint(` ${run.trials.length}/${run.planned}`) : ''}`;
-  return `${faint(runWhen(run.id))}  ${scores}  ${faint(`${run.tasks.length}×${run.options.repeat}`)}${state}`;
-}
+/** Tab positions, in the order `tabs` names them and keys 1–6 select them. */
+const HOME = 0, LIVE = 1, MODELS = 2, TESTS = 3, RUNS = 4, SETTINGS = 5;
 type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'localModels' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'leaderboard' | 'addModel' | 'addTest' | 'authFor' | 'setLocalUrl' | 'probeLocal'>;
 type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'cancel' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help' | 'local';
 
@@ -365,8 +27,8 @@ export class Dashboard implements Component, Focusable {
   private exit: () => void;
   private input = new Input({ prompt: '› ' });
   private list?: SelectList;
-  private tab = 0;
-  private selection = [0, 0, 0, 0, 0];
+  private tab = HOME;
+  private selection = [0, 0, 0, 0, 0, 0];
   private dialog?: Dialog;
   private message = '';
   /** Why the last attempt produced no run at all. Cleared when the next one starts. */
@@ -404,13 +66,23 @@ export class Dashboard implements Component, Focusable {
 
   /** Supplied by launchTui so panels fill the real window instead of a fixed 12 rows. */
   private rows: () => number;
-  constructor(app: UIApp, repaint: () => void = () => {}, exit: () => void = () => {}, rows: () => number = () => 24) {
+  private resetScroll: () => void;
+  /** The last drawing, reused by the regions drawn after the header in the same frame. */
+  private frame?: { width: number; lines: string[]; footerStart: number };
+  /** What a click can reach, found while drawing: `line` is counted within its region, `x` in screen columns. */
+  private hits: { region: 'header' | 'body'; line: number; x0: number; x1: number; act: (clicks: number) => void }[] = [];
+  /** Body hits while drawing, by the line index they had before cards were framed. */
+  private pending: { at: number; x0: number; x1: number; act: (clicks: number) => void }[] = [];
+  constructor(app: UIApp, repaint: () => void = () => {}, exit: () => void = () => {}, rows: () => number = () => 24, resetScroll: () => void = () => {}) {
     this.app = app;
     this.repaint = repaint;
     this.exit = exit;
     this.rows = rows;
+    this.resetScroll = resetScroll;
     // Read now without repainting: nothing is on screen yet, and the caller's render hook may not exist until this returns.
     this.watch(false);
+    // Opened during a run, the run is what the user came to see.
+    if (this.live) this.tab = LIVE;
     setInterval(() => this.watch(), 2000).unref();
   }
   private watch(repaint = true): void {
@@ -443,8 +115,8 @@ export class Dashboard implements Component, Focusable {
   invalidate(): void { this.input.invalidate(); this.list?.invalidate(); }
 
   private listLength(): number {
-    return this.tab === 1 ? this.app.config.models.length : this.tab === 2 ? this.tasks().length
-      : this.tab === 4 ? JUDGE_FIELDS.length + 1 : this.app.runs.length;
+    return this.tab === MODELS ? this.app.config.models.length : this.tab === TESTS ? this.tasks().length
+      : this.tab === SETTINGS ? JUDGE_FIELDS.length + 1 : this.tab === RUNS ? this.app.runs.length : 0;
   }
   private tasks() { return this.app.suite.tasks.filter(t => !this.app.config.removedTests.includes(t.id)); }
   private enabledTasks() { return this.tasks().filter(t => !this.app.config.disabledTests.includes(t.id)); }
@@ -461,8 +133,24 @@ export class Dashboard implements Component, Focusable {
   }
 
   handleInput(data: string): void {
-    this.attempt(() => this.key(data));
+    this.act(() => this.key(data));
+  }
+  /** Runs one user action. A different tab or panel starts at its top; anything else keeps the scroll where the user left it. */
+  private act(action: () => void): void {
+    const view = `${this.tab}:${this.dialog}`;
+    this.attempt(action);
+    if (`${this.tab}:${this.dialog}` !== view) this.resetScroll();
     this.repaint();
+  }
+  /**
+   * A click on the header or body. `line` counts from the top of that region's content, `x` from its
+   * left edge; a double click on a list row does what enter would.
+   */
+  click(region: 'header' | 'body', line: number, x: number, clicks = 1): boolean {
+    const target = this.hits.find(h => h.region === region && h.line === line && x >= h.x0 && x < h.x1);
+    if (!target) return false;
+    this.act(() => target.act(clicks));
+    return true;
   }
   private key(data: string): void {
     const key = (name: Parameters<typeof matchesKey>[1]) => matchesKey(data, name);
@@ -482,8 +170,8 @@ export class Dashboard implements Component, Focusable {
     if (this.dialog) { if (!this.controller || this.dialog === 'cancel') this.dialogKey(data); return; }
     // Looking around is always allowed. A run is long, and being pinned to one screen while it
     // works is why a cancelled run felt like it had vanished.
-    if (key('tab') || key('shift+tab') || key('left') || key('right') || /^[1-5]$/.test(data)) {
-      this.tab = /^[1-5]$/.test(data) ? Number(data) - 1 : (this.tab + (key('shift+tab') || key('left') ? tabs.length - 1 : 1)) % tabs.length;
+    if (key('tab') || key('shift+tab') || key('left') || key('right') || /^[1-6]$/.test(data)) {
+      this.tab = /^[1-6]$/.test(data) ? Number(data) - 1 : (this.tab + (key('shift+tab') || key('left') ? tabs.length - 1 : 1)) % tabs.length;
       return;
     }
     if (data === '?') { this.dialog = 'help'; return; }
@@ -499,7 +187,7 @@ export class Dashboard implements Component, Focusable {
     if (data === '+' || data === '=' || data === '-') {
       const step = data === '-' ? -1 : 1;
       // Rounds are the only number on Settings, so − + stay unambiguous there.
-      if (this.tab === 4) this.persist(() => { this.app.config.judge.repeat = Math.max(1, Math.min(5, this.app.config.judge.repeat + step)); });
+      if (this.tab === SETTINGS) this.persist(() => { this.app.config.judge.repeat = Math.max(1, Math.min(5, this.app.config.judge.repeat + step)); });
       else this.options.repeat = Math.max(1, Math.min(20, this.options.repeat + step));
       return;
     }
@@ -515,13 +203,13 @@ export class Dashboard implements Component, Focusable {
     if (data === 'P') { this.persist(() => { this.app.config.parallel = PARALLEL[(PARALLEL.indexOf(this.app.config.parallel ?? 1) + 1) % PARALLEL.length]; }); return; }
     if (data === 'T') { this.options.maxTurns = TURNS[(TURNS.indexOf(this.options.maxTurns) + 1) % TURNS.length] ?? 12; return; }
     const index = this.selection[this.tab]!;
-    if (this.tab === 1) {
+    if (this.tab === MODELS) {
       if (data === 'a') { this.openPicker(); return; }
       const model = this.app.config.models[index];
       if (!model) return;
       if (key('space') || key('enter')) this.persist(() => { model.enabled = !model.enabled; });
       if (data === 'd') this.confirmDelete(model.label, () => this.persist(() => { this.app.config.models = this.app.config.models.filter(m => m.id !== model.id); }));
-    } else if (this.tab === 2) {
+    } else if (this.tab === TESTS) {
       if (data === 'u') {
         const id = this.app.config.removedTests.at(-1);
         if (id) { this.persist(() => { this.app.config.removedTests.pop(); }); this.message = `Restored ${plain(id)}.`; }
@@ -535,13 +223,13 @@ export class Dashboard implements Component, Focusable {
         this.app.config.disabledTests = ids.includes(task.id) ? ids.filter(id => id !== task.id) : [...ids, task.id];
       });
       if (data === 'd') this.confirmDelete(task.title, () => this.persist(() => { this.app.config.removedTests.push(task.id); }));
-    } else if (this.tab === 3) {
+    } else if (this.tab === RUNS) {
       const run = this.app.runs[index];
       if (key('space') && run) { if (this.selectedRuns.has(run.id)) this.selectedRuns.delete(run.id); else this.selectedRuns.add(run.id); }
       if (key('enter') && run) { this.detailRun = run; this.trialIndex = 0; this.reportOffset = 0; this.dialog = 'evidence'; }
       if (data === 'c') { const ids = this.runIds(); this.report = terminalReport(this.app.compare(ids)); this.reportRuns = this.app.runs.filter(r => ids.includes(r.id)); this.reportOffset = 0; this.reportMode = 'summary'; this.dialog = 'report'; }
       if (data === 'e') this.export();
-    } else if (this.tab === 4 && (key('space') || key('enter'))) {
+    } else if (this.tab === SETTINGS && (key('space') || key('enter'))) {
       const judge = this.app.config.judge;
       if (index === 0) this.persist(() => { judge.enabled = !judge.enabled; });
       else if (index === 1) this.openPicker('judge');
@@ -552,7 +240,7 @@ export class Dashboard implements Component, Focusable {
   }
   private runIds(): string[] {
     const ids = this.app.runs.filter(r => this.selectedRuns.has(r.id)).map(r => r.id);
-    const current = this.app.runs[this.selection[3]!];
+    const current = this.app.runs[this.selection[RUNS]!];
     if (!ids.length && current) ids.push(current.id);
     if (!ids.length) throw new Error('No runs yet. Start with r.');
     return ids;
@@ -715,6 +403,7 @@ export class Dashboard implements Component, Focusable {
     this.live = undefined;
     this.lastFailure = '';
     this.message = 'Starting run… Esc cancels safely.';
+    this.tab = LIVE;
     this.repaint();
     try {
       const run = await this.app.run(options, p => {
@@ -731,14 +420,14 @@ export class Dashboard implements Component, Focusable {
       const silent = run.judge?.enabled && !run.trials.some(t => t.checks.some(c => c.dimension === 'design'));
       this.message = `Run ${plain(run.status)} · ${run.trials.length}/${run.planned} trials retained.`
         + (silent ? ' Reviewer scored nothing.' : '');
-      this.tab = 3;
-      this.selection[3] = 0;
+      this.tab = RUNS;
+      this.selection[RUNS] = 0;
     } catch (error) {
       // A run that never reached its first trial leaves no manifest, so the Runs list cannot
       // explain itself. Keep the reason on screen instead of in a status line that scrolls away.
       this.lastFailure = plain(error instanceof Error ? error.message : error);
       this.message = `Run stopped: ${this.lastFailure}`;
-      this.tab = 0;
+      this.tab = HOME;
     }
     finally { this.controller = undefined; this.progress = undefined; this.repaint(); }
   }
@@ -750,6 +439,7 @@ export class Dashboard implements Component, Focusable {
     if (this.controller) return 'tabs and ↑↓ still work · edits wait for the run';
     return [
       'r run   − + tries   l lane   t limit   T turns   p cache   P at once',
+      'r run   L leaderboard',
       'space toggle   a add   d remove',
       'space toggle   a add   d remove   u restore',
       'space select   c compare   L leaderboard   ⏎ evidence   e export',
@@ -757,8 +447,19 @@ export class Dashboard implements Component, Focusable {
     ][this.tab]!;
   }
 
+  /**
+   * The header, body and footer are three components on screen but one drawing: the header, drawn
+   * first in each frame, draws everything and the other two reuse it. Scrolling redraws the body
+   * alone, and so costs nothing.
+   */
   render(width: number, region: 'all' | 'header' | 'body' | 'footer' = 'all'): string[] {
     if (width <= 0) return [''];
+    if (region === 'all' || region === 'header' || this.frame?.width !== width) this.frame = { width, ...this.draw(width) };
+    const { lines, footerStart } = this.frame;
+    return region === 'header' ? lines.slice(0, 3) : region === 'body' ? lines.slice(3, footerStart) : region === 'footer' ? lines.slice(footerStart) : lines;
+  }
+  private draw(width: number): { lines: string[]; footerStart: number } {
+    this.pending = [];
     // Content sits inside a card: two columns of margin, then a border and a space on each side.
     // Under 60 columns borders would eat the content, so cards keep only their titles.
     const boxed = width >= 60, outer = Math.max(1, width - 4), inner = Math.max(1, boxed ? outer - 4 : outer);
@@ -792,7 +493,7 @@ export class Dashboard implements Component, Focusable {
     row();
 
     if (this.dialog) this.renderDialog(inner, row, prose, head);
-    else if ((this.controller || this.live) && this.tab === 0) {
+    else if (this.tab === LIVE) {
       const top = lines.length;
       const run = this.live, done = run?.trials.length ?? 0, total = run?.planned ?? 0, share = total ? done / total : 0;
       // Time left from the pace so far: finished tries are the only honest predictor available.
@@ -864,7 +565,7 @@ export class Dashboard implements Component, Focusable {
         head('Leaderboard', 'L for the full page');
         comparisonPage([board], inner, false, true).forEach(line => row(line));
       }
-    } else if (this.tab === 0) {
+    } else if (this.tab === HOME) {
       const enabled = this.models();
       // The answer comes first: how the models compare, from every comparable try on record.
       const board = this.app.leaderboard();
@@ -889,9 +590,9 @@ export class Dashboard implements Component, Focusable {
         prose(this.lastFailure, rose);
         prose('Nothing was recorded, so there is nothing on the Runs tab for it. Fix this and press r again.', faint);
       }
-    } else if (this.tab === 1) {
+    } else if (this.tab === MODELS) {
       const models = this.app.config.models;
-      const model = models[this.selection[1]!];
+      const model = models[this.selection[MODELS]!];
       const detail: string[] = [];
       if (model) {
         const auth = this.app.authFor(model);
@@ -903,16 +604,16 @@ export class Dashboard implements Component, Focusable {
       row();
       head('Models', `${this.models().length} of ${models.length} enabled`);
       row();
-      twoColumn(this.listRows(models.map(m => `${dot(m.enabled)} ${plain(m.label)}`)), detail, inner, LIST_WIDTH).forEach(row);
-    } else if (this.tab === 2) {
+      twoColumn(this.listRows(models.map(m => `${dot(m.enabled)} ${plain(m.label)}`), lines.length), detail, inner, LIST_WIDTH).forEach(row);
+    } else if (this.tab === TESTS) {
       const tasks = this.tasks();
-      const task = tasks[this.selection[2]!];
+      const task = tasks[this.selection[TESTS]!];
       row();
       head('Tests', `${this.enabledTasks().length} of ${tasks.length} enabled`);
       row();
-      twoColumn(this.listRows(tasks.map(t => `${dot(!this.app.config.disabledTests.includes(t.id))} ${plain(t.title)}`)),
+      twoColumn(this.listRows(tasks.map(t => `${dot(!this.app.config.disabledTests.includes(t.id))} ${plain(t.title)}`), lines.length),
         task ? this.taskDetail(task, detailWidth, wrap) : [muted('No tests yet. Press a to create an exact-JSON test.')], inner, LIST_WIDTH).forEach(row);
-    } else if (this.tab === 4) {
+    } else if (this.tab === SETTINGS) {
       const judge = this.app.config.judge;
       const auth = this.app.authFor({ ...judge, id: 'judge', label: 'judge', enabled: true });
       const local = this.app.config.local.url;
@@ -928,12 +629,12 @@ export class Dashboard implements Component, Focusable {
       twoColumn([
         muted('Design reviewer'), '',
         ...JUDGE_FIELDS.map((label, i) => {
-          const marker = i === this.selection[4] ? accent('›') : ' ';
+          const marker = i === this.selection[SETTINGS] ? accent('›') : ' ';
           return `${marker} ${muted(label)}${' '.repeat(Math.max(2, 12 - label.length))}${values[i]}`;
         }), '',
         judge.enabled ? authLine(auth) : faint('Nothing is sent while the reviewer is off.'), '',
         muted('Local server'), '',
-        `${this.selection[4] === LOCAL_ROW ? accent('›') : ' '} ${muted('Address')}${' '.repeat(Math.max(2, 12 - 'Address'.length))}${local ? accent(plain(local)) : faint('not set')}`,
+        `${this.selection[SETTINGS] === LOCAL_ROW ? accent('›') : ' '} ${muted('Address')}${' '.repeat(Math.max(2, 12 - 'Address'.length))}${local ? accent(plain(local)) : faint('not set')}`,
         faint(!local ? 'space to point at llama-server, Ollama, LM Studio…' : this.app.localModels ? `${count(this.app.localModels.length, 'model')} listed · a on Models adds one` : 'space to change · a on Models lists its models'),
       ], [
         muted('What this changes'), '',
@@ -949,7 +650,7 @@ export class Dashboard implements Component, Focusable {
       }
       prose('Validate a reviewer before trusting it: npm run test:judge reports how often it agrees with your recorded standard.', faint);
     } else {
-      const run = this.app.runs[this.selection[3]!];
+      const run = this.app.runs[this.selection[RUNS]!];
       // The selected run sits under the list with its headline table, so a run is found by what
       // it showed rather than by its hash.
       const detail: string[] = [];
@@ -970,25 +671,40 @@ export class Dashboard implements Component, Focusable {
       row();
       head('Runs', `${this.selectedRuns.size} selected`);
       row();
-      this.listRows(this.app.runs.map(r => `${dot(this.selectedRuns.has(r.id))} ${runLine(r)}`), Math.max(4, this.bodyRows() - detail.length - 10)).forEach(row);
+      this.listRows(this.app.runs.map(r => `${dot(this.selectedRuns.has(r.id))} ${runLine(r)}`), lines.length, Math.max(4, this.bodyRows() - detail.length - 10)).forEach(row);
       if (this.app.runs.length) head('Selected run');
       detail.forEach(row);
     }
-    const body = cards(lines.splice(3), outer, boxed);
+    const where: number[] = [];
+    const body = cards(lines.splice(3), outer, boxed, where);
     lines.push(...body);
+    // Clicks land on screen columns: two columns of margin, then a card's border and its space.
+    const indent = boxed ? 4 : 2;
+    this.hits = [
+      ...this.headerHits(),
+      ...this.pending.flatMap(h => (where[h.at - 3] === undefined ? [] : [{ region: 'body' as const, line: where[h.at - 3]!, x0: h.x0 + indent, x1: h.x1 + indent, act: h.act }])),
+    ];
     const footerStart = lines.length;
     row();
     // Long provider errors remain terminal-safe; the line appears only when there is something to say.
     if (this.message) row(muted(truncateToWidth(plain(this.message), outer)));
     // The same two keys do the same thing at every level, so the hint names both every time.
     const leave = this.dialog ? (this.typing() ? `${accent('esc')} ${faint('back')}` : `${accent('esc · q')} ${faint('back')}`)
-      : busy && this.tab === 0 ? `${accent('esc')} ${faint('cancel')}` : `${accent('?')} ${faint('keys')}   ${accent('esc · q')} ${faint('quit')}`;
+      : busy && this.tab === HOME ? `${accent('esc')} ${faint('cancel')}` : `${accent('?')} ${faint('keys')}   ${accent('esc · q')} ${faint('quit')}`;
     row(spreadAt(keyHints(this.keys(), Math.max(1, outer - width_(leave) - 3)), leave, outer));
-    const regionLines = region === 'header' ? lines.slice(0, 3) : region === 'body' ? lines.slice(3, footerStart) : region === 'footer' ? lines.slice(footerStart) : lines;
-    return regionLines.map(line => {
+    return { footerStart, lines: lines.map(line => {
       const content = truncateToWidth(line, outer);
       const padded = `  ${content}${' '.repeat(Math.max(0, outer - visibleWidth(content)))}  `;
       return `${BACKDROP}${truncateToWidth(padded, width, '')}\x1b[0m`;
+    }) };
+  }
+  /** Each tab's pill in the header row, where `draw` puts it: margin, name, two spaces, then pills one space apart. */
+  private headerHits(): typeof this.hits {
+    let x = 2 + 'forseti'.length + 2;
+    return tabs.map((t, i) => {
+      const hit = { region: 'header' as const, line: 1, x0: x, x1: x + t.length + 2, act: () => { this.tab = i; } };
+      x = hit.x1 + 1;
+      return hit;
     });
   }
   /** What a test measures, then enough of the prompt to recognise it. The whole prompt is on disk. */
@@ -1001,10 +717,15 @@ export class Dashboard implements Component, Focusable {
       ...brief.slice(0, 8), ...(brief.length > 8 ? [faint('…')] : []),
     ];
   }
-  private listRows(items: string[], visible = Math.max(6, this.bodyRows() - 8)): string[] {
+  /** The rows of a list that fit, pushed from body line `at`; a click selects a row and a double click opens it. */
+  private listRows(items: string[], at: number, visible = Math.max(6, this.bodyRows() - 8)): string[] {
     const selected = Math.min(this.selection[this.tab]!, Math.max(0, items.length - 1));
     this.selection[this.tab] = selected;
     const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), items.length - visible));
+    const tab = this.tab;
+    for (let k = 0; k < Math.min(visible, items.length - Math.max(0, start)); k++) {
+      this.pending.push({ at: at + k, x0: 0, x1: LIST_WIDTH, act: clicks => { this.selection[tab] = Math.max(0, start) + k; if (clicks > 1) this.key('\r'); } });
+    }
     // A single accent bar marks the cursor; the dot inside each row carries enabled/selected state.
     const rows = items.slice(Math.max(0, start), Math.max(0, start) + visible)
       .map((item, i) => (i + Math.max(0, start) === selected ? `${accent('▌')} ${item}` : `  ${item}`));
@@ -1165,11 +886,19 @@ export async function launchTui(app: App): Promise<void> {
   finally { if (writeLog !== undefined) process.env.PI_TUI_WRITE_LOG = writeLog; }
   const tui = new TuiAltScreen(terminal, false, app.root, { copyOnSelect: false });
   await new Promise<void>((resolve, reject) => {
-    const dashboard = new Dashboard(app, () => { body.scrollToStart(); tui.requestRender(); }, () => { tui.stop(); resolve(); }, () => terminal.rows);
+    const dashboard = new Dashboard(app, () => tui.requestRender(), () => { tui.stop(); resolve(); }, () => terminal.rows, () => body.scrollToStart());
     const pane = (region: 'header' | 'body' | 'footer'): Component => ({
       render: width => dashboard.render(width, region), invalidate: () => dashboard.invalidate(),
+      handleMouse: region === 'header' ? event => (event.type === 'click' && dashboard.click('header', event.y, event.x, event.clickCount) ? { handled: true } : undefined) : undefined,
     });
-    const body = new ScrollView(pane('body'), { primary: true, follow: 'none', scrollbarThumbStyle: accent });
+    // The body scrolls, so a click is found by its line in the whole page, not in the window.
+    class Body extends ScrollView {
+      handleMouse(event: TuiMouseEvent) {
+        if (event.type !== 'click' || !dashboard.click('body', event.y + this.scrollTop, event.x, event.clickCount)) return undefined;
+        return { handled: true as const, target: { component: this, originX: event.screenX - event.x, originY: event.screenY - event.y, width: event.width, height: event.height } };
+      }
+    }
+    const body = new Body(pane('body'), { primary: true, follow: 'none', scrollbarThumbStyle: accent });
     tui.addChild(dashboard);
     tui.setLayoutRoot(new VStack([
       { component: pane('header'), basis: 3, shrink: 0 },

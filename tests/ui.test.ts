@@ -104,12 +104,12 @@ test('all views and dialogs fit 40/80/120 columns with clean content', () => {
     }
   };
   for (const tab of ['1', '2', '3', '4', '5']) { f.key(tab); check(); }
-  f.key('2', 'a'); check();
+  f.key('3', 'a'); check();
   f.key(enter); check();
-  f.key(esc, '3', 'a'); check();
+  f.key(esc, '4', 'a'); check();
   f.key(esc, 'd'); check();
   f.key(esc, 'r'); check();
-  f.key(esc, '4', 'c'); check();
+  f.key(esc, '5', 'c'); check();
   f.key(esc, enter); check();
   f.key(esc, '?'); check();
   assert.equal(f.calls.length, 0);
@@ -122,13 +122,13 @@ test('terminal text rejects OSC, DCS, ANSI, C1 and bidi controls', () => {
 
 test('keyboard navigation, toggles, confirmed removal, settings and empty states', () => {
   const f = fixture();
-  f.key('\t', ' ');
+  f.key('\t', '\t', ' ');
   assert.equal(f.app.config.models[0]!.enabled, false);
   f.key(' ');
   assert.equal(f.app.config.models[0]!.enabled, true);
   f.key('d', enter);
   assert.equal(f.app.config.models.length, 1);
-  f.key('n', '3', ' ');
+  f.key('n', '4', ' ');
   assert.deepEqual(f.app.config.disabledTests, ['json']);
   f.key(' ');
   assert.deepEqual(f.app.config.disabledTests, []);
@@ -147,7 +147,7 @@ test('keyboard navigation, toggles, confirmed removal, settings and empty states
 
 test('filtered native catalog picker shows auth and adds only on explicit selection', () => {
   const f = fixture();
-  f.key('2', 'a', 'Second');
+  f.key('3', 'a', 'Second');
   assert.match(f.text(), /Second model/);
   assert.match(f.text(), /NOT READY/);
   assert.match(f.text(), /Credentials missing/);
@@ -166,7 +166,7 @@ test('filtered native catalog picker shows auth and adds only on explicit select
 
 test('test wizard validates each step, saves JSON and discards cancelled draft', () => {
   const f = fixture();
-  f.key('3', 'a', 'Bad ID', enter);
+  f.key('4', 'a', 'Bad ID', enter);
   assert.match(f.text(), /lowercase slug/);
   f.key('\x15', 'answer-test', enter, 'Return the number 42.', enter, 'oops', enter);
   assert.equal(f.app.suite.tasks.length, 1);
@@ -246,7 +246,7 @@ test('preflight uses effective selected auth, not catalog auth or UI heuristics'
 
 test('run selection, comparison, check-level evidence, scrolling and workspace export', () => {
   const f = fixture();
-  f.key('4', ' ', 'c');
+  f.key('5', ' ', 'c');
   // The summary opens first: one comparison page, not a wall of markdown.
   assert.match(f.text(), /Model comparison/);
   assert.match(f.text(), /[█░]{10}/);
@@ -287,7 +287,7 @@ test('run selection, comparison, check-level evidence, scrolling and workspace e
 test('persistence failure rolls configuration back and is visible', () => {
   const f = fixture();
   f.app.persist = () => { throw new Error('Disk full'); };
-  f.key('2', ' ');
+  f.key('3', ' ');
   assert.equal(f.app.config.models[0]!.enabled, true);
   assert.match(f.text(), /Disk full/);
 });
@@ -302,7 +302,7 @@ test('run rejection clears busy state, allows editing and preserves backend evid
   assert.match(f.text(), /Run stopped: Provider failed/);
   assert.ok(!f.text().includes('Running'));
   assert.equal(f.app.runs[0]!.trials.length, 1);
-  f.key('3', 'a', 'after-error', enter, 'Return 1.', enter, '1', enter);
+  f.key('4', 'a', 'after-error', enter, 'Return 1.', enter, '1', enter);
   assert.equal(f.app.suite.tasks[1]!.id, 'after-error');
   f.key('q');
   assert.equal(f.exits, 1);
@@ -333,7 +333,7 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
   assert.match(f.text(), /Running/, 'Home shows the progress panel');
   // Counts come from the run on disk, which this mock never writes; the header still says a run is going.
   assert.match(f.text(), /running · 0\/\?/, 'the header carries the run');
-  f.key('-', 'l', '3', 'a');
+  f.key('-', 'l', '4', 'a');
   assert.match(f.text(), /running · 0\/\?/, 'still visible from another tab');
   assert.doesNotMatch(f.text(), /Running/, 'the progress panel belongs to Home');
   assert.equal(f.app.suite.tasks.length, 1, 'a does not open the add-test form while busy');
@@ -341,7 +341,7 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
   assert.equal(f.exits, 0, 'q cannot quit out from under a live run');
   assert.equal(f.aborted, false, 'and it cannot cancel one either — leaving is now one key, cancelling still is not');
   assert.match(f.text(), /Press esc to cancel it/);
-  f.key('4');
+  f.key('5');
   assert.match(f.text(), /Runs/);
   f.key('1');
   assert.match(f.text(), /Running/, 'Home still shows progress after wandering off');
@@ -353,7 +353,7 @@ test('hygiene reads as a gate, never as a score beside correctness', () => {
   const f = fixture('subscription', 200);
   const hygiene = (passed: boolean) => ({ id: 'python-ast-parses', dimension: 'hygiene' as const, passed, evidence: 'parsed' });
   f.app.runs = [{ ...f.run, trials: [{ ...f.run.trials[0]!, checks: [...f.run.trials[0]!.checks, hygiene(true)] }] }];
-  f.key('4', ' ', 'c');
+  f.key('5', ' ', 'c');
   const text = f.text(120);
   // Renamed from "Hygiene gate" to "Safe-code gate": a reader should not need the rubric to know what it guards.
   assert.match(text, /Safe-code gate\s+ok \(1\)/);
@@ -381,7 +381,7 @@ test('esc and q both mean leave, at every level', () => {
     assert.doesNotMatch(f.text(), /Keys/, `${leave === 'q' ? 'q' : 'esc'} closes the panel`);
     assert.equal(f.exits, 0, 'and closing a panel never quits');
 
-    f.key('4', ' ', 'c');
+    f.key('5', ' ', 'c');
     assert.match(f.text(), /Model comparison/, 'the comparison panel is open');
     f.key(leave);
     assert.doesNotMatch(f.text(), /Model comparison/, 'the same key closes this one too');
@@ -393,7 +393,7 @@ test('esc and q both mean leave, at every level', () => {
 
   // A dialog that takes typed text is the one carve-out: there q is a letter.
   const typing = fixture();
-  typing.key('3', 'a', 'q');
+  typing.key('4', 'a', 'q');
   assert.match(typing.text(), /q/, 'q is typed, not swallowed');
   assert.equal(typing.exits, 0);
   typing.key('\x1b');
@@ -417,7 +417,7 @@ test('a half-solved task shows how much was right, without a second headline', (
     ],
   };
   f.app.runs = [{ ...f.run, trials: [half] }];
-  f.key('4', ' ', 'c');
+  f.key('5', ' ', 'c');
   assert.match(f.text(120), /Checks passed\s+50%/, 'half the checks passed, and it says so');
   assert.match(f.text(120), /0\/1 ✗ \(50%\)/, 'and the task row shows how close it came');
   assert.match(f.text(120), /Example model\s+[█░]+\s+0%/, 'the headline is still the task, not the checks');
@@ -449,7 +449,7 @@ test('the comparison page ranks with ties, splits by difficulty and names each h
     run('2026-09-21T10-00-00-b', 'claude-code', [[sonnet, 10]]),
     run('2026-09-22T10-00-00-c', 'pi', [[m('local', 'qwen-local', 'ollama'), 4]]),
   ];
-  f.key('4', ' ', down, ' ', down, ' ', 'c');
+  f.key('5', ' ', down, ' ', down, ' ', 'c');
   const text = f.text(120);
   assert.match(text, /3 models · 12 tasks · 3–6 tries each/);
   // Each difficulty level counts equally, so 3 of 4 hard tasks weighs as much as 8 of 8 basic ones:
@@ -490,7 +490,7 @@ test('a model that ran out of turns says so beside its score', () => {
   // finished. Correctness alone reads 100% for a model that only completed half its work.
   const solved = { ...good, status: 'passed' as const, checks: [{ id: 'exact', dimension: 'correctness' as const, passed: true, evidence: 'ok' }] };
   f.app.runs = [{ ...f.run, trials: [solved, { ...good, id: 'stalled', status: 'budget', checks: [] }] }];
-  f.key('4', ' ', 'c');
+  f.key('5', ' ', 'c');
   const text = f.text(120);
   // Reworded from a "Stalled" column to a sentence under the ranking, in plain words.
   assert.match(text, /ran out of turns or time on 1 try \(counted as unsolved\)/);
@@ -520,7 +520,7 @@ test('a tier or skill cell the provider left short says so, and earns no place',
   const outcome = { refused: ['passed', 'auth_error'], solves: ['passed', 'passed'], stalls: ['passed', 'budget'] } as const;
   f.app.runs = [{ ...f.run, tasks, models: Object.keys(outcome).map(m), planned: 12,
     trials: Object.entries(outcome).flatMap(([who, [a, b]]) => [1, 2].flatMap(r => [trial(who, 'h0', r, a), trial(who, 'h1', r, b)])) }];
-  f.key('4', ' ', 'c');
+  f.key('5', ' ', 'c');
   const text = f.text(120);
   // Decluttered: stars, footnotes and places became an inline "1/2" wherever tasks lack a finished try.
   assert.match(text, /refused model\s+[█░]+\s+100% ±\d+ 1\/2/, 'the rank line says what the score rests on');
@@ -575,7 +575,7 @@ test('a reviewer that was on but scored nothing says so', async () => {
   // The reason lives on the Runs tab, which has room for it.
   f.app.runs = [{ ...f.run, judge: { ...DEFAULT_JUDGE, enabled: true, model: 'gpt-5.5' },
     trials: [{ ...f.run.trials[0]!, judgeNote: 'Reviewer unavailable: token expired' }] }];
-  f.key('4');
+  f.key('5');
   assert.match(f.text(), /reviewer gpt-5\.5 scored nothing/);
   assert.match(f.text(120), /token expired/, 'the reason is shown, not just the fact');
   f.app.runs = [{
@@ -595,7 +595,7 @@ test('a run that never started explains itself instead of vanishing', async () =
   assert.match(f.text(), /Last attempt produced no run/);
   assert.match(f.text(), /Run lock exists/);
   assert.match(f.text(), /nothing on the Runs tab for it/);
-  f.key('4', '1');
+  f.key('5', '1');
   assert.match(f.text(), /Last attempt produced no run/, 'it survives navigating away and back');
   f.app.run = async () => f.run;
   f.key('r', enter);
@@ -610,7 +610,7 @@ test('an unfinished run is listed with how far it got', () => {
     { ...f.run, id: 'run-stopped', status: 'interrupted' },
     { ...f.run, id: 'run-done', status: 'completed' },
   ];
-  f.key('4');
+  f.key('5');
   const line = (id: string) => f.text().split('\n').find(l => l.includes(id))!;
   assert.match(line('run-live'), /running 1\/2/);
   assert.match(line('run-stopped'), /interrupted 1\/2/);
@@ -619,7 +619,7 @@ test('an unfinished run is listed with how far it got', () => {
 
 test('the design reviewer is off by default and every setting persists', () => {
   const f = fixture();
-  f.key('5');
+  f.key('6');
   assert.match(f.text(), /Design reviewer/);
   assert.match(f.text(), /design not scored/, 'the headline says plainly that nothing is judged yet');
   assert.match(f.text(), /Nothing is sent while the reviewer is off/);
@@ -645,7 +645,7 @@ test('the design reviewer is off by default and every setting persists', () => {
   assert.match(f.text(), /2 tries/);
 
   // Picking a reviewer goes through the same catalog and auth path as a candidate.
-  f.key('5', up, up, enter);
+  f.key('6', up, up, enter);
   assert.match(f.text(), /example\/model-one/);
   f.key(enter, enter);
   assert.equal(f.app.config.judge.provider, 'example');
@@ -658,7 +658,7 @@ test('a same-family reviewer is called out where it is chosen', () => {
   const f = fixture();
   f.app.config.models[0]!.provider = 'anthropic';
   Object.assign(f.app.config.judge, { enabled: true, provider: 'anthropic', model: 'claude-sonnet-5' });
-  f.key('5');
+  f.key('6');
   assert.match(f.text(), /same family as candidates/);
   f.app.config.judge.provider = 'openai-codex';
   assert.doesNotMatch(f.text(), /same family as candidates/);
@@ -666,11 +666,11 @@ test('a same-family reviewer is called out where it is chosen', () => {
 
 test('cancel from every form never adds, deletes or enables payment', () => {
   const f = fixture('metered');
-  f.key('2', 'a', enter, esc);
+  f.key('3', 'a', enter, esc);
   assert.equal(f.app.config.models.length, 1);
   f.key('d', esc);
   assert.equal(f.app.config.models.length, 1);
-  f.key('3', 'a', 'cancelled', enter, 'prompt', enter, '42', esc);
+  f.key('4', 'a', 'cancelled', enter, 'prompt', enter, '42', esc);
   assert.equal(f.app.suite.tasks.length, 1);
   f.key('r', enter, 'PAY', '\x03');
   assert.equal(f.calls.length, 0);
@@ -690,11 +690,11 @@ test('headless screen artifacts use only workspace-local mock data', () => {
     }
   };
   capture('home');
-  f.key('2'); capture('models');
+  f.key('3'); capture('models');
   f.key('a'); capture('catalog');
-  f.key(esc, '3'); capture('tests');
+  f.key(esc, '4'); capture('tests');
   f.key('a'); capture('test-wizard');
-  f.key(esc, '4'); capture('runs');
+  f.key(esc, '5'); capture('runs');
   f.key(enter); capture('evidence');
   f.key(esc, 'r'); capture('preflight');
   f.key(enter); capture('billing');
@@ -721,7 +721,7 @@ test('the comparison says who is better at what, and only where the run can tell
   // The weak model fails every evidence task and passes the safety task, four times over.
   const record = (repeats: number, weakPasses: string[]) => tasks.flatMap(t => Array.from({ length: repeats }, (_, r) => [trial('strong', t.id, r + 1, true), trial('weak', t.id, r + 1, weakPasses.includes(t.id))]).flat());
   f.app.runs = [{ ...f.run, models: [weak, strong], tasks, planned: 6 * 4, trials: record(4, ['c']) }];
-  f.key('4', ' ', 'c');
+  f.key('5', ' ', 'c');
   let text = f.text(120);
   // Reworded from "overall  Strong model over Weak model  +67 pts" to the page's one verdict sentence.
   assert.match(text, /Strong model beats Weak model: 67 points apart, more than the \d+ needed/, 'the overall gap is stated as a verdict');
@@ -764,7 +764,7 @@ test('the comparison says who is better at what, and only where the run can tell
 test('a local server is set on Settings, listed in the picker and added with no credential', async () => {
   const f = fixture();
   const settle = () => new Promise(resolve => setImmediate(resolve));
-  f.key('5');
+  f.key('6');
   assert.match(f.text(), /Local server/);
   assert.match(f.text(), /not set/);
   f.key(down, down, down, down, ' ');
@@ -781,7 +781,7 @@ test('a local server is set on Settings, listed in the picker and added with no 
   assert.match(f.text(), /1 model listed/);
   assert.match(f.text(), /http:\/\/127\.0\.0\.1:8080/);
 
-  f.key('2', 'a');
+  f.key('3', 'a');
   await settle();
   assert.equal(f.app.probes, 1, 'already listed; opening the picker does not ask again');
   assert.match(f.text(), /local\/\/models\/tiny-q4\.gguf · tiny-q4 · local/);
@@ -801,14 +801,14 @@ test('a local server is set on Settings, listed in the picker and added with no 
   f.key(esc);
 
   // The reviewer picker never offers it.
-  f.key('5', up, up, up, enter);
+  f.key('6', up, up, up, enter);
   assert.match(f.text(), /example\/model-one/);
   assert.doesNotMatch(f.text(), /local\/\/models/);
   f.key(esc);
 
   // A server that does not answer is reported, and the rest of the catalog still opens.
   f.app.setLocalUrl('http://down:1');
-  f.key('2', 'a');
+  f.key('3', 'a');
   await settle();
   assert.equal(f.app.probes, 2);
   assert.match(f.text(), /Local server: No answer from http:\/\/down:1/);
@@ -821,7 +821,7 @@ test('the leaderboard is the first thing on Home and opens in full from any tab'
   const home = f.text(120);
   assert.match(home, /Leaderboard[─\s]+L for the full page/);
   assert.ok(home.indexOf('Overall') < home.indexOf('Next run'), 'the answer comes before the run controls');
-  f.key('3', 'L');
+  f.key('4', 'L');
   const page = f.text(120);
   assert.match(page, /Leaderboard[─\s]+every comparable try, all runs/);
   assert.match(page, /Per task/, 'the full page, not only the chart');
@@ -948,13 +948,13 @@ test('tries running side by side each get a live column, or stack when the windo
 
 test('sections are rounded cards with their title in the border, and plain headings on a narrow terminal', () => {
   const f = fixture('subscription', 60);
-  f.key('2');
+  f.key('3');
   const wide = f.ui.render(100).map(stripVTControlCharacters);
   const top = wide.findIndex(l => /╭─ Models ─+.* ╮\s*$/.test(l));
   assert.ok(top > 0, 'a card opens with its title in the top border');
   assert.match(wide[top + 1]!, /^\s+│ .* │\s*$/, 'its content sits between side borders');
   assert.ok(wide.slice(top).some(l => /^\s+╰─+╯\s*$/.test(l)), 'and it closes');
-  assert.match(wide[1]!, /forseti\s+Home\s+Models/, 'the header is one line: name, then tabs');
+  assert.match(wide[1]!, /forseti\s+Home\s+Live\s+Models/, 'the header is one line: name, then tabs');
   const narrow = f.ui.render(50).map(stripVTControlCharacters).join('\n');
   assert.doesNotMatch(narrow, /[╭╰│]/, 'under 60 columns borders would eat the content');
   assert.match(narrow, /Models/);
