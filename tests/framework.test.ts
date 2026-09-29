@@ -13,8 +13,8 @@ import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
-import { byTier, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
-import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
+import { byTier, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
+import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
 import type { Config, Dimension, LiveEvent, ModelConfig, Run, ToolEvent, Trial } from '../src/types.ts';
@@ -895,3 +895,21 @@ test('a change to how a try runs is recorded on purpose, by whoever makes it', (
   assert.deepEqual(Object.keys(harnessFiles(root)), lock.files, 'and the lock names the files it covers');
 });
 
+
+test('a Claude Code alias is named by the exact model it served', () => {
+  assert.equal(modelName('claude-sonnet-5-5'), 'Claude Sonnet 5.5');
+  assert.equal(modelName('claude-haiku-4-5-20251001'), 'Claude Haiku 4.5');
+  assert.equal(modelName('claude-opus-5'), 'Claude Opus 5');
+  assert.equal(modelName('gpt-5.5'), 'gpt-5.5', 'anything else reads as it is');
+  const dir = temp();
+  const model: ModelConfig = { id: 'cc', label: 'Claude sonnet · via Claude Code', provider: 'claude-code', model: 'sonnet', auth: 'cli', enabled: true, thinking: 'off' };
+  const run = { schema: 1, id: 'r', created: '', status: 'completed', suite: 's', suiteHash: 'x', harnessHash: 'y', environment: {}, judge: null, options: DEFAULT_OPTIONS,
+    models: [model], tasks: [{ id: task.id, title: task.title, hash: 'h' }], planned: 2, trials: [blankTrial('0001-cc-a', model, task, 1), blankTrial('0002-cc-a', model, task, 2)] } as Run;
+  put(dir, 'runs/r/run.json', JSON.stringify(run));
+  // Claude Code's init line, as the try's log keeps it inside the recorded stdout.
+  put(dir, 'runs/r/trials/0001-cc-a/events.jsonl', JSON.stringify({ event: { type: 'claude-code-result', stdout: JSON.stringify({ type: 'system', model: 'claude-sonnet-5-5' }) } }));
+  const read = readRun(dir, 'r')!;
+  assert.equal(read.trials[0]!.served, 'claude-sonnet-5-5');
+  assert.equal(read.trials[1]!.served, undefined, 'a try with no log keeps no name');
+  assert.equal(scorecards([read]).cards[0]!.label, 'Claude Sonnet 5.5');
+});

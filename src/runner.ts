@@ -195,6 +195,11 @@ export function readRun(root: string, id: string, active = activeRunId(root)): R
     for (const check of trial.checks) if ((check.dimension as string) === 'quality') check.dimension = 'hygiene';
   }
   if (run.status === 'running' && run.id !== active) run.status = 'interrupted';
+  // Claude Code's first log line names the model behind the alias; the try's log keeps it.
+  for (const trial of run.trials) {
+    if (trial.served || !run.models.some(m => m.id === trial.model && m.provider === 'claude-code')) continue;
+    try { trial.served = /\\"model\\":\\"(claude-[a-z0-9-]+)\\"/.exec(readFileSync(inside(root, `runs/${id}/trials/${trial.id}/events.jsonl`), 'utf8'))?.[1]; } catch { /* no log, no name */ }
+  }
   refingerprint(root, run);
   return run;
 }

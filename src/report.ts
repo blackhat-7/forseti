@@ -321,18 +321,25 @@ const HARNESS: Record<string, string> = { 'claude-code': 'Claude Code', pi: 'For
  * harness or settings, not more evidence. Every card is scored over the union of the selected
  * tasks, so a task one run never had reads "not graded" instead of shifting the columns.
  */
+/** "claude-sonnet-5-5" reads as "Claude Sonnet 5.5", "claude-haiku-4-5-20251001" as "Claude Haiku 4.5"; any other id as it is. */
+export function modelName(id: string): string {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(id);
+  return m ? `Claude ${m[1]![0]!.toUpperCase()}${m[1]!.slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ''}` : id;
+}
 export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks']; mixed: boolean } {
   const tasks = [...new Map(runs.toReversed().flatMap(r => r.tasks).map(t => [t.id, t])).values()].reverse();
   const entries = runs.flatMap(run => run.models.map(model => ({ run, model })));
   const groups = Map.groupBy(entries, ({ run, model }) => `${comparisonKey(run)} ${model.provider}/${model.model}/${model.thinking}`);
   const name = (label: string) => clean(label).replace(/\s*·\s*via\s.*$/, '').trim();
+  // An alias like "sonnet" names whatever Claude Code maps it to, so the card says which model that was.
+  const served = (trials: Trial[]) => { const ids = [...new Set(trials.flatMap(t => (t.served ? [t.served] : [])))]; return ids.length === 1 ? modelName(ids[0]!) : undefined; };
   const cards = [...groups.values()].map(members => {
     const { run, model } = members[0]!;
     const trials = members.flatMap(m => m.run.trials.filter(t => t.model === m.model.id));
     const planned = members.reduce((sum, m) => sum + m.run.planned / m.run.models.length, 0);
     const synthetic = model.provider === 'control';
     return { run, card: {
-      ...scorecard(name(model.label), trials, tasks, planned),
+      ...scorecard(served(trials) ?? name(model.label), trials, tasks, planned),
       harness: synthetic ? 'synthetic' : HARNESS[model.provider === 'claude-code' ? 'claude-code' : 'pi']!,
       synthetic, tries: members.reduce((sum, m) => sum + m.run.options.repeat, 0), hygiene: dimensionScore(trials, 'hygiene'),
     } };

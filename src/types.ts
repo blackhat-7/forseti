@@ -78,6 +78,8 @@ export type Trial = {
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
   estimatedCost: number | null;
   trace: ToolEvent[]; answer: string; files: Record<string, string>; turns: number;
+  /** The exact model the provider served, such as claude-sonnet-5-5 for the alias sonnet. Read from the try's log, never recorded by the try itself. */
+  served?: string;
 };
 export type Run = {
   schema: 1; id: string; created: string; finished?: string; status: 'running' | 'completed' | 'cancelled' | 'interrupted';
