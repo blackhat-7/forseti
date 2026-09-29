@@ -99,6 +99,7 @@ npm start -- compare RUN_ID                 # models within a run
 npm start -- compare RUN_A RUN_B
 npm start -- parallel 4                      # tries at once (default 1); local models still one at a time
 npm start -- leaderboard                    # every comparable try from every run; a run only makes missing tries (--fresh to force)
+npm start -- regrade                        # grade saved tries again after a grader change; calls no model
 npm start -- run --models MODEL_CONFIG_ID --lane prompt --repeat 2
 ```
 

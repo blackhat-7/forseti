@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { App } from './app.ts';
@@ -7,7 +8,7 @@ import { authInfo, defaultAuth, ENV_KEYS } from './auth.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { atomicJson, clean } from './files.ts';
 import { LOCAL } from './local.ts';
-import { conditionsNow, harnessFiles } from './runner.ts';
+import { conditionsNow, gradeClosure, harnessFiles, regrade } from './runner.ts';
 import { SCHEME } from './fingerprint.ts';
 import { comparisonReport } from './report.ts';
 import { checkSandbox, pythonExecutable } from './sandbox.ts';
@@ -34,6 +35,7 @@ const help = `FORSETI  ·  evidence-first LLM benchmarks
                   [--allow-metered] [--no-cache] [--fresh] [--parallel N]
   npm start -- parallel N                     How many tries a run makes at once (default 1)
   npm start -- leaderboard                    Every comparable finished try, all runs
+  npm start -- regrade                        Grade saved tries again by today's graders; calls no model
   npm start -- runs
   npm start -- compare RUN_ID [RUN_ID ...]
 
@@ -113,12 +115,18 @@ async function main() {
     return;
   }
   if (command === 'fingerprint') {
-    // The tripwire: npm test fails until a change to how tries run is recorded here, on purpose.
+    // The tripwire: npm test fails until a change to how tries run or are graded is recorded here, on purpose.
     const note = positionals.slice(1).join(' ').trim();
-    if (!note) throw new Error('Say why tries must be rerun: npm run fingerprint -- "what changed and why it matters"');
-    const now = conditionsNow(root, app.config, DEFAULT_OPTIONS, 'any');
-    atomicJson(root, 'fingerprint.lock', { scheme: SCHEME, harness: now.harnessHash, files: Object.keys(harnessFiles(root)), note });
-    console.log(`Recorded ${now.harnessHash.slice(0, 12)}. Tries recorded under any other fingerprint no longer compare and are rerun when asked for.`); return;
+    if (!note) throw new Error('Say what changed: npm run fingerprint -- "what changed and why it matters"');
+    const now = conditionsNow(root, app.config, DEFAULT_OPTIONS, 'any'), before = JSON.parse(readFileSync(join(root, 'fingerprint.lock'), 'utf8'));
+    atomicJson(root, 'fingerprint.lock', { scheme: SCHEME, harness: now.harnessHash, grading: now.gradingHash, files: Object.keys(harnessFiles(root)), gradingFiles: Object.keys(harnessFiles(root, gradeClosure)), note, ...(before.equivalent ? { equivalent: before.equivalent } : {}) });
+    console.log(`Recorded harness ${now.harnessHash.slice(0, 12)}, grading ${now.gradingHash!.slice(0, 12)}. A new harness reruns tries when asked for; new grading only regrades them: npm start -- regrade.`); return;
+  }
+  if (command === 'regrade') {
+    const { regraded, failed } = await regrade(root, app.config);
+    console.log(`Regraded ${regraded} ${regraded === 1 ? 'try' : 'tries'} from their saved submissions. No model was called.`);
+    for (const f of failed) console.log(clean(`  could not regrade ${f}`));
+    return;
   }
   if (command === 'parallel') {
     if (action) { app.config.parallel = Number(action); app.persist(); }

@@ -13,8 +13,8 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **The rebuilt hard tier separates, on one try each.** `lock-refresh` and `sheet-eval`: Haiku ✗, Sonnet ✗, Opus ✓. `crew-schedule` and `log-query`: Haiku ✗, Sonnet ✓. Detail in `docs/transcript-research.md`. Not yet a measurement.
 - **The leaderboard is strict and currently empty.** It shows only tries recorded under today's code, task fingerprints and default settings; the lane (Claude Code vs Pi) may differ. Live streaming (commit b333ddc) moved the fingerprint on purpose: every earlier try is stale.
 - **Every try streams to `trials/<id>/live.jsonl`.** The TUI's Live tab (key 2) tails it: one pane per try in progress, `[` `]` focus, ⏎ zoom. Claude Code runs with `--output-format stream-json`.
-- **A run only makes missing tries.** Same model + same task hash + same harness and settings = already done. `--fresh` forces a rerun.
-- Battery on Linux: `npm run check` clean · `npm test` **85/85** · `npm run test:terminal` passes · `test:suite`, `test:judge` not run this session.
+- **A run only makes missing tries.** Same model + same task and harness submission fingerprints + same settings = already done; `--fresh` forces a rerun. A grading-only change is regraded from saved files (`npm start -- regrade`, also run before every run).
+- Battery on Linux: `npm run check` clean · `npm test` **88/88** · `npm run test:terminal` passes · `test:suite`, `test:judge` not run this session.
 
 ## Done this session
 

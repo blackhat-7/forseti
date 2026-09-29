@@ -277,6 +277,12 @@ export function modelKey(run: Pick<Run, 'environment' | 'options'>, model: Model
   const release = claude ? `/cc${e.claudeVersion ?? '?'}` : context ? `/ctx${context}` : '';
   return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(flags).slice(0, 12)}${release}`;
 }
+/** How a try's checks were made: the grading code and the task's own grader. A regraded try carries the key it was regraded under. */
+export function gradingKey(run: Pick<Run, 'tasks' | 'gradingHash' | 'harnessHash'>, taskId: string): string {
+  const task = run.tasks.find(t => t.id === taskId)!;
+  return hash({ harness: run.gradingHash ?? run.harnessHash, task: task.grading ?? task.hash });
+}
+export const gradedKey = (run: Run, trial: Trial) => trial.graded ?? gradingKey(run, trial.task);
 export function trialKey(run: Run, trial: Trial): string {
   return `${modelKey(run, run.models.find(m => m.id === trial.model)!)} ${conditionsKey(run, trial.task)}`;
 }
@@ -289,14 +295,16 @@ export function trialKey(run: Run, trial: Trial): string {
  * left out: they check the grader, not a model. The suite decides which tasks count and at which
  * difficulty.
  */
-export function leaderboard(runs: Run[], suite: Pick<Task, 'id' | 'title' | 'tier' | 'capabilities'>[], now: Pick<Run, 'options' | 'tasks' | 'harnessHash' | 'environment' | 'judge'>): Run | null {
+export function leaderboard(runs: Run[], suite: Pick<Task, 'id' | 'title' | 'tier' | 'capabilities'>[], now: Pick<Run, 'options' | 'tasks' | 'harnessHash' | 'gradingHash' | 'environment' | 'judge'>): Run | null {
   const live = new Map(suite.map(t => [t.id, t]));
   const wanted = new Map(now.tasks.filter(t => live.has(t.id)).map(t => [t.id, conditionsKey(now, t.id)]));
+  // A try graded by older rules waits for `regrade`: its submission is current, its score is not.
+  const graded = new Map(now.tasks.map(t => [t.id, gradingKey(now, t.id)]));
   const newestFirst = runs.toSorted((a, b) => b.created.localeCompare(a.created));
   const models = new Map<string, ModelConfig>(), tries = new Map<string, number>(), trials: Trial[] = [];
   for (const run of newestFirst) for (const t of run.trials) {
     const m = run.models.find(x => x.id === t.model)!;
-    if (m.provider === 'control' || !FINISHED.includes(t.status) || !run.tasks.some(x => x.id === t.task) || wanted.get(t.task) !== conditionsKey(run, t.task)) continue;
+    if (m.provider === 'control' || !FINISHED.includes(t.status) || !run.tasks.some(x => x.id === t.task) || wanted.get(t.task) !== conditionsKey(run, t.task) || graded.get(t.task) !== gradedKey(run, t)) continue;
     const id = modelKey(run, m), pair = `${id} ${t.task}`, n = (tries.get(pair) ?? 0) + 1;
     if (!models.has(id)) models.set(id, { ...m, id });
     tries.set(pair, n);

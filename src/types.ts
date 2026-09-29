@@ -78,14 +78,19 @@ export type Trial = {
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
   estimatedCost: number | null;
   trace: ToolEvent[]; answer: string; files: Record<string, string>; turns: number;
+  /** The grading this try's checks came from, when a regrade replaced the original. See gradingKey. */
+  graded?: string;
   /** The exact model the provider served, such as claude-sonnet-5-5 for the alias sonnet. Read from the try's log, never recorded by the try itself. */
   served?: string;
 };
 export type Run = {
   schema: 1; id: string; created: string; finished?: string; status: 'running' | 'completed' | 'cancelled' | 'interrupted';
-  suite: string; suiteHash: string; harnessHash: string; environment: Record<string, string>;
+  suite: string; suiteHash: string; harnessHash: string;
+  /** The grading code's fingerprint; runs from before grading had its own take the harness's. */
+  gradingHash?: string;
+  environment: Record<string, string>;
   judge: JudgeConfig | null;
-  options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; capabilities?: Capability[]; tier?: Tier; turns?: number; timeout?: number }[];
+  options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; grading?: string; capabilities?: Capability[]; tier?: Tier; turns?: number; timeout?: number }[];
   planned: number; trials: Trial[];
 };
 export type Progress = { completed: number; total: number; model: string; task: string; phase: string; runId: string };

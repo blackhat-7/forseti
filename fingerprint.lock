@@ -1,11 +1,11 @@
 {
-  "scheme": 1,
-  "harness": "df01d8bfa7fab558f6b3ebf2a20fb28a5e9bc2246ad46693855930ae5317dbf1",
+  "scheme": 2,
+  "harness": "27bfe2fa281d1b839700337f025f0451e7cace3edda0b8ca8cf96eb3bbb9e195",
+  "grading": "8b491f6fe635ea37440c6a3559547b323587489a166e882ad9cea325f4f6d1d5",
   "files": [
     "adapter.ts",
     "auth.ts",
     "claudecode.ts",
-    "config.ts",
     "files.ts",
     "judge.ts",
     "local.ts",
@@ -15,5 +15,26 @@
     "trial.ts",
     "types.ts"
   ],
-  "note": "Both lanes stream each try live to live.jsonl: Pi emits deltas from the agent loop, Claude Code switches to --output-format stream-json --verbose --include-partial-messages. Output format is a flag change, and the lane code changed."
+  "gradingFiles": [
+    "adapter.ts",
+    "auth.ts",
+    "claudecode.ts",
+    "config.ts",
+    "files.ts",
+    "grade.ts",
+    "local.ts",
+    "mcpserver.ts",
+    "sandbox-linux.py",
+    "sandbox.ts",
+    "types.ts"
+  ],
+  "note": "Grading moved from src/trial.ts to src/grade.ts with its own fingerprint, so a grading change regrades saved tries instead of rerunning models. A pure move: the old try path is declared equivalent below.",
+  "equivalent": [
+    {
+      "was": "e9ef57a27baa290ca498be82e674e01d1fafb18b95b0ccbf4655d8f8d80d1404",
+      "harness": "27bfe2fa281d1b839700337f025f0451e7cace3edda0b8ca8cf96eb3bbb9e195",
+      "grading": "8b491f6fe635ea37440c6a3559547b323587489a166e882ad9cea325f4f6d1d5",
+      "note": "The try path before grade.ts existed (commit b333ddc to b0c9210). Splitting grading out moved code without changing it, so tries recorded then are current for both parts."
+    }
+  ]
 }

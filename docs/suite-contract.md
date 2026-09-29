@@ -52,4 +52,4 @@ Known gaps: nothing here tests architecture or system design, long-horizon plann
 
 ## Grader imports
 
-A grader may import only `helpers.mjs` from `private/`. A task's fingerprint covers its definition (not its title, tier or skills), its fixture files byte for byte, and its own grader and `helpers.mjs` compared without comments or layout; any other private file it imported would change results without changing the fingerprint. A logic change to `helpers.mjs` invalidates every task's recorded tries; a comment does not.
+A grader may import only `helpers.mjs` from `private/`. A task has two fingerprints. What the model met: its definition (not its title, tier, skills, dimensions or grader) and its fixture files byte for byte; a change reruns the models. How it is graded: its dimensions, its own grader and `helpers.mjs`, compared without comments or layout; a change is applied to recorded tries with `npm start -- regrade`, from their saved files, without calling a model. Any other private file a grader imported would change results without changing a fingerprint. A logic change to `helpers.mjs` regrades every task's tries; a comment does not.

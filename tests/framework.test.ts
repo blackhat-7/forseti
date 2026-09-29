@@ -14,7 +14,7 @@ import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConf
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
 import { byTier, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
-import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
+import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, regrade, gradeClosure, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
 import type { Config, Dimension, LiveEvent, ModelConfig, Run, ToolEvent, Trial } from '../src/types.ts';
@@ -651,6 +651,36 @@ test('only a change to how a try runs moves the fingerprint', () => {
   assert.equal(now(), start, 'an unreached file is not part of a try');
   writeFileSync(join(dir, 'src/trial.ts'), `import { h } from './helper.ts';\nvoid h;\n${readFileSync(join(dir, 'src/trial.ts'), 'utf8')}`);
   assert.notEqual(now(), start, 'the moment trial.ts imports it, it is');
+  // Grading has its own fingerprint: changing it regrades, it does not rerun.
+  const grading = () => conditionsNow(dir, cfg(), DEFAULT_OPTIONS, '3').gradingHash, graded = grading(), ran = now();
+  writeFileSync(join(dir, 'src/grade.ts'), `${readFileSync(join(dir, 'src/grade.ts'), 'utf8')}\nexport const stricter = 1;\n`);
+  assert.equal(now(), ran, 'a grading change leaves the submission current');
+  assert.notEqual(grading(), graded, 'and moves the grading fingerprint');
+});
+
+test('a grading change regrades saved tries from their files and never calls a model', async () => {
+  const dir = workspace(), config = cfg(), opts = { ...DEFAULT_OPTIONS, repeat: 1, tests: [task.id] };
+  const first = await runBenchmark(dir, config, opts);
+  const now = () => conditionsNow(dir, config, DEFAULT_OPTIONS, 'any');
+  const board = () => leaderboard(listRuns(dir), loadSuite(dir, 'suites/personal/suite.json').suite.tasks, now());
+  const statuses = () => Object.fromEntries(listRuns(dir).find(r => r.id === first.id)!.trials.map(t => [t.model, t.status]));
+  assert.deepEqual(statuses(), { 'control-reference': 'passed', 'control-baseline': 'failed' });
+  assert.deepEqual((await regrade(dir, config)).regraded, 0, 'nothing to do while grading is current');
+  // A stricter grader: every correctness check now fails.
+  const graderPath = join(dir, 'suites/personal', task.grader), original = readFileSync(graderPath, 'utf8');
+  writeFileSync(graderPath, original.replace('export async function grade(', 'async function looseGrade(') + `\nexport async function grade(context) { return (await looseGrade(context)).map(c => c.dimension === 'correctness' ? { ...c, passed: false } : c); }\n`);
+  const result = await regrade(dir, config);
+  assert.deepEqual([result.regraded, result.failed], [2, []]);
+  assert.deepEqual(statuses(), { 'control-reference': 'failed', 'control-baseline': 'failed' }, 'graded again from the saved files');
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'runs', first.id, 'run.json'), 'utf8')).trials.map((t: Trial) => t.status).sort(), ['failed', 'passed'], 'the recorded try is never rewritten');
+  assert.equal((await regrade(dir, config)).regraded, 0, 'and it is done once');
+  assert.equal(board(), null, 'controls never reach the board, graded or not');
+  // A change to what the model saw is not a grading change: that needs the model again.
+  writeFileSync(graderPath, original);
+  const suitePath = join(dir, 'suites/personal/suite.json'), suite = JSON.parse(readFileSync(suitePath, 'utf8'));
+  suite.tasks.find((t: { id: string }) => t.id === task.id).prompt += ' Be brief.';
+  writeFileSync(suitePath, JSON.stringify(suite));
+  assert.equal((await regrade(dir, config)).regraded, 0, 'a changed prompt is never regraded: the model has to see it');
 });
 
 /** The standard OpenAI-compatible surface and nothing else: `GET /v1/models`, streamed `POST /v1/chat/completions`. */
@@ -797,6 +827,10 @@ test('a try already on record under the same conditions is never run again', asy
     const other = loadSuite(dir, 'suites/personal/suite.json').suite.tasks.find(t => t.id !== task.id)!;
     writeFileSync(join(dir, 'suites/personal', other.grader), readFileSync(join(dir, 'suites/personal', other.grader), 'utf8') + '\n// edited\n');
     await assert.rejects(runBenchmark(dir, config, opts), /Nothing to run/);
+    // Changed on purpose: this task's own grader is grading, not what the model saw, so it regrades instead of rerunning.
+    const own = join(dir, 'suites/personal', task.grader);
+    writeFileSync(own, readFileSync(own, 'utf8') + '\nexport const stricter = 1;\n');
+    await assert.rejects(runBenchmark(dir, config, opts), /Nothing to run/);
     assert.equal((await runBenchmark(dir, config, { ...opts, repeat: 2 })).planned, 1, 'only the missing second try');
     assert.equal((await runBenchmark(dir, config, { ...opts, fresh: true })).planned, 1, '--fresh runs it anyway');
     // A different condition is a different try: a larger turn budget is not the same experiment.
@@ -888,11 +922,15 @@ test('tries run side by side never see each other', async () => {
   assert.notEqual(reference.files[differs], baseline.files[differs], 'the two answers stayed apart');
 });
 
-test('a change to how a try runs is recorded on purpose, by whoever makes it', () => {
-  const lock = JSON.parse(readFileSync(join(root, 'fingerprint.lock'), 'utf8')) as { harness: string; files: string[] };
-  assert.equal(conditionsNow(root, cfg(), DEFAULT_OPTIONS, 'any').harnessHash, lock.harness,
+test('a change to how a try runs or is graded is recorded on purpose, by whoever makes it', () => {
+  const lock = JSON.parse(readFileSync(join(root, 'fingerprint.lock'), 'utf8')) as { harness: string; grading: string; files: string[]; gradingFiles: string[] };
+  const now = conditionsNow(root, cfg(), DEFAULT_OPTIONS, 'any');
+  assert.equal(now.harnessHash, lock.harness,
     `This change alters how tries run, so every recorded try stops comparing and will be rerun. If that is intended, record it: npm run fingerprint -- "what changed and why it matters". Try path: ${lock.files.join(', ')}`);
+  assert.equal(now.gradingHash, lock.grading,
+    `This change alters how tries are graded. If that is intended, record it: npm run fingerprint -- "what changed and why", then npm start -- regrade (no model is called). Grading path: ${lock.gradingFiles.join(', ')}`);
   assert.deepEqual(Object.keys(harnessFiles(root)), lock.files, 'and the lock names the files it covers');
+  assert.deepEqual(Object.keys(harnessFiles(root, gradeClosure)), lock.gradingFiles);
 });
 
 

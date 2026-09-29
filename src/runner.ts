@@ -5,13 +5,15 @@ import { spawnSync } from 'node:child_process';
 import { authInfo, catalogModels } from './auth.ts';
 import { SYSTEM_PROMPT } from './adapter.ts';
 import { claudeCodeArgs, claudeCodeBinary } from './claudecode.ts';
-import { SCHEME, harnessFingerprint, taskFingerprint, trialClosure, canonical } from './fingerprint.ts';
-import { loadSuite, selectedModels, validateOptions } from './config.ts';
+import { SCHEME, gradeClosure, gradingFingerprint, harnessFingerprint, taskFingerprint, taskGrading, trialClosure, canonical } from './fingerprint.ts';
+export { gradeClosure } from './fingerprint.ts';
+import { DEFAULT_OPTIONS, loadSuite, selectedModels, validateOptions } from './config.ts';
 import { MAX_ENTRIES, atomicJson, files, hash, inside, localDir, put } from './files.ts';
 import { makeJudgeCall, type JudgeCall } from './judge.ts';
 import { listLocalModels, LOCAL } from './local.ts';
 import { SANDBOX, checkSandbox, pythonExecutable } from './sandbox.ts';
-import { FINISHED, conditionsKey, modelKey, trialKey } from './report.ts';
+import { FINISHED, STALL, conditionsKey, gradedKey, gradingKey, modelKey, trialKey } from './report.ts';
+import { applicableDimensions, gradeSubmission, loadGrader, rejectArtifacts, validateChecks } from './grade.ts';
 import { laneOf, runTrial, type Job } from './trial.ts';
 import type { Config, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
 
@@ -30,9 +32,9 @@ export function schedule(models: ModelConfig[], tasks: Task[], repeat: number, s
 /** Everything under src/ and the lockfile: saved with every run, so its fingerprint can be recomputed later. */
 const harnessOf = (root: string) => ({ src: files(inside(root, 'src')), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8') });
 /** The try path as it executes, for tests and for anyone asking what a fingerprint covers. */
-export function harnessFiles(root: string): Record<string, string> {
+export function harnessFiles(root: string, closure = trialClosure): Record<string, string> {
   const src = files(inside(root, 'src'));
-  return Object.fromEntries(trialClosure(src).map(path => [path, canonical(path, src[path]!)]));
+  return Object.fromEntries(closure(src).map(path => [path, canonical(path, src[path]!)]));
 }
 /** The current Claude Code release: it decides that lane's prompt and tools, so it is part of the model. */
 function claudeVersion(): string {
@@ -40,18 +42,18 @@ function claudeVersion(): string {
   return /versions\/([\d.]+)/.exec(binary)?.[1] ?? spawnSync(binary, ['--version'], { encoding: 'utf8' }).stdout.trim().split(/\s/)[0] ?? '';
 }
 function taskEntry(t: Task, contents: Record<string, string>): Run['tasks'][number] {
-  return { id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, turns: t.turns, timeout: t.timeout, hash: taskFingerprint(t, contents) };
+  return { id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, turns: t.turns, timeout: t.timeout, hash: taskFingerprint(t, contents), grading: taskGrading(t, contents) };
 }
 /**
  * The conditions a try would run under now, with these options: the code, every task in the suite
  * and this machine. A run looks up what is already on record by it, and the leaderboard keeps only
  * tries recorded under it.
  */
-export function conditionsNow(root: string, config: Config, options: RunOptions, pythonVersion?: string): Pick<Run, 'options' | 'tasks' | 'harnessHash' | 'environment' | 'judge'> {
+export function conditionsNow(root: string, config: Config, options: RunOptions, pythonVersion?: string): Pick<Run, 'options' | 'tasks' | 'harnessHash' | 'gradingHash' | 'environment' | 'judge'> {
   const { suite, contents } = loadSuite(root, config.suite);
   const version = pythonVersion ?? spawnSync(pythonExecutable(), ['-I', '-c', 'import platform; print(platform.python_version())'], { encoding: 'utf8' }).stdout.trim();
   return {
-    options, harnessHash: (({ src, lock }) => harnessFingerprint(src, lock))(harnessOf(root)), judge: config.judge.enabled ? config.judge : null,
+    options, ...(({ src, lock }) => ({ harnessHash: harnessFingerprint(src, lock), gradingHash: gradingFingerprint(src, lock) }))(harnessOf(root)), judge: config.judge.enabled ? config.judge : null,
     environment: { os: `${platform()} ${release()} ${arch()}`, python: pythonExecutable(), pythonVersion: version, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)) },
     tasks: suite.tasks.map(t => taskEntry(t, contents)),
   };
@@ -111,6 +113,8 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
   catch { throw new Error('Run lock exists. Another run may be active. If it crashed, inspect .state/run.lock and its PID before removing that local file.'); }
   try {
     const pythonVersion = await checkSandbox(root);
+    // A try graded by older rules is regraded, not rerun: its submission is still current.
+    await regrade(root, config);
     // Read once per run: the local server's real context size, recorded below with the model.
     const contexts: Record<string, number> = models.some(m => m.provider === LOCAL)
       ? Object.fromEntries((await listLocalModels(config.local.url)).flatMap(m => (m.contextWindow ? [[m.id, m.contextWindow]] : []))) : {};
@@ -142,7 +146,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     put(harnessDir, 'package.json', readFileSync(inside(root, 'package.json'), 'utf8'));
     const run: Run = {
       schema: 1, id, created: new Date().toISOString(), status: 'running', suite: suite.id,
-      suiteHash: hash(contents), harnessHash: draft.harnessHash, environment, judge,
+      suiteHash: hash(contents), harnessHash: draft.harnessHash, gradingHash: draft.gradingHash, environment, judge,
       options, models, tasks: taskEntries, planned: jobs.length, trials: [],
     };
     atomicJson(runDir, 'run.json', run);
@@ -195,6 +199,8 @@ export function readRun(root: string, id: string, active = activeRunId(root)): R
     for (const check of trial.checks) if ((check.dimension as string) === 'quality') check.dimension = 'hygiene';
   }
   if (run.status === 'running' && run.id !== active) run.status = 'interrupted';
+  // A regrade replaces a try's checks by newer grading without rewriting what was recorded.
+  try { const regraded = JSON.parse(readFileSync(inside(root, `runs/${id}/regrade.json`), 'utf8')) as Record<string, Partial<Trial>>; for (const trial of run.trials) Object.assign(trial, regraded[trial.id]); } catch { /* Never regraded. */ }
   // Claude Code's first log line names the model behind the alias; the try's log keeps it.
   for (const trial of run.trials) {
     if (trial.served || !run.models.some(m => m.id === trial.model && m.provider === 'claude-code')) continue;
@@ -211,7 +217,7 @@ export function readRun(root: string, id: string, active = activeRunId(root)): R
  */
 function refingerprint(root: string, run: Run): void {
   const dir = inside(root, `runs/${run.id}`), cachePath = inside(dir, 'fingerprint.json');
-  type Cache = { scheme: number; harness: string; tasks: Record<string, string>; claudeVersion?: string };
+  type Cache = { scheme: number; harness: string; grading: string; tasks: Record<string, string>; gradings: Record<string, string>; claudeVersion?: string };
   let cache: Cache | undefined;
   try { cache = JSON.parse(readFileSync(cachePath, 'utf8')) as Cache; } catch { /* Not computed yet. */ }
   if (cache?.scheme !== SCHEME) {
@@ -220,17 +226,73 @@ function refingerprint(root: string, run: Run): void {
     const suite = files(at('suite'), MAX_ENTRIES), definitions = (JSON.parse(suite['suite.json']!) as { tasks: Task[] }).tasks;
     const logged = run.models.some(m => m.provider === 'claude-code') && !run.environment.claudeVersion && existsSync(at('trials'))
       ? readdirSync(at('trials')).map(t => { try { return /versions\/([\d.]+)/.exec(readFileSync(at(`trials/${t}/events.jsonl`), 'utf8'))?.[1]; } catch { return undefined; } }).find(Boolean) : undefined;
+    const src = files(at('harness/src')), lock = readFileSync(at('harness/package-lock.json'), 'utf8');
     cache = {
-      scheme: SCHEME, harness: harnessFingerprint(files(at('harness/src')), readFileSync(at('harness/package-lock.json'), 'utf8')),
+      scheme: SCHEME, harness: harnessFingerprint(src, lock), grading: gradingFingerprint(src, lock),
       tasks: Object.fromEntries(run.tasks.map(t => { const d = definitions.find(x => x.id === t.id); return [t.id, d ? taskFingerprint(d, suite) : t.hash]; })),
+      gradings: Object.fromEntries(run.tasks.flatMap(t => { const d = definitions.find(x => x.id === t.id); return d ? [[t.id, taskGrading(d, suite)]] : []; })),
       ...(logged ? { claudeVersion: logged } : {}),
     };
     // A running run's trials may not have logged yet; its fingerprints are fixed, so only the version waits.
     if (run.status !== 'running' || !run.models.some(m => m.provider === 'claude-code') || run.environment.claudeVersion) try { writeFileSync(cachePath, JSON.stringify(cache)); } catch { /* Read-only is fine. */ }
   }
-  run.harnessHash = cache.harness;
-  for (const t of run.tasks) t.hash = cache.tasks[t.id] ?? t.hash;
+  // A refactor that changed no behaviour is declared in fingerprint.lock, so it strands nothing.
+  const same = equivalences(root).find(e => e.was === cache.harness);
+  run.harnessHash = same?.harness ?? cache.harness;
+  run.gradingHash = same?.grading ?? cache.grading;
+  for (const t of run.tasks) { t.hash = cache.tasks[t.id] ?? t.hash; t.grading = cache.gradings?.[t.id]; }
   if (cache.claudeVersion && !run.environment.claudeVersion) run.environment.claudeVersion = cache.claudeVersion;
+}
+/** Harness fingerprints fingerprint.lock declares equal to a later pair, each with the reason. */
+function equivalences(root: string): { was: string; harness: string; grading: string }[] {
+  try { return (JSON.parse(readFileSync(inside(root, 'fingerprint.lock'), 'utf8')) as { equivalent?: { was: string; harness: string; grading: string }[] }).equivalent ?? []; } catch { return []; }
+}
+/**
+ * Grades again, by today's graders, every finished try whose submission is still current but whose
+ * checks came from older grading. No model is called: the saved files, answer and tool trace are
+ * graded in a fresh folder. The result goes to runs/<id>/regrade.json; the recorded try is never
+ * rewritten. The reviewer is not called again either: its verdict stands while the answer is right.
+ */
+export async function regrade(root: string, config: Config): Promise<{ regraded: number; failed: string[] }> {
+  const now = conditionsNow(root, config, DEFAULT_OPTIONS, 'any'), { suite, dir } = loadSuite(root, config.suite);
+  const result = { regraded: 0, failed: [] as string[] };
+  for (const run of listRuns(root)) {
+    if (run.status === 'running' || run.harnessHash !== now.harnessHash) continue;
+    const path = inside(root, `runs/${run.id}/regrade.json`);
+    let overlay: Record<string, Partial<Trial>> = {};
+    try { overlay = JSON.parse(readFileSync(path, 'utf8')); } catch { /* First regrade. */ }
+    const before = result.regraded;
+    for (const trial of run.trials) {
+      const task = suite.tasks.find(t => t.id === trial.task), current = now.tasks.find(t => t.id === trial.task), model = run.models.find(m => m.id === trial.model)!;
+      if (!task || !current || !FINISHED.includes(trial.status) || run.tasks.find(t => t.id === trial.task)?.hash !== current.hash) continue;
+      const key = gradingKey(now, task.id);
+      if (gradedKey(run, trial) === key) continue;
+      const lane = run.options.lane, control = model.provider === 'control', agent = laneOf(model), next = structuredClone(trial);
+      const rejected = trial.checks.find(c => c.id.startsWith('invalid-submission-'));
+      try {
+        if (rejected) {
+          // Rejected before grading, so there is nothing to grade; only the checks it is marked down on can change.
+          rejectArtifacts(Object.assign(next, { status: 'passed' }), task, lane, control, rejected.evidence.replace(/^Submission rejected before grading: /, ''), agent);
+          next.error = trial.error;
+        } else if (!STALL.includes(trial.status)) {
+          const work = localDir(root, `.state/regrade/${randomUUID()}`);
+          try {
+            for (const [file, text] of Object.entries(trial.files)) put(work, file, text);
+            const checks = validateChecks(await gradeSubmission(await loadGrader(inside(dir, task.grader)), trial, lane, control, agent, work, new AbortController().signal), applicableDimensions(task, lane, control, agent));
+            const wrong = checks.filter(c => c.dimension === 'correctness' && !c.passed).length, design = trial.checks.filter(c => c.dimension === 'design');
+            next.checks = [...checks, ...(wrong ? [] : design)];
+            if (wrong && design.length) next.judgeNote = `Not reviewed: ${wrong} correctness check(s) failed first`;
+            else if (!wrong && !design.length && trial.judgeNote?.startsWith('Not reviewed:')) next.judgeNote = 'Not reviewed: it failed correctness when first graded';
+            next.status = next.checks.every(c => c.passed) ? 'passed' : 'failed';
+          } finally { rmSync(work, { recursive: true, force: true }); }
+        }
+      } catch (error) { result.failed.push(`${run.id}/${trial.id}: ${error instanceof Error ? error.message : error}`); continue; }
+      overlay[trial.id] = { graded: key, status: next.status, checks: next.checks, error: next.error, judgeNote: next.judgeNote };
+      result.regraded++;
+    }
+    if (result.regraded > before) atomicJson(inside(root, `runs/${run.id}`), 'regrade.json', overlay);
+  }
+  return result;
 }
 export function listRuns(root: string): Run[] {
   const base = inside(root, 'runs');
