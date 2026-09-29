@@ -27,7 +27,8 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## Gotchas
 
-- **`parallel` in forseti.json sets tries at once (default 1).** Local-server models still run one at a time. Only `src/trial.ts` and what it calls are fingerprinted; editing `runner.ts`, `app.ts`, `cli.ts`, `report.ts` or `tui.ts` keeps recorded tries.
+- **`parallel` in forseti.json sets tries at once (default 1).** Local-server models still run one at a time.
+- **If `npm test` fails on `fingerprint.lock`, you changed how tries run.** Only `src/trial.ts` and its imports count, without comments or layout. Record it with `npm run fingerprint -- "why"` only if intended. A Claude Code update also resets Claude tries.
 - **Parallel Opus subagents drain the plan's 5-hour window fast.** Four here plus four in another project's session took it from 70% to 100% in about 30 minutes; the benchmark trials were ~2% of that. Run agents one at a time, or on Sonnet.
 - **Pilot with Haiku and Sonnet first; run Opus only where both fail.** Opus is the costliest candidate.
 - **A prompt that lists expected behaviours makes a bug hunt easy.** It points at every defect.

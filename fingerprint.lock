@@ -1,0 +1,19 @@
+{
+  "scheme": 1,
+  "harness": "16406541837e6191d0ab46a821ff787a420e5487079bfabbb75b75d8b16ac643",
+  "files": [
+    "adapter.ts",
+    "auth.ts",
+    "claudecode.ts",
+    "config.ts",
+    "files.ts",
+    "judge.ts",
+    "local.ts",
+    "mcpserver.ts",
+    "sandbox-linux.py",
+    "sandbox.ts",
+    "trial.ts",
+    "types.ts"
+  ],
+  "note": "Fingerprint what a try executes: comments, layout and types no longer count; the try path is followed from src/trial.ts"
+}

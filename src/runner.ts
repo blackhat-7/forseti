@@ -4,9 +4,10 @@ import { arch, platform, release } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { authInfo, catalogModels } from './auth.ts';
 import { SYSTEM_PROMPT } from './adapter.ts';
-import { claudeCodeArgs } from './claudecode.ts';
+import { claudeCodeArgs, claudeCodeBinary } from './claudecode.ts';
+import { SCHEME, harnessFingerprint, taskFingerprint, trialClosure, canonical } from './fingerprint.ts';
 import { loadSuite, selectedModels, validateOptions } from './config.ts';
-import { atomicJson, files, hash, inside, localDir, put } from './files.ts';
+import { MAX_ENTRIES, atomicJson, files, hash, inside, localDir, put } from './files.ts';
 import { makeJudgeCall, type JudgeCall } from './judge.ts';
 import { listLocalModels, LOCAL } from './local.ts';
 import { SANDBOX, checkSandbox, pythonExecutable } from './sandbox.ts';
@@ -26,24 +27,20 @@ export function schedule(models: ModelConfig[], tasks: Task[], repeat: number, s
   }
   return jobs;
 }
-/**
- * The harness fingerprint covers the code that runs and grades a try (trial.ts and everything it
- * calls), not the code around it. report.ts and tui.ts only read finished tries; runner.ts decides
- * which tries run, in what order and how many at once; app.ts and cli.ts only pass settings, which
- * are recorded on their own. Hashing those stranded paid-for tries behind a wording fix and a
- * scheduling change that could not alter any answer.
- */
-const NOT_TRIAL = new Set(['report.ts', 'tui.ts', 'runner.ts', 'app.ts', 'cli.ts']);
-const harnessOf = (root: string) => ({ src: harnessFiles(root), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8'), system: SYSTEM_PROMPT });
-/**
- * A task's fingerprint: what the model is shown and what grades it. The title, tier and skills are
- * labels the model never sees, so relabelling a task keeps its tries. Only its own grader and the
- * helpers every grader imports count, so editing one grader strands nothing else.
- */
-function taskEntry(t: Task, dir: string, contents: Record<string, string>): Run['tasks'][number] {
-  const { title, tier, capabilities, ...shown } = t;
-  const graders = Object.entries(contents).filter(([p]) => p === t.grader || p === 'private/helpers.mjs');
-  return { id: t.id, title, capabilities, tier, turns: t.turns, timeout: t.timeout, hash: hash({ task: shown, fixture: files(inside(dir, t.fixture)), private: graders }) };
+/** Everything under src/ and the lockfile: saved with every run, so its fingerprint can be recomputed later. */
+const harnessOf = (root: string) => ({ src: files(inside(root, 'src')), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8') });
+/** The try path as it executes, for tests and for anyone asking what a fingerprint covers. */
+export function harnessFiles(root: string): Record<string, string> {
+  const src = files(inside(root, 'src'));
+  return Object.fromEntries(trialClosure(src).map(path => [path, canonical(path, src[path]!)]));
+}
+/** The current Claude Code release: it decides that lane's prompt and tools, so it is part of the model. */
+function claudeVersion(): string {
+  const binary = claudeCodeBinary();
+  return /versions\/([\d.]+)/.exec(binary)?.[1] ?? spawnSync(binary, ['--version'], { encoding: 'utf8' }).stdout.trim().split(/\s/)[0] ?? '';
+}
+function taskEntry(t: Task, contents: Record<string, string>): Run['tasks'][number] {
+  return { id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, turns: t.turns, timeout: t.timeout, hash: taskFingerprint(t, contents) };
 }
 /**
  * The conditions a try would run under now, with these options: the code, every task in the suite
@@ -51,16 +48,13 @@ function taskEntry(t: Task, dir: string, contents: Record<string, string>): Run[
  * tries recorded under it.
  */
 export function conditionsNow(root: string, config: Config, options: RunOptions, pythonVersion?: string): Pick<Run, 'options' | 'tasks' | 'harnessHash' | 'environment' | 'judge'> {
-  const { suite, dir, contents } = loadSuite(root, config.suite);
+  const { suite, contents } = loadSuite(root, config.suite);
   const version = pythonVersion ?? spawnSync(pythonExecutable(), ['-I', '-c', 'import platform; print(platform.python_version())'], { encoding: 'utf8' }).stdout.trim();
   return {
-    options, harnessHash: hash(harnessOf(root)), judge: config.judge.enabled ? config.judge : null,
+    options, harnessHash: (({ src, lock }) => harnessFingerprint(src, lock))(harnessOf(root)), judge: config.judge.enabled ? config.judge : null,
     environment: { os: `${platform()} ${release()} ${arch()}`, python: pythonExecutable(), pythonVersion: version, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)) },
-    tasks: suite.tasks.map(t => taskEntry(t, dir, contents)),
+    tasks: suite.tasks.map(t => taskEntry(t, contents)),
   };
-}
-export function harnessFiles(root: string): Record<string, string> {
-  return Object.fromEntries(Object.entries(files(inside(root, 'src'))).filter(([path]) => !NOT_TRIAL.has(path)));
 }
 /**
  * Runs jobs in schedule order, at most `limit` at a time. Tries on the local server go one at a
@@ -124,7 +118,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     const taskEntries = tasks.map(t => now.tasks.find(e => e.id === t.id)!);
     // Each model runs in its own family's lane, so one run can hold both; a model's client flags are those of its lane.
     const environment = { node: process.version, ...now.environment, sandbox: SANDBOX, pi: '0.85.1', agent: lanes.size > 1 ? 'mixed' : lanes.has('claude-code') ? 'claude-code' : 'pi',
-      claudeFlags: claudeCodeArgs('MODEL', options.maxTurns).join(' '), piFlags: 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null } : catalogModels.getModel(m.provider, m.model))) };
+      claudeFlags: claudeCodeArgs('MODEL', options.maxTurns).join(' '), piFlags: 'pi-agent-core 0.85.1', ...(lanes.has('claude-code') ? { claudeVersion: claudeVersion() } : {}), catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null } : catalogModels.getModel(m.provider, m.model))) };
     // Only the tries not already on record under these exact conditions are run; see trialKey.
     const draft = { ...now, tasks: taskEntries, environment };
     const done = new Map<string, number>();
@@ -201,7 +195,37 @@ export function readRun(root: string, id: string, active = activeRunId(root)): R
     for (const check of trial.checks) if ((check.dimension as string) === 'quality') check.dimension = 'hygiene';
   }
   if (run.status === 'running' && run.id !== active) run.status = 'interrupted';
+  refingerprint(root, run);
   return run;
+}
+/**
+ * Replaces a run's recorded fingerprints with ones recomputed, by the current scheme, from the code
+ * and suite the run saved, and caches them beside it. So a better fingerprint never strands an old
+ * run, and two runs whose code differs only in comments still compare. Older runs also learn which
+ * Claude Code release ran them, from the binary path their trials logged.
+ */
+function refingerprint(root: string, run: Run): void {
+  const dir = inside(root, `runs/${run.id}`), cachePath = inside(dir, 'fingerprint.json');
+  type Cache = { scheme: number; harness: string; tasks: Record<string, string>; claudeVersion?: string };
+  let cache: Cache | undefined;
+  try { cache = JSON.parse(readFileSync(cachePath, 'utf8')) as Cache; } catch { /* Not computed yet. */ }
+  if (cache?.scheme !== SCHEME) {
+    const at = (path: string) => inside(dir, path);
+    if (!existsSync(at('harness/src')) || !existsSync(at('harness/package-lock.json')) || !existsSync(at('suite/suite.json'))) return;
+    const suite = files(at('suite'), MAX_ENTRIES), definitions = (JSON.parse(suite['suite.json']!) as { tasks: Task[] }).tasks;
+    const logged = run.models.some(m => m.provider === 'claude-code') && !run.environment.claudeVersion && existsSync(at('trials'))
+      ? readdirSync(at('trials')).map(t => { try { return /versions\/([\d.]+)/.exec(readFileSync(at(`trials/${t}/events.jsonl`), 'utf8'))?.[1]; } catch { return undefined; } }).find(Boolean) : undefined;
+    cache = {
+      scheme: SCHEME, harness: harnessFingerprint(files(at('harness/src')), readFileSync(at('harness/package-lock.json'), 'utf8')),
+      tasks: Object.fromEntries(run.tasks.map(t => { const d = definitions.find(x => x.id === t.id); return [t.id, d ? taskFingerprint(d, suite) : t.hash]; })),
+      ...(logged ? { claudeVersion: logged } : {}),
+    };
+    // A running run's trials may not have logged yet; its fingerprints are fixed, so only the version waits.
+    if (run.status !== 'running' || !run.models.some(m => m.provider === 'claude-code') || run.environment.claudeVersion) try { writeFileSync(cachePath, JSON.stringify(cache)); } catch { /* Read-only is fine. */ }
+  }
+  run.harnessHash = cache.harness;
+  for (const t of run.tasks) t.hash = cache.tasks[t.id] ?? t.hash;
+  if (cache.claudeVersion && !run.environment.claudeVersion) run.environment.claudeVersion = cache.claudeVersion;
 }
 export function listRuns(root: string): Run[] {
   const base = inside(root, 'runs');

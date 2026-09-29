@@ -14,7 +14,8 @@
     "test:judge": "PYTHONDONTWRITEBYTECODE=1 node suites/personal/private/verify-judge.mjs",
     "demo": "node src/cli.ts run --models control-reference,control-baseline --repeat 2",
     "doctor": "node src/cli.ts doctor",
-    "screenshot": "node tools/screenshot.ts"
+    "screenshot": "node tools/screenshot.ts",
+    "fingerprint": "node src/cli.ts fingerprint"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.85.1",

@@ -265,7 +265,10 @@ export function modelKey(run: Pick<Run, 'environment' | 'options'>, model: Model
   const tokens = claude ? '' : `/${run.options.maxTokens}`;
   // A run records each lane's client flags; runs from before mixed lanes recorded only their one lane's.
   const flags = (claude ? e.claudeFlags : e.piFlags) ?? e.agentFlags ?? '';
-  return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(flags).slice(0, 12)}`;
+  // Claude Code's release changes its prompt and tools; a local server's context changes what fits.
+  const context = (() => { try { return (JSON.parse(e.catalog ?? '[]') as { local?: string; contextWindow?: number }[]).find(c => c.local === model.model)?.contextWindow; } catch { return undefined; } })();
+  const release = claude ? `/cc${e.claudeVersion ?? '?'}` : context ? `/ctx${context}` : '';
+  return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(flags).slice(0, 12)}${release}`;
 }
 export function trialKey(run: Run, trial: Trial): string {
   return `${modelKey(run, run.models.find(m => m.id === trial.model)!)} ${conditionsKey(run, trial.task)}`;

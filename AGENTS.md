@@ -47,7 +47,7 @@ npm run demo                       # 36 synthetic trials, no provider needed
 - **This repository is public.** Nothing you commit may contain a credential, a real transcript excerpt, an employer or product name, or a production path. Suite fixtures are invented data. A `gitleaks` pre-commit hook is the backstop, not the check.
 - **Never read, copy, refresh or rotate a credential.** No metered API key without an explicit `--auth env`.
 - **Do not broaden the sandbox.** Its denials are the security boundary and are covered by tests.
-- Anything that changes comparability goes in `comparisonKey`, so unlike runs never pool.
+- **Anything that changes how a try runs changes its fingerprint, and that is recorded on purpose.** The fingerprint covers `src/trial.ts` and every file it imports, compared without comments, layout or types, plus each task's prompt, fixture and grader. If `npm test` fails on `fingerprint.lock`, your change makes every recorded try stale: run `npm run fingerprint -- "why"` only if you meant it, and say so in the commit. Never move try logic out of that path to dodge it.
 - The suite must not import from `src/`. Expected values stay in trusted JavaScript.
 - Never weaken a test, type or check to get green. Changing an assertion needs a stated reason in the commit.
 - All work stays inside this workspace. External projects and transcripts are read-only.

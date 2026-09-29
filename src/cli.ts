@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { App } from './app.ts';
 import { authInfo, defaultAuth, ENV_KEYS } from './auth.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
-import { clean } from './files.ts';
+import { atomicJson, clean } from './files.ts';
 import { LOCAL } from './local.ts';
+import { conditionsNow, harnessFiles } from './runner.ts';
+import { SCHEME } from './fingerprint.ts';
 import { comparisonReport } from './report.ts';
 import { checkSandbox, pythonExecutable } from './sandbox.ts';
 import type { ModelConfig, RunOptions } from './types.ts';
@@ -109,6 +111,14 @@ async function main() {
       app.persist(); console.log(`${action}: ${id}. Fixtures/results retained; restore is reversible.`);
     }
     return;
+  }
+  if (command === 'fingerprint') {
+    // The tripwire: npm test fails until a change to how tries run is recorded here, on purpose.
+    const note = positionals.slice(1).join(' ').trim();
+    if (!note) throw new Error('Say why tries must be rerun: npm run fingerprint -- "what changed and why it matters"');
+    const now = conditionsNow(root, app.config, DEFAULT_OPTIONS, 'any');
+    atomicJson(root, 'fingerprint.lock', { scheme: SCHEME, harness: now.harnessHash, files: Object.keys(harnessFiles(root)), note });
+    console.log(`Recorded ${now.harnessHash.slice(0, 12)}. Tries recorded under any other fingerprint no longer compare and are rerun when asked for.`); return;
   }
   if (command === 'parallel') {
     if (action) { app.config.parallel = Number(action); app.persist(); }

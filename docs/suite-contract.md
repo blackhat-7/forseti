@@ -52,4 +52,4 @@ Known gaps: nothing here tests architecture or system design, long-horizon plann
 
 ## Grader imports
 
-A grader may import only `helpers.mjs` from `private/`. A task's fingerprint covers its prompt, fixture files, its own grader and `helpers.mjs`; any other private file it imported would change results without changing the fingerprint. Editing `helpers.mjs` invalidates every task's recorded tries.
+A grader may import only `helpers.mjs` from `private/`. A task's fingerprint covers its definition (not its title, tier or skills), its fixture files byte for byte, and its own grader and `helpers.mjs` compared without comments or layout; any other private file it imported would change results without changing the fingerprint. A logic change to `helpers.mjs` invalidates every task's recorded tries; a comment does not.

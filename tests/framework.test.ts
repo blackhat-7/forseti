@@ -14,7 +14,7 @@ import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConf
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
 import { byTier, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
-import { applicableDimensions, inParallel, laneOf, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
+import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
 import type { Config, Dimension, ModelConfig, Run, ToolEvent, Trial } from '../src/types.ts';
@@ -614,18 +614,27 @@ test('read-only OAuth preflight agrees with Pi five-minute validity window', () 
   assert.throws(() => validateCredential({ type: 'api_key', key: '!some-command' }), /Command/);
 });
 
-test('a rendering-only change does not split comparison groups', () => {
+test('only a change to how a try runs moves the fingerprint', () => {
   const dir = workspace();
+  const now = () => conditionsNow(dir, cfg(), DEFAULT_OPTIONS, '3').harnessHash, start = now();
   const before = harnessFiles(dir);
-  // Scheduling and settings plumbing are outside the fingerprint too; the code that runs a try is inside.
-  for (const outside of ['report.ts', 'tui.ts', 'runner.ts', 'app.ts', 'cli.ts']) assert.ok(!(outside in before), outside);
-  assert.ok('trial.ts' in before && 'adapter.ts' in before && 'claudecode.ts' in before);
-  writeFileSync(join(dir, 'src/runner.ts'), '// how many at once\n', { flag: 'a' });
-  assert.deepEqual(harnessFiles(dir), before, 'a scheduling change must not strand earlier runs');
-  writeFileSync(join(dir, 'src/report.ts'), '// reworded\n', { flag: 'a' });
-  assert.deepEqual(harnessFiles(dir), before, 'a report wording fix must not strand earlier runs');
-  writeFileSync(join(dir, 'src/sandbox.ts'), '// changed\n', { flag: 'a' });
-  assert.notDeepEqual(harnessFiles(dir), before, 'anything that touches a trial still starts a new experiment');
+  // Scheduling, settings plumbing and the screens are outside the try path.
+  for (const outside of ['report.ts', 'tui.ts', 'runner.ts', 'app.ts', 'cli.ts', 'fingerprint.ts']) assert.ok(!(outside in before), outside);
+  assert.ok(['trial.ts', 'adapter.ts', 'claudecode.ts', 'sandbox.ts', 'sandbox-linux.py', 'mcpserver.ts'].every(f => f in before), 'the imports of trial.ts, followed');
+  for (const file of ['runner.ts', 'report.ts']) writeFileSync(join(dir, 'src', file), 'export const scheduling = 1;\n', { flag: 'a' });
+  assert.equal(now(), start, 'a scheduling or wording change must not strand recorded tries');
+  // A comment, a reformat or a type annotation is not a behaviour change.
+  const sandbox = readFileSync(join(dir, 'src/sandbox.ts'), 'utf8');
+  writeFileSync(join(dir, 'src/sandbox.ts'), `// a note\n${sandbox.replaceAll('  ', '    ')}\nexport type Note = string;\n`);
+  assert.equal(now(), start, 'comments, layout and types do not count');
+  writeFileSync(join(dir, 'src/sandbox.ts'), `${sandbox}\nexport const changed = 1;\n`);
+  assert.notEqual(now(), start, 'a line of logic on the try path does');
+  writeFileSync(join(dir, 'src/sandbox.ts'), sandbox);
+  // A new file counts once the try path reaches it, and not before.
+  writeFileSync(join(dir, 'src/helper.ts'), 'export const h = 1;\n');
+  assert.equal(now(), start, 'an unreached file is not part of a try');
+  writeFileSync(join(dir, 'src/trial.ts'), `import { h } from './helper.ts';\nvoid h;\n${readFileSync(join(dir, 'src/trial.ts'), 'utf8')}`);
+  assert.notEqual(now(), start, 'the moment trial.ts imports it, it is');
 });
 
 /** The standard OpenAI-compatible surface and nothing else: `GET /v1/models`, streamed `POST /v1/chat/completions`. */
@@ -765,6 +774,9 @@ test('a try already on record under the same conditions is never run again', asy
     recorded.trials[0] = { ...recorded.trials[0]!, status: 'failed', checks: [{ id: 'c', dimension: 'correctness', passed: false, evidence: '' }] };
     writeFileSync(path, JSON.stringify(recorded));
     await assert.rejects(runBenchmark(dir, config, opts), /Nothing to run/);
+    // A comment on the try path is not a new condition: the recorded try still counts.
+    writeFileSync(join(dir, 'src/trial.ts'), `// reworded\n${readFileSync(join(dir, 'src/trial.ts'), 'utf8')}`);
+    await assert.rejects(runBenchmark(dir, config, opts), /Nothing to run/);
     // Another task's grader is not this task's condition, so editing it strands nothing.
     const other = loadSuite(dir, 'suites/personal/suite.json').suite.tasks.find(t => t.id !== task.id)!;
     writeFileSync(join(dir, 'suites/personal', other.grader), readFileSync(join(dir, 'suites/personal', other.grader), 'utf8') + '\n// edited\n');
@@ -859,3 +871,11 @@ test('tries run side by side never see each other', async () => {
   const differs = Object.keys(grader.reference.files).find(p => grader.reference.files[p] !== grader.baseline.files?.[p])!;
   assert.notEqual(reference.files[differs], baseline.files[differs], 'the two answers stayed apart');
 });
+
+test('a change to how a try runs is recorded on purpose, by whoever makes it', () => {
+  const lock = JSON.parse(readFileSync(join(root, 'fingerprint.lock'), 'utf8')) as { harness: string; files: string[] };
+  assert.equal(conditionsNow(root, cfg(), DEFAULT_OPTIONS, 'any').harnessHash, lock.harness,
+    `This change alters how tries run, so every recorded try stops comparing and will be rerun. If that is intended, record it: npm run fingerprint -- "what changed and why it matters". Try path: ${lock.files.join(', ')}`);
+  assert.deepEqual(Object.keys(harnessFiles(root)), lock.files, 'and the lock names the files it covers');
+});
+
