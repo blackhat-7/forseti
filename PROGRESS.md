@@ -23,18 +23,17 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## Next
 
-`PLAN.md`: top up the hard tier to 3 tries — only missing tries run now. **Run it alone.** Any edit outside `report.ts`/`tui.ts` in `src/` changes the harness hash and makes every task's tries stale.
+`PLAN.md`: top up the hard tier to 3 tries — only missing tries run. Editing `src/trial.ts` or anything it calls makes every try stale.
 
 ## Gotchas
 
+- **`parallel` in forseti.json sets tries at once (default 1).** Local-server models still run one at a time. Only `src/trial.ts` and what it calls are fingerprinted; editing `runner.ts`, `app.ts`, `cli.ts`, `report.ts` or `tui.ts` keeps recorded tries.
 - **Parallel Opus subagents drain the plan's 5-hour window fast.** Four here plus four in another project's session took it from 70% to 100% in about 30 minutes; the benchmark trials were ~2% of that. Run agents one at a time, or on Sonnet.
 - **Pilot with Haiku and Sonnet first; run Opus only where both fail.** Opus is the costliest candidate.
 - **A prompt that lists expected behaviours makes a bug hunt easy.** It points at every defect.
-- **Any edit to `suite.json` changes the suite hash**, re-tiering included, so later runs form a new comparison group.
 - **The Linux sandbox denies `exec` of anything, even Python.** A grader that needs a subprocess fails with `PermissionError`.
 - **A copied `node_modules` has no `.bin`, so `tsc` is missing.** Run `TMPDIR="$PWD/.tmp" npm ci` after moving machines.
 - **`--safe-mode` disables every MCP server.** The Claude Code lane uses `--restricted`. Do not switch back.
 - **`forseti.json` holds the local server address; never commit it.**
 - **Running `python3` against a fixture writes `__pycache__` into it.** Always `python3 -B`.
-- **`quality` is a substring of `equality`.** A blind `sed s/quality/hygiene/` corrupts `regression-boundary`.
 - `TMPDIR="$PWD/.tmp"` is required for `npm ci` and `npm run test:terminal`. `CLAUDE.md` is a symlink to `AGENTS.md`; edit `AGENTS.md`.

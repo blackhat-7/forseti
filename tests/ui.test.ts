@@ -884,7 +884,8 @@ test('a tall window shows the conversation of the try in progress; a short one k
   writeFileSync(join(pi, 'events.jsonl'), [{ type: 'started' }, { type: 'assistant', text: 'Reading the parser first.' }, { type: 'tool', event: { tool: 'read_file', args: { path: 'src/counts.py' }, ok: true } }, { type: 'tool', event: { tool: 'python', args: { source: 'run check' }, ok: false } }]
     .map(event => JSON.stringify({ at: '', event })).join('\n'));
   const tall = view(60);
-  assert.match(tall, /Live\s+Qwen · Task one/);
+  // Each try now has its own column under Live, headed by its model and task.
+  assert.match(tall, /Live\s*\n\s+Qwen\s*\n\s+Task one/);
   assert.match(tall, /◆ Reading the parser first\./);
   assert.match(tall, /→ read_file\s+counts\.py/, 'a path shows as its file name');
   assert.match(tall, /✗ python\s+run check/, 'a failed call is marked');
@@ -909,3 +910,28 @@ test('a tall window shows the conversation of the try in progress; a short one k
     rmSync(config, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('tries running side by side each get a live column, or stack when the window is narrow', () => {
+  const f = fixture();
+  const root = mkdtempSync(join(process.cwd(), '.tmp/ui-many-'));
+  const a = { ...model, id: 'qa', label: 'Qwen A · local', provider: 'local' }, b = { ...model, id: 'qb', label: 'Qwen B · local', provider: 'local' };
+  const tasks = [{ id: 'one', title: 'Task one', hash: 'one' }];
+  mkdirSync(join(root, '.state'), { recursive: true });
+  writeFileSync(join(root, '.state', 'run.lock'), JSON.stringify({ pid: process.pid, runId: 'live' }));
+  mkdirSync(join(root, 'runs', 'live'), { recursive: true });
+  writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', status: 'running', models: [a, b], tasks, planned: 2, trials: [] }));
+  for (const [who, said] of [['qa', 'Alpha is reading.'], ['qb', 'Beta is writing.']] as const) {
+    const dir = join(root, 'runs', 'live', 'trials', `000${who === 'qa' ? 1 : 2}-${who}-one`);
+    mkdirSync(join(dir, 'public'), { recursive: true });
+    writeFileSync(join(dir, 'events.jsonl'), [{ type: 'started' }, { type: 'assistant', text: said }].map(event => JSON.stringify({ at: '', event })).join('\n'));
+  }
+  const view = (width: number) => new Dashboard({ ...f.app, root }, () => {}, () => {}, () => 60).render(width).map(stripVTControlCharacters).join('\n');
+  const wide = view(140);
+  assert.match(wide, /Now\s+Qwen A\s+Task one/); assert.match(wide, /^\s+Qwen B\s+Task one/m, 'every try in progress is listed');
+  assert.match(wide, /◆ Alpha is reading\.\s+│ ◆ Beta is writing\./, 'side by side');
+  const narrow = view(80);
+  assert.ok(narrow.indexOf('Alpha is reading.') < narrow.indexOf('Beta is writing.') && !/│ ◆/.test(narrow), 'stacked');
+  for (const width of [40, 80, 140]) new Dashboard({ ...f.app, root }, () => {}, () => {}, () => 60).render(width).forEach(line => assert.ok(visibleWidth(line) <= width, `width ${width}: ${visibleWidth(line)}`));
+  rmSync(root, { recursive: true, force: true });
+});
+

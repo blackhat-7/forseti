@@ -56,9 +56,13 @@ export type ModelConfig = {
 export type JudgeConfig = { enabled: boolean; provider: string; model: string; auth: 'pi' | 'env' | 'cli'; thinking: ModelConfig['thinking']; repeat: number };
 /** The user's own OpenAI-compatible server, such as llama-server. Empty means none is configured. */
 export type LocalConfig = { url: string };
-export type Config = { schema: 1; suite: string; models: ModelConfig[]; disabledTests: string[]; removedTests: string[]; judge: JudgeConfig; local: LocalConfig };
+export type Config = { schema: 1; suite: string; models: ModelConfig[]; disabledTests: string[]; removedTests: string[]; judge: JudgeConfig; local: LocalConfig;
+  /** How many tries a run makes at once; 1 when unset. */
+  parallel?: number };
 export type AuthInfo = { mode: string; billing: 'subscription' | 'metered' | 'unknown' | 'control' | 'local'; ready: boolean; note: string };
-export type RunOptions = { models?: string[]; tests?: string[]; repeat: number; seed: number; lane: 'tools' | 'prompt'; timeout: number; maxTurns: number; maxTokens: number; allowMetered: boolean; cache: boolean; fresh?: boolean };
+export type RunOptions = { models?: string[]; tests?: string[]; repeat: number; seed: number; lane: 'tools' | 'prompt'; timeout: number; maxTurns: number; maxTokens: number; allowMetered: boolean; cache: boolean; fresh?: boolean;
+  /** Tries at once. Scheduling only, so not a condition: a try runs the same alone or beside others. */
+  parallel?: number };
 export type Trial = {
   id: string; model: string; task: string; repetition: number;
   status: 'passed' | 'failed' | 'auth_error' | 'rate_limited' | 'provider_error' | 'harness_error' | 'timeout' | 'budget' | 'cancelled' | 'skipped';

@@ -1,21 +1,20 @@
-import { appendFileSync, closeSync, existsSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { arch, platform, release } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { performance } from 'node:perf_hooks';
-import { authInfo, catalogModels, modelsFor } from './auth.ts';
-import { runAgent, safeError, SYSTEM_PROMPT } from './adapter.ts';
-import { claudeCodeArgs, runClaudeCode } from './claudecode.ts';
-import { DIMENSIONS, loadSuite, selectedModels, validateOptions } from './config.ts';
+import { authInfo, catalogModels } from './auth.ts';
+import { SYSTEM_PROMPT } from './adapter.ts';
+import { claudeCodeArgs } from './claudecode.ts';
+import { loadSuite, selectedModels, validateOptions } from './config.ts';
 import { atomicJson, files, hash, inside, localDir, put } from './files.ts';
-import { makeJudgeCall, review as reviewSubmission, type JudgeCall, type Review } from './judge.ts';
+import { makeJudgeCall, type JudgeCall } from './judge.ts';
 import { listLocalModels, LOCAL } from './local.ts';
-import { SANDBOX, checkSandbox, pythonExecutable, runPython } from './sandbox.ts';
+import { SANDBOX, checkSandbox, pythonExecutable } from './sandbox.ts';
 import { FINISHED, conditionsKey, modelKey, trialKey } from './report.ts';
-import type { Check, Config, Dimension, GradeContext, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
+import { laneOf, runTrial, type Job } from './trial.ts';
+import type { Config, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
 
+export { applicableDimensions, blankTrial, laneOf, rejectArtifacts, taskBudget, validateChecks, type Agent } from './trial.ts';
 export function schedule(models: ModelConfig[], tasks: Task[], repeat: number, seed: number) {
   const jobs = [];
   for (let r = 1; r <= repeat; r++) for (const task of tasks) for (const model of models) jobs.push({ model, task, repetition: r });
@@ -27,50 +26,14 @@ export function schedule(models: ModelConfig[], tasks: Task[], repeat: number, s
   }
   return jobs;
 }
-export function validateChecks(checks: unknown, dimensions?: Dimension[]): Check[] {
-  if (!Array.isArray(checks) || !checks.length || checks.length > 100) throw new Error('Grader must return 1–100 checks');
-  const ids = new Set<string>();
-  for (const c of checks) {
-    if (!c || typeof c.id !== 'string' || ids.has(c.id) || !DIMENSIONS.includes(c.dimension) || typeof c.passed !== 'boolean' || typeof c.evidence !== 'string' || c.evidence.length > 8000) throw new Error('Invalid/duplicate grader check');
-    ids.add(c.id);
-  }
-  if (dimensions && (dimensions.some(d => !checks.some(c => c.dimension === d)) || checks.some(c => !dimensions.includes(c.dimension)))) throw new Error('Grader output does not match the declared task dimensions for this lane');
-  return checks;
-}
 /**
- * What the deterministic grader must produce. The tool rubric names Forseti's own file tools, so
- * it grades the Pi lane only: the Claude Code lane reads and writes with its own, which Forseti
- * cannot observe. That is a process check, not a capability one — both lanes can run code, so
- * correctness stays comparable. `design` never appears here because it comes from the reviewer
- * model, which runs after grading and is appended separately.
+ * The harness fingerprint covers the code that runs and grades a try (trial.ts and everything it
+ * calls), not the code around it. report.ts and tui.ts only read finished tries; runner.ts decides
+ * which tries run, in what order and how many at once; app.ts and cli.ts only pass settings, which
+ * are recorded on their own. Hashing those stranded paid-for tries behind a wording fix and a
+ * scheduling change that could not alter any answer.
  */
-export function applicableDimensions(task: Task, lane: RunOptions['lane'], control: boolean, agent: Agent = 'pi'): Dimension[] {
-  return task.dimensions.filter(d => d !== 'design' && (d !== 'tools' || (lane === 'tools' && !control && agent === 'pi')));
-}
-export type Agent = 'pi' | 'claude-code';
-export function agentOf(models: ModelConfig[]): Agent {
-  const claudeCode = models.filter(m => m.provider === 'claude-code');
-  if (!claudeCode.length) return 'pi';
-  if (claudeCode.length !== models.filter(m => m.provider !== 'control').length) {
-    throw new Error('A run cannot mix Claude Code with Pi-adapter providers: they are different harnesses, so the comparison would measure the harness, not the model. Run them separately.');
-  }
-  return 'claude-code';
-}
-export function rejectArtifacts(trial: Trial, task: Task, lane: RunOptions['lane'], control: boolean, reason: string, agent: Agent = 'pi'): void {
-  trial.error = [trial.error, `Invalid submission: ${reason}`].filter(Boolean).join('; ');
-  if (!['passed', 'failed'].includes(trial.status)) return;
-  trial.status = 'failed';
-  trial.checks = applicableDimensions(task, lane, control, agent).map(dimension => ({ id: `invalid-submission-${dimension}`, dimension, passed: false, evidence: `Submission rejected before grading: ${reason}` }));
-}
-export function blankTrial(id: string, model: ModelConfig, task: Task, repetition: number, local = ''): Trial {
-  return { id, model: model.id, task: task.id, repetition, status: 'passed', auth: authInfo(model, local), checks: [], wallMs: 0, modelMs: 0, toolMs: 0, gradeMs: 0, firstTokenMs: null, tokens: null, estimatedCost: null, trace: [], answer: '', files: {}, turns: 0 };
-}
-/**
- * The harness is what ran the trial. report.ts and tui.ts only read finished trials, and every
- * run in a comparison group is rendered by the same current copy of them, so a change there cannot
- * make two runs incomparable. Hashing them once stranded paid-for runs behind a wording fix.
- */
-const RENDER_ONLY = new Set(['report.ts', 'tui.ts']);
+const NOT_TRIAL = new Set(['report.ts', 'tui.ts', 'runner.ts', 'app.ts', 'cli.ts']);
 const harnessOf = (root: string) => ({ src: harnessFiles(root), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8'), system: SYSTEM_PROMPT });
 /**
  * A task's fingerprint: what the model is shown and what grades it. The title, tier and skills are
@@ -96,12 +59,33 @@ export function conditionsNow(root: string, config: Config, options: RunOptions,
     tasks: suite.tasks.map(t => taskEntry(t, dir, contents)),
   };
 }
-/** A task's own budget only ever raises the run's, so a big task is not censored by a default sized for small ones. */
-export function taskBudget(options: RunOptions, task: Task): RunOptions {
-  return { ...options, maxTurns: Math.max(options.maxTurns, task.turns ?? 0), timeout: Math.max(options.timeout, task.timeout ?? 0) };
-}
 export function harnessFiles(root: string): Record<string, string> {
-  return Object.fromEntries(Object.entries(files(inside(root, 'src'))).filter(([path]) => !RENDER_ONLY.has(path)));
+  return Object.fromEntries(Object.entries(files(inside(root, 'src'))).filter(([path]) => !NOT_TRIAL.has(path)));
+}
+/**
+ * Runs jobs in schedule order, at most `limit` at a time. Tries on the local server go one at a
+ * time whatever the limit: two models sharing one GPU would slow each other into their time limits,
+ * which would score the hardware, not the model. A limit of 1 is the plain sequential run.
+ */
+export async function inParallel<J>(jobs: J[], limit: number, serial: (job: J) => boolean, run: (job: J, index: number) => Promise<void>): Promise<void> {
+  const left = jobs.map((job, index) => ({ job, index }));
+  let serialBusy = false;
+  const waiting: (() => void)[] = [];
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const next = left.findIndex(x => !(serialBusy && serial(x.job)));
+      if (next < 0) {
+        if (!left.length) return;
+        await new Promise<void>(resolve => waiting.push(resolve));
+        continue;
+      }
+      const { job, index } = left.splice(next, 1)[0]!, alone = serial(job);
+      if (alone) serialBusy = true;
+      try { await run(job, index); }
+      finally { if (alone) { serialBusy = false; for (const wake of waiting.splice(0)) wake(); } }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, limit) }, worker));
 }
 export async function runBenchmark(root: string, config: Config, options: RunOptions, onProgress: (p: Progress) => void = () => {}, signal = new AbortController().signal, makeJudge: typeof makeJudgeCall = makeJudgeCall): Promise<Run> {
   validateOptions(options);
@@ -110,7 +94,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
   if (options.tests?.some(id => !suite.tasks.some(t => t.id === id))) throw new Error('Unknown test selection');
   const tasks = suite.tasks.filter(t => options.tests ? options.tests.includes(t.id) : !config.disabledTests.includes(t.id) && !config.removedTests.includes(t.id));
   if (!tasks.length) throw new Error('Enable at least one test');
-  const agent = agentOf(models);
+  const lanes = new Set(models.filter(m => m.provider !== 'control').map(laneOf));
   for (const model of models) {
     const auth = authInfo(model, config.local.url);
     if (auth.ready && ['metered', 'unknown'].includes(auth.billing) && !options.allowMetered) throw new Error(`${model.label}: ${auth.billing} billing. Review costs and rerun with --allow-metered to consent. No calls made.`);
@@ -138,7 +122,9 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
       ? Object.fromEntries((await listLocalModels(config.local.url)).flatMap(m => (m.contextWindow ? [[m.id, m.contextWindow]] : []))) : {};
     const harness = harnessOf(root), now = conditionsNow(root, config, options, pythonVersion);
     const taskEntries = tasks.map(t => now.tasks.find(e => e.id === t.id)!);
-    const environment = { node: process.version, ...now.environment, sandbox: SANDBOX, pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null } : catalogModels.getModel(m.provider, m.model))) };
+    // Each model runs in its own family's lane, so one run can hold both; a model's client flags are those of its lane.
+    const environment = { node: process.version, ...now.environment, sandbox: SANDBOX, pi: '0.85.1', agent: lanes.size > 1 ? 'mixed' : lanes.has('claude-code') ? 'claude-code' : 'pi',
+      claudeFlags: claudeCodeArgs('MODEL', options.maxTurns).join(' '), piFlags: 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null } : catalogModels.getModel(m.provider, m.model))) };
     // Only the tries not already on record under these exact conditions are run; see trialKey.
     const draft = { ...now, tasks: taskEntries, environment };
     const done = new Map<string, number>();
@@ -169,93 +155,18 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     atomicJson(runDir, 'experiment.json', { system: SYSTEM_PROMPT, config, options, schedule: jobs.map(j => ({ model: j.model.id, task: j.task.id, repetition: j.repetition })), harnessHash: run.harnessHash, suiteHash: run.suiteHash });
     const blockedProviders = new Map<string, string>();
     const blockedModels = new Map<string, string>();
-    for (const [i, job] of jobs.entries()) {
-      const trial = blankTrial(`${String(i + 1).padStart(4, '0')}-${job.model.id}-${job.task.id}`, job.model, job.task, job.repetition, config.local.url);
-      const trialDir = localDir(runDir, `trials/${trial.id}`);
-      const work = localDir(trialDir, 'public');
-      const notify = (phase: string) => onProgress({ completed: i, total: jobs.length, task: job.task.title, model: job.model.label, phase, runId: id });
-      const record = (event: unknown) => appendFileSync(inside(trialDir, 'events.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), event })}\n`, { mode: 0o600 });
-      const start = performance.now();
-      let deadline: NodeJS.Timeout | undefined;
-      const controller = new AbortController();
-      const cancel = () => controller.abort();
-      signal.addEventListener('abort', cancel, { once: true });
-      try {
-        const budget = taskBudget(options, job.task);
-        notify('preparing'); record({ type: 'started', model: job.model.id, task: job.task.id, repetition: job.repetition });
-        for (const [path, text] of Object.entries(files(inside(snapshot, job.task.fixture)))) put(work, path, text);
-        if (signal.aborted) { trial.status = 'cancelled'; trial.error = 'Run cancelled before this trial'; }
-        else if (blockedProviders.has(job.model.provider)) { trial.status = 'skipped'; trial.error = blockedProviders.get(job.model.provider); }
-        else if (blockedModels.has(job.model.id)) { trial.status = 'skipped'; trial.error = blockedModels.get(job.model.id); }
-        else if (!trial.auth.ready) { trial.status = 'auth_error'; trial.error = trial.auth.note; }
-        else {
-          const grader = await import(pathToFileURL(inside(snapshot, job.task.grader)).href) as {
-            grade(context: GradeContext): Promise<Check[]>;
-            reference?: { files?: Record<string, string>; answer?: string };
-            baseline?: { files?: Record<string, string>; answer?: string };
-            review?: Review;
-          };
-          deadline = setTimeout(() => controller.abort(), budget.timeout * 1000);
-          if (job.model.provider === 'control') {
-            notify('applying synthetic control');
-            const control = job.model.model === 'reference' ? grader.reference : grader.baseline;
-            if (!control) throw new Error(`Missing ${job.model.model} control for ${job.task.id}`);
-            for (const [path, content] of Object.entries(control.files ?? {})) put(work, path, content);
-            trial.answer = control.answer ?? '';
-          } else if (job.model.provider === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, budget, trial, controller.signal, notify, record);
-          else await runAgent(work, job.model, job.task, budget, trial, controller.signal, notify, record, modelsFor(job.model, config.local.url, contexts));
-          if (controller.signal.aborted) {
-            trial.status = signal.aborted ? 'cancelled' : 'timeout';
-            trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${budget.timeout}s exceeded; counted as unsolved`;
-          }
-          if (trial.status === 'failed') rejectArtifacts(trial, job.task, options.lane, job.model.provider === 'control', trial.checks.map(c => c.evidence).join('; '), agent);
-          try { trial.files = files(work); }
-          catch (e) { rejectArtifacts(trial, job.task, options.lane, job.model.provider === 'control', safeError(e), agent); }
-          if (trial.status === 'passed' && !controller.signal.aborted) {
-            notify('verifying hidden checks');
-            const grading = performance.now();
-            const checks = await grader.grade({ lane: options.lane, control: job.model.provider === 'control', agent, answer: trial.answer, files: trial.files, trace: trial.trace, python: source => runPython(work, source, controller.signal, 5000, true) });
-            trial.gradeMs = performance.now() - grading;
-            if (controller.signal.aborted) { trial.status = signal.aborted ? 'cancelled' : 'timeout'; trial.error = 'Cancelled/deadline during grading'; }
-            else { trial.checks = validateChecks(checks, applicableDimensions(job.task, options.lane, job.model.provider === 'control', agent)); trial.status = trial.checks.every(c => c.passed) ? 'passed' : 'failed'; }
-          }
-          if (judge && judgeCall && job.task.dimensions.includes('design') && !controller.signal.aborted && ['passed', 'failed'].includes(trial.status)) {
-            if (!grader.review) throw new Error(`${job.task.id} declares the design dimension but its grader exports no review rubric`);
-            // Correctness gates the reviewer. Judging code that is already wrong would score the
-            // elegance of a broken answer, and spends quota to do it.
-            const wrong = trial.checks.filter(c => c.dimension === 'correctness' && !c.passed);
-            if (wrong.length) trial.judgeNote = `Not reviewed: ${wrong.length} correctness check(s) failed first`;
-            else {
-              notify('reviewing design');
-              const grading = performance.now();
-              const { checks, note } = await reviewSubmission(judgeCall, judge, grader.review, trial.files, controller.signal);
-              trial.gradeMs += performance.now() - grading;
-              if (note) trial.judgeNote = note;
-              if (checks.length) {
-                trial.checks = validateChecks([...trial.checks, ...checks]);
-                trial.status = trial.checks.every(c => c.passed) ? 'passed' : 'failed';
-              }
-              record({ type: 'review', checks, note });
-            }
-          }
-        }
-      } catch (error) {
-        trial.status = controller.signal.aborted ? (signal.aborted ? 'cancelled' : 'timeout') : 'harness_error';
-        trial.error = safeError(error);
-      } finally {
-        if (deadline) clearTimeout(deadline);
-        signal.removeEventListener('abort', cancel);
-        controller.abort();
-        trial.wallMs = performance.now() - start;
-      }
+    const ctx = { runDir, snapshot, options, local: config.local.url, contexts, judge, judgeCall, signal,
+      blocked: (job: Job) => blockedProviders.get(job.model.provider) ?? blockedModels.get(job.model.id) };
+    await inParallel(jobs, options.parallel ?? 1, job => job.model.provider === LOCAL, async (job, i) => {
+      const notify = (phase: string) => onProgress({ completed: run.trials.length, total: jobs.length, task: job.task.title, model: job.model.label, phase, runId: id });
+      const trial: Trial = await runTrial({ ...ctx, notify }, job, `${String(i + 1).padStart(4, '0')}-${job.model.id}-${job.task.id}`);
       if (['auth_error', 'rate_limited'].includes(trial.status)) blockedProviders.set(job.model.provider, `${trial.status} in ${trial.id}; no retries, account switching or paid fallback. ${trial.error}`);
       if (trial.status === 'provider_error') blockedModels.set(job.model.id, `Provider rejected/failed ${trial.id}; remaining trials for this model are skipped. ${trial.error}`);
-      record({ type: 'finished', status: trial.status, checks: trial.checks, error: trial.error });
-      atomicJson(trialDir, 'result.json', trial);
+      atomicJson(inside(runDir, `trials/${trial.id}`), 'result.json', trial);
       run.trials.push(trial);
       atomicJson(runDir, 'run.json', run);
-      onProgress({ completed: i + 1, total: jobs.length, task: job.task.title, model: job.model.label, phase: trial.status, runId: id });
-    }
+      onProgress({ completed: run.trials.length, total: jobs.length, task: job.task.title, model: job.model.label, phase: trial.status, runId: id });
+    });
     run.status = signal.aborted ? 'cancelled' : 'completed'; run.finished = new Date().toISOString();
     atomicJson(runDir, 'run.json', run);
     return run;

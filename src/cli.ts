@@ -29,7 +29,8 @@ const help = `FORSETI  ·  evidence-first LLM benchmarks
   npm start -- tests enable|disable|remove|restore ID
   npm start -- run [--models ID,ID] [--tests ID,ID] [--repeat 2] [--seed 42]
                   [--lane tools|prompt] [--timeout 180] [--turns 12] [--tokens 4096]
-                  [--allow-metered] [--no-cache] [--fresh]
+                  [--allow-metered] [--no-cache] [--fresh] [--parallel N]
+  npm start -- parallel N                     How many tries a run makes at once (default 1)
   npm start -- leaderboard                    Every comparable finished try, all runs
   npm start -- runs
   npm start -- compare RUN_ID [RUN_ID ...]
@@ -44,7 +45,7 @@ async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, strict: true, options: {
     help: { type: 'boolean', short: 'h' }, models: { type: 'string' }, tests: { type: 'string' }, repeat: { type: 'string' }, seed: { type: 'string' },
     lane: { type: 'string' }, timeout: { type: 'string' }, turns: { type: 'string' }, tokens: { type: 'string' },
-    'allow-metered': { type: 'boolean' }, 'no-cache': { type: 'boolean' }, fresh: { type: 'boolean' }, auth: { type: 'string' }, prompt: { type: 'string' }, expect: { type: 'string' },
+    'allow-metered': { type: 'boolean' }, 'no-cache': { type: 'boolean' }, fresh: { type: 'boolean' }, parallel: { type: 'string' }, auth: { type: 'string' }, prompt: { type: 'string' }, expect: { type: 'string' },
   } });
   if (values.help) { console.log(help); return; }
   const root = realpathSync(process.cwd());
@@ -109,6 +110,10 @@ async function main() {
     }
     return;
   }
+  if (command === 'parallel') {
+    if (action) { app.config.parallel = Number(action); app.persist(); }
+    console.log(`Runs make ${app.config.parallel ?? 1} tries at once. Local-server models always go one at a time.`); return;
+  }
   if (command === 'local') {
     if (action) app.setLocalUrl(action);
     if (!app.config.local.url) { console.log('No local server set. Usage: npm start -- local http://host:port'); return; }
@@ -132,7 +137,8 @@ async function main() {
     const options: RunOptions = { ...DEFAULT_OPTIONS, models: values.models?.split(','), tests: values.tests?.split(','),
       repeat: values.repeat === undefined ? DEFAULT_OPTIONS.repeat : Number(values.repeat), seed: values.seed === undefined ? DEFAULT_OPTIONS.seed : Number(values.seed),
       lane: (values.lane ?? DEFAULT_OPTIONS.lane) as RunOptions['lane'], timeout: values.timeout === undefined ? DEFAULT_OPTIONS.timeout : Number(values.timeout),
-      maxTurns: values.turns === undefined ? DEFAULT_OPTIONS.maxTurns : Number(values.turns), maxTokens: values.tokens === undefined ? DEFAULT_OPTIONS.maxTokens : Number(values.tokens), allowMetered: values['allow-metered'] ?? false, cache: !values['no-cache'], fresh: values.fresh ?? false };
+      maxTurns: values.turns === undefined ? DEFAULT_OPTIONS.maxTurns : Number(values.turns), maxTokens: values.tokens === undefined ? DEFAULT_OPTIONS.maxTokens : Number(values.tokens), allowMetered: values['allow-metered'] ?? false, cache: !values['no-cache'], fresh: values.fresh ?? false,
+      parallel: values.parallel === undefined ? app.config.parallel ?? 1 : Number(values.parallel) };
     const controller = new AbortController();
     const cancel = () => { if (!controller.signal.aborted) console.error('Cancelling; saving partial results…'); controller.abort(); };
     process.on('SIGINT', cancel); process.on('SIGTERM', cancel);

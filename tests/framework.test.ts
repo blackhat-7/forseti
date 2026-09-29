@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -13,7 +14,7 @@ import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConf
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
 import { byTier, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
-import { agentOf, applicableDimensions, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
+import { applicableDimensions, inParallel, laneOf, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
 import type { Config, Dimension, ModelConfig, Run, ToolEvent, Trial } from '../src/types.ts';
@@ -119,7 +120,8 @@ test('all independent controls run through real sandbox, persist and compare wit
     assert.ok(existsSync(join(dir, 'runs', run.id, 'trials', t.id, 'events.jsonl')));
   }
   assert.ok(run.trials.some(t => t.checks.some(c => c.dimension === 'hygiene')));
-  assert.equal(readFileSync(join(dir, 'runs', run.id, 'harness/src/runner.ts'), 'utf8'), readFileSync(join(dir, 'src/runner.ts'), 'utf8'));
+  // The saved harness is the code that runs a try: trial.ts, not the scheduler around it.
+  assert.equal(readFileSync(join(dir, 'runs', run.id, 'harness/src/trial.ts'), 'utf8'), readFileSync(join(dir, 'src/trial.ts'), 'utf8'));
   assert.equal(listRuns(dir)[0].status, 'completed');
   const report = comparisonReport([run]);
   assert.match(report, /Synthetic controls/); assert.match(report, /actual=/); assert.match(report, /expected=/); assert.match(report, /No claim about hidden model reasoning/);
@@ -249,7 +251,8 @@ test('ranks share a place when the run cannot tell models apart, and pool only l
   assert.equal(pooled[0]!.evaluated, 72);
   // Under a different key it is a different measurement, so it stays apart and says which run.
   const split = scorecards([run('1', [[a!, 11]]), run('2', [[a!, 11]], 'claude-code')]);
-  assert.deepEqual(split.cards.map(c => [c.label, c.harness]), [['a · 09-21 10:00', 'Forseti agent'], ['a · 09-22 10:00', 'Claude Code']]);
+  // A model's harness is its family's lane, so the tag follows the model, not the run.
+  assert.deepEqual(split.cards.map(c => [c.label, c.harness]), [['a · 09-21 10:00', 'Forseti agent'], ['a · 09-22 10:00', 'Forseti agent']]);
   assert.equal(split.mixed, true);
 
   // Difficulty rolls up per task; a run from before tiers existed has none, and none is guessed.
@@ -506,10 +509,11 @@ test('Claude Code runs under the first-party login, never an API key, and never 
   // A limit phrase inside the transcript must not be read as a provider limit.
   assert.equal(resultMessage(JSON.stringify([{ type: 'assistant', result: 'weekly limit' }])), undefined);
 
-  // Mixing harnesses would measure the harness, not the model.
-  assert.equal(agentOf([pi, cfg().models[0]]), 'pi');
-  assert.equal(agentOf([cc('sonnet'), cc('haiku'), cfg().models[0]]), 'claude-code');
-  assert.throws(() => agentOf([cc('sonnet'), pi]), /different harnesses/);
+  // Changed on purpose: a model's lane is its family, so one run may hold both lanes; the page
+  // names each model's harness instead of the run refusing to start.
+  assert.equal(laneOf(pi), 'pi');
+  assert.equal(laneOf(cc('sonnet')), 'claude-code');
+  assert.equal(laneOf(cfg().models[0]!), 'pi');
 
   // The tool rubric names Forseti's own file tools, which the CLI lane does not use.
   const withTools = { ...task, dimensions: ['correctness', 'tools'] as Dimension[] };
@@ -613,7 +617,11 @@ test('read-only OAuth preflight agrees with Pi five-minute validity window', () 
 test('a rendering-only change does not split comparison groups', () => {
   const dir = workspace();
   const before = harnessFiles(dir);
-  assert.ok(!('report.ts' in before) && !('tui.ts' in before) && 'runner.ts' in before);
+  // Scheduling and settings plumbing are outside the fingerprint too; the code that runs a try is inside.
+  for (const outside of ['report.ts', 'tui.ts', 'runner.ts', 'app.ts', 'cli.ts']) assert.ok(!(outside in before), outside);
+  assert.ok('trial.ts' in before && 'adapter.ts' in before && 'claudecode.ts' in before);
+  writeFileSync(join(dir, 'src/runner.ts'), '// how many at once\n', { flag: 'a' });
+  assert.deepEqual(harnessFiles(dir), before, 'a scheduling change must not strand earlier runs');
   writeFileSync(join(dir, 'src/report.ts'), '// reworded\n', { flag: 'a' });
   assert.deepEqual(harnessFiles(dir), before, 'a report wording fix must not strand earlier runs');
   writeFileSync(join(dir, 'src/sandbox.ts'), '// changed\n', { flag: 'a' });
@@ -705,7 +713,7 @@ test('a local OpenAI-compatible server runs through the Pi adapter with no crede
     assert.match(run.environment.catalog!, new RegExp(server.url), 'the run records which server answered');
     assert.match(comparisonReport([run]), /your own server; USD n\/a/);
     assert.equal(run.environment.agent, 'pi', 'a local model is a Pi-adapter model and pools with the others');
-    assert.throws(() => agentOf([added, { ...added, id: 'cc', provider: 'claude-code' }]), /different harnesses/);
+    assert.equal(laneOf({ ...added, id: 'cc', provider: 'claude-code' }), 'claude-code', 'a Claude model beside it runs in its own lane');
   } finally { server.close(); }
 });
 
@@ -812,4 +820,42 @@ test('the overall score uses only the difficulty levels every model has tries on
   assert.deepEqual(cards.map(c => [c.label, c.score, c.levels]), [['wide', 0, ['hard']], ['narrow', 0, ['hard']]], 'a level only one model ran cannot lift its overall score');
   assert.equal(levelsNote(cards), 'Hard only: not every model has tries on every level');
   assert.equal(byTier(cards[0]!, tasks)[0]!.rate, 1, 'the level itself is still shown');
+});
+
+test('a run makes up to N tries at once, and local-server tries one at a time', async () => {
+  const measure = async (limit: number) => {
+    let live = 0, peak = 0, local = 0, localPeak = 0;
+    const order: number[] = [];
+    const jobs = [false, true, true, false, false, true].map(serial => ({ serial }));
+    await inParallel(jobs, limit, j => j.serial, async (j, i) => {
+      live++; peak = Math.max(peak, live);
+      if (j.serial) { local++; localPeak = Math.max(localPeak, local); }
+      await new Promise(resolve => setTimeout(resolve, 5));
+      order.push(i); live--; if (j.serial) local--;
+    });
+    return { peak, localPeak, order };
+  };
+  const wide = await measure(4);
+  assert.ok(wide.peak > 1 && wide.peak <= 4, `peak ${wide.peak}`);
+  assert.equal(wide.localPeak, 1, 'two models on one GPU would score the hardware');
+  const one = await measure(1);
+  assert.deepEqual([one.peak, one.order], [1, [0, 1, 2, 3, 4, 5]], 'a limit of 1 is the plain sequential run');
+});
+
+test('tries run side by side never see each other', async () => {
+  const dir = workspace(), phases: string[] = [];
+  const run = await runBenchmark(dir, cfg(), { ...DEFAULT_OPTIONS, repeat: 1, tests: [task.id], parallel: 2 }, p => phases.push(p.phase));
+  assert.ok(phases.indexOf('preparing', phases.indexOf('preparing') + 1) < phases.findIndex(p => ['passed', 'failed'].includes(p)), 'both started before either finished');
+  const [reference, baseline] = ['control-reference', 'control-baseline'].map(id => run.trials.find(t => t.model === id)!);
+  assert.equal(reference.status, 'passed'); assert.equal(baseline.status, 'failed');
+  const { suite, dir: suiteDir } = loadSuite(dir, 'suites/personal/suite.json');
+  const grader = await import(pathToFileURL(join(suiteDir, suite.tasks.find(t => t.id === task.id)!.grader)).href);
+  // Each folder holds its own fixture plus its own answer, and nothing of the other's.
+  for (const [trial, control] of [[reference, grader.reference], [baseline, grader.baseline]] as const) {
+    for (const [path, text] of Object.entries(control.files as Record<string, string>)) assert.equal(trial.files[path], text, `${trial.model} ${path}`);
+    const own = readdirSync(join(dir, 'runs', run.id, 'trials', trial.id, 'public')).sort();
+    assert.deepEqual(own, Object.keys(trial.files).filter(p => !p.includes('/')).sort(), 'only its own files');
+  }
+  const differs = Object.keys(grader.reference.files).find(p => grader.reference.files[p] !== grader.baseline.files?.[p])!;
+  assert.notEqual(reference.files[differs], baseline.files[differs], 'the two answers stayed apart');
 });

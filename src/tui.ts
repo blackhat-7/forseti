@@ -56,6 +56,8 @@ const LOCAL_ROW = JUDGE_FIELDS.length;
 const TIMEOUTS = [30, 60, 90, 120, 180, 300, 600];
 /** Tool-call turns per trial. Too low censors outcomes; too high spends plan quota on stragglers. */
 const TURNS = [6, 12, 20, 30, 50];
+/** Tries a run makes at once. Saved to your config; local-server models still go one at a time. */
+const PARALLEL = [1, 2, 4, 8];
 const dot = (on: boolean) => (on ? green('●') : faint('○'));
 /** "2026-09-20T14-31-08-443Z-6d55ccee" reads as "09-20 14:31"; anything else is shown as it is. */
 const runWhen = (id: string) => (/^\d{4}-\d{2}-\d{2}T/.test(id) ? `${id.slice(5, 10)} ${id.slice(11, 13)}:${id.slice(14, 16)}` : id);
@@ -336,7 +338,8 @@ export class Dashboard implements Component, Focusable {
    * that finished, and its newest trial folder is the try in progress.
    */
   private live?: Run;
-  private now?: { model: string; task: string; since: number; step: string; chat: Line[] };
+  /** Every try in progress: with tries running side by side there can be several. */
+  private nows: { model: string; task: string; since: number; step: string; chat: Line[] }[] = [];
   private reportLength = 0;
   private reportPage = 12;
   private everyTask = false;
@@ -364,18 +367,19 @@ export class Dashboard implements Component, Focusable {
   private watch(repaint = true): void {
     const id = activeRunId(this.app.root), ended = this.live && !id;
     this.live = id ? readRun(this.app.root, id) : undefined;
-    this.now = undefined;
+    this.nows = [];
     if (this.live) {
       const run = this.live, dir = join(this.app.root, 'runs', run.id, 'trials');
-      const open = existsSync(dir) ? readdirSync(dir).sort().reverse().find(name => !run.trials.some(t => t.id === name)) : undefined;
-      const model = open && run.models.find(m => run.tasks.some(t => open.slice(5) === `${m.id}-${t.id}`));
-      const task = model && run.tasks.find(t => open!.slice(5) === `${model.id}-${t.id}`);
-      if (model && task) {
+      // A trial folder exists from the moment its try starts; one with no result yet is in progress.
+      for (const open of existsSync(dir) ? readdirSync(dir).sort().filter(name => !run.trials.some(t => t.id === name)) : []) {
+        const model = run.models.find(m => run.tasks.some(t => open.slice(5) === `${m.id}-${t.id}`));
+        const task = model && run.tasks.find(t => open.slice(5) === `${model.id}-${t.id}`);
+        if (!model || !task) continue;
         // The Pi agent logs every turn and tool call; Claude Code logs only its start and end.
-        const events = readFileSync(join(dir, open!, 'events.jsonl'), 'utf8').split('\n').flatMap(l => { try { return [JSON.parse(l).event]; } catch { return []; } });
+        const events = readFileSync(join(dir, open, 'events.jsonl'), 'utf8').split('\n').flatMap(l => { try { return [JSON.parse(l).event]; } catch { return []; } });
         const turns = events.filter(e => e.type === 'assistant').length, tool = events.findLast(e => e.type === 'tool')?.event?.tool;
-        const chat = model.provider === 'claude-code' ? claudeChat(join(dir, open!, 'public')) : piChat(events);
-        this.now = { model: model.label, task: task.title, since: statSync(join(dir, open!)).birthtimeMs, step: turns ? `turn ${turns}${tool ? ` · ${tool}` : ''}` : '', chat };
+        const chat = model.provider === 'claude-code' ? claudeChat(join(dir, open, 'public')) : piChat(events);
+        this.nows.push({ model: model.label, task: task.title, since: statSync(join(dir, open)).birthtimeMs, step: turns ? `turn ${turns}${tool ? ` · ${tool}` : ''}` : '', chat });
       }
     }
     // A run started elsewhere just ended: its results are new, so the leaderboard reloads.
@@ -459,6 +463,7 @@ export class Dashboard implements Component, Focusable {
     if (data === 'l') { this.options.lane = this.options.lane === 'tools' ? 'prompt' : 'tools'; return; }
     if (data === 'p') { this.options.cache = !this.options.cache; return; }
     if (data === 't') { this.options.timeout = TIMEOUTS[(TIMEOUTS.indexOf(this.options.timeout) + 1) % TIMEOUTS.length] ?? 180; return; }
+    if (data === 'P') { this.persist(() => { this.app.config.parallel = PARALLEL[(PARALLEL.indexOf(this.app.config.parallel ?? 1) + 1) % PARALLEL.length]; }); return; }
     if (data === 'T') { this.options.maxTurns = TURNS[(TURNS.indexOf(this.options.maxTurns) + 1) % TURNS.length] ?? 12; return; }
     const index = this.selection[this.tab]!;
     if (this.tab === 1) {
@@ -654,7 +659,7 @@ export class Dashboard implements Component, Focusable {
   }
   private async startRun(allowMetered: boolean): Promise<void> {
     if (!this.pendingOptions || this.controller) return;
-    const options = { ...this.pendingOptions, allowMetered };
+    const options = { ...this.pendingOptions, allowMetered, parallel: this.app.config.parallel ?? 1 };
     this.close();
     this.controller = new AbortController();
     this.progress = undefined;
@@ -695,7 +700,7 @@ export class Dashboard implements Component, Focusable {
     if (this.dialog) return '';
     if (this.controller) return 'tabs and ↑↓ still work · edits wait for the run';
     return [
-      'r run   − + tries   l lane   t limit   T turns   p cache',
+      'r run   − + tries   l lane   t limit   T turns   p cache   P at once',
       'space toggle   a add   d remove',
       'space toggle   a add   d remove   u restore',
       'space select   c compare   L leaderboard   ⏎ evidence   e export',
@@ -744,9 +749,12 @@ export class Dashboard implements Component, Focusable {
       const cells = Math.max(8, Math.min(60, inner));
       row(accent('━'.repeat(Math.round(cells * (total ? done / total : 0)))) + faint('━'.repeat(cells - Math.round(cells * (total ? done / total : 0)))));
       row();
-      if (this.now) {
-        row(`${faint('Now')}   ${bold(nick(this.now.model))}${faint('  ·  ')}${plain(this.now.task)}`);
-        row(`      ${muted([duration(Date.now() - this.now.since), this.now.step].filter(Boolean).join(' · '))}`);
+      if (this.nows.length) {
+        const nameW = Math.min(20, Math.max(...this.nows.map(n => width_(nick(n.model)))) + 2);
+        for (const [i, n] of this.nows.entries()) {
+          const detail = faint(`  ${[duration(Date.now() - n.since), n.step].filter(Boolean).join(' · ')}`);
+          row(`${faint(i ? '     ' : 'Now  ')} ${bold(padTo(nick(n.model), nameW))}${truncateToWidth(plain(n.task), Math.max(8, inner - nameW - 8 - width_(detail)))}${detail}`);
+        }
       }
       else row(muted('Preparing isolated trial workspaces…'));
       const live = this.live;
@@ -782,16 +790,25 @@ export class Dashboard implements Component, Focusable {
           row(`  ${mark}  ${padTo(nick(model), Math.min(18, nameW))}${padTo(plain(task), taskW)}${faint(tail)}`);
         }
       }
-      // The try's own conversation, when the window has room for it; a small window keeps the short form.
-      const room = this.bodyRows() - (lines.length - top) - 4;
-      if (this.now?.chat.length && room >= 8) {
+      // Each try's own conversation, when the window has room: side by side when it is wide enough for
+      // a readable column each, stacked when it is tall, and the short form above when it is neither.
+      const room = this.bodyRows() - (lines.length - top) - 4, talking = this.nows.filter(n => n.chat.length);
+      const said = (l: Line, w: number) => l.say
+        ? wrap(plain(l.say).replace(/\s+/g, ' '), Math.max(12, w - 2)).map((t, i) => `${i ? ' ' : faint('◆')} ${muted(t)}`)
+        : [`${l.failed ? rose('✗') : faint('→')} ${accent(padTo(l.tool ?? '', 10))}${truncateToWidth(l.target ?? '', Math.max(4, w - 13))}`];
+      const column = (n: typeof talking[number], w: number, height: number) =>
+        [bold(truncateToWidth(nick(n.model), w)), faint(truncateToWidth(plain(n.task), w)), ...n.chat.flatMap(l => said(l, w)).slice(-(height - 2))];
+      const colW = talking.length ? Math.floor((inner - 2 - 3 * (talking.length - 1)) / talking.length) : 0;
+      if (talking.length && room >= 10 && (talking.length === 1 || colW >= 38)) {
         row();
-        row(bold('Live') + faint(`   ${nick(this.now.model)} · ${plain(this.now.task)}`));
-        // What the model says wraps in full; tool calls stay one line each. The newest lines stay in view.
-        const said = (l: Line) => l.say
-          ? wrap(plain(l.say).replace(/\s+/g, ' '), Math.max(12, inner - 4)).map((t, i) => `  ${i ? ' ' : faint('◆')} ${muted(t)}`)
-          : [`  ${l.failed ? rose('✗') : faint('→')} ${accent(padTo(l.tool ?? '', 10))}${truncateToWidth(l.target ?? '', Math.max(8, inner - 16))}`];
-        for (const line of this.now.chat.flatMap(said).slice(-(room - 2))) row(line);
+        row(bold('Live'));
+        const cols = talking.map(n => column(n, talking.length === 1 ? inner - 2 : colW, room - 2));
+        const cell = (text: string, w: number) => { const t = truncateToWidth(text, w); return t + ' '.repeat(Math.max(0, w - width_(t))); };
+        for (let r = 0; r < Math.max(...cols.map(c => c.length)); r++) row('  ' + cols.map(c => cell(c[r] ?? '', talking.length === 1 ? inner - 2 : colW)).join(faint(' │ ')));
+      } else if (talking.length > 1 && room >= 10 && Math.floor((room - 2) / talking.length) >= 5) {
+        row();
+        row(bold('Live'));
+        for (const n of talking) for (const line of column(n, inner - 2, Math.floor((room - 2) / talking.length))) row(`  ${line}`);
       }
       row();
       row(faint(this.controller ? 'esc cancels · finished tries are kept' : 'started elsewhere · esc cancels it · q leaves, the run keeps going'));
@@ -808,7 +825,7 @@ export class Dashboard implements Component, Focusable {
       // What r would do, in one line; the keys to change it are in the footer.
       head('Next run', 'r to review');
       row();
-      prose(`${count(enabled.length, 'model')} × ${count(this.enabledTasks().length, 'test')} × ${tries(this.options.repeat)} · ${this.options.lane} lane · ${this.options.timeout}s · ${this.options.maxTurns} turns · cache ${this.options.cache ? 'on' : 'off'}`, muted);
+      prose(`${count(enabled.length, 'model')} × ${count(this.enabledTasks().length, 'test')} × ${tries(this.options.repeat)} · ${this.options.lane} lane · ${this.options.timeout}s · ${this.options.maxTurns} turns · cache ${this.options.cache ? 'on' : 'off'} · ${this.app.config.parallel ?? 1} at once`, muted);
       prose('Tries already on record under the same conditions are skipped.', faint);
       row(creditLine([
         ...enabled.map(m => ({ label: plain(m.label), auth: this.app.authFor(m) })),
@@ -1018,7 +1035,7 @@ export class Dashboard implements Component, Focusable {
         ['tab · 1–5', 'switch view'], ['↑↓ · j k', 'move'], ['space', 'toggle or select'],
         ['a', 'add model or test'], ['d', 'remove, with confirmation'], ['u', 'restore last removed test'],
         ['r', 'review preflight'], ['− +', 'tries per test, or reviewer rounds on Settings'], ['l', 'tools / prompt lane'],
-        ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer, local server'], ['R', 'refresh metadata, sends nothing'],
+        ['p', 'prompt caching on / off'], ['P', 'tries at once: 1, 2, 4, 8 (saved; local models one at a time)'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer, local server'], ['R', 'refresh metadata, sends nothing'],
         ['c · ⏎ · e', 'runs: compare, evidence, export'], ['L', 'leaderboard of every comparable try, from any tab'], ['m', 'comparison: summary / full report'], ['a', 'comparison: show / fold tasks every model solved'], ['←→', 'evidence: previous / next trial'],
         ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc · q', 'leave what you are looking at: close a panel, else quit'], ['esc during a run', 'asks, then cancels it, keeping completed evidence'], ['during a run', 'tabs and ↑↓ work; edits wait'], ['ctrl+c', 'quit'],
       ] as const) row(`${accent(keys)}${' '.repeat(Math.max(2, 14 - keys.length))}${muted(what)}`);

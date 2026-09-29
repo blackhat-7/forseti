@@ -261,8 +261,11 @@ export function conditionsKey(run: Pick<Run, 'tasks' | 'options' | 'environment'
  * it tells two local setups apart without making Claude Code tries look unlike.
  */
 export function modelKey(run: Pick<Run, 'environment' | 'options'>, model: ModelConfig): string {
-  const tokens = model.provider === 'claude-code' ? '' : `/${run.options.maxTokens}`;
-  return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(run.environment.agentFlags ?? '').slice(0, 12)}`;
+  const claude = model.provider === 'claude-code', e = run.environment;
+  const tokens = claude ? '' : `/${run.options.maxTokens}`;
+  // A run records each lane's client flags; runs from before mixed lanes recorded only their one lane's.
+  const flags = (claude ? e.claudeFlags : e.piFlags) ?? e.agentFlags ?? '';
+  return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(flags).slice(0, 12)}`;
 }
 export function trialKey(run: Run, trial: Trial): string {
   return `${modelKey(run, run.models.find(m => m.id === trial.model)!)} ${conditionsKey(run, trial.task)}`;
@@ -320,7 +323,7 @@ export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks
     const synthetic = model.provider === 'control';
     return { run, card: {
       ...scorecard(name(model.label), trials, tasks, planned),
-      harness: synthetic ? 'synthetic' : HARNESS[model.provider === 'claude-code' ? 'claude-code' : run.environment.agent ?? 'pi'] ?? run.environment.agent!,
+      harness: synthetic ? 'synthetic' : HARNESS[model.provider === 'claude-code' ? 'claude-code' : 'pi']!,
       synthetic, tries: members.reduce((sum, m) => sum + m.run.options.repeat, 0), hygiene: dimensionScore(trials, 'hygiene'),
     } };
   });

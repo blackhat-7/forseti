@@ -48,6 +48,7 @@ export function validateConfig(root: string, value: Config): Config {
     if (m.provider === LOCAL && m.auth !== 'none') throw new Error('A local server model uses auth "none": the server is your own and no credential is sent');
     if (m.provider !== 'control' && m.provider !== LOCAL && m.auth === 'none') throw new Error('Live providers require explicit Pi or environment auth');
   }
+  if (value.parallel !== undefined && !(Number.isInteger(value.parallel) && value.parallel >= 1 && value.parallel <= 16)) throw new Error('parallel must be 1–16 tries at once');
   unique(value.models.map(m => m.id), 'model IDs'); unique(value.disabledTests, 'disabled tests'); unique(value.removedTests, 'removed tests');
   validateJudge(value.judge);
   return value;
@@ -97,7 +98,7 @@ export function loadSuite(root: string, path: string): { suite: Suite; dir: stri
 }
 export function validateOptions(o: RunOptions): void {
   const inRange = (v: number, low: number, high: number) => Number.isInteger(v) && v >= low && v <= high;
-  if (!inRange(o.repeat, 1, 20) || !inRange(o.seed, 0, 0xffffffff) || !inRange(o.timeout, 1, 1800) || !inRange(o.maxTurns, 1, 100) || !inRange(o.maxTokens, 128, 65536) || !['tools', 'prompt'].includes(o.lane) || typeof o.allowMetered !== 'boolean' || typeof o.cache !== 'boolean' || (o.fresh !== undefined && typeof o.fresh !== 'boolean')) throw new Error('Invalid run options: repeat 1–20, timeout 1–1800s, turns 1–100, tokens 128–65536, seed uint32');
+  if (!inRange(o.repeat, 1, 20) || !inRange(o.seed, 0, 0xffffffff) || !inRange(o.timeout, 1, 1800) || !inRange(o.maxTurns, 1, 100) || !inRange(o.maxTokens, 128, 65536) || !['tools', 'prompt'].includes(o.lane) || typeof o.allowMetered !== 'boolean' || typeof o.cache !== 'boolean' || (o.fresh !== undefined && typeof o.fresh !== 'boolean') || (o.parallel !== undefined && !inRange(o.parallel, 1, 16))) throw new Error('Invalid run options: repeat 1–20, timeout 1–1800s, turns 1–100, tokens 128–65536, seed uint32');
   if (o.models) unique(o.models, 'selected models');
   if (o.tests) unique(o.tests, 'selected tests');
 }
