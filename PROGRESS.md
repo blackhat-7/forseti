@@ -19,8 +19,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 ## Done this session
 
 - TUI split into `src/ui/` (kit, board, live, running). Tabs: Home · Live · Models · Tests · Runs · Settings.
-- One drawing per frame; repaints keep the scroll position; clicks reach tabs, list rows, settings and dialog buttons.
-- Redesign: hairline header and footer, eighth-block bars, banded selected rows, centered dialogs.
+- Redesign: one drawing per frame, scroll kept on repaint, clicks on tabs/rows/dialog buttons, eighth-block bars, centered dialogs.
 
 ## Next
 
@@ -35,7 +34,6 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **Pilot with Haiku and Sonnet first; run Opus only where both fail.** Opus is the costliest candidate.
 - **A prompt that lists expected behaviours makes a bug hunt easy.** It points at every defect.
 - **The Linux sandbox denies `exec` of anything, even Python.** A grader that needs a subprocess fails with `PermissionError`.
-- **A copied `node_modules` has no `.bin`, so `tsc` is missing.** Run `TMPDIR="$PWD/.tmp" npm ci` after moving machines.
 - **`--safe-mode` disables every MCP server.** The Claude Code lane uses `--restricted`. Do not switch back.
 - **`forseti.json` holds the local server address; never commit it.**
 - **Running `python3` against a fixture writes `__pycache__` into it.** Always `python3 -B`.
