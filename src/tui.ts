@@ -858,6 +858,12 @@ export class Dashboard implements Component, Focusable {
         head('Live');
         for (const [i, n] of talking.entries()) { if (i) row(); column(n, inner, Math.floor((room - 3) / talking.length) - 1, true).forEach(line => row(line)); }
       }
+      // The leaderboard stays on Home during a run: results already on record, below the run's own.
+      const board = this.app.leaderboard();
+      if (board) {
+        head('Leaderboard', 'L for the full page');
+        comparisonPage([board], inner, false, true).forEach(line => row(line));
+      }
     } else if (this.tab === 0) {
       const enabled = this.models();
       // The answer comes first: how the models compare, from every comparable try on record.
