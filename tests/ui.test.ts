@@ -249,7 +249,7 @@ test('run selection, comparison, check-level evidence, scrolling and workspace e
   f.key('5', ' ', 'c');
   // The summary opens first: one comparison page, not a wall of markdown.
   assert.match(f.text(), /Model comparison/);
-  assert.match(f.text(), /[█░]{10}/);
+  assert.match(f.text(), /[█▏▎▍▌▋▊▉░]{10}/);
   // Legend shortened with the decluttered page; still the per-task grid's own key.
   assert.match(f.text(), /✓ all, ✗ none/);
   f.key('m');
@@ -359,7 +359,7 @@ test('hygiene reads as a gate, never as a score beside correctness', () => {
   assert.match(text, /Safe-code gate\s+ok \(1\)/);
   assert.match(text, /a floor, not a score/);
   // The thing this rename exists to prevent: a full-width bar at a percentage that cannot move.
-  assert.doesNotMatch(text, /(Hygiene|Safe-code gate)\s+[█░]/);
+  assert.doesNotMatch(text, /(Hygiene|Safe-code gate)\s+[█▏▎▍▌▋▊▉░]/);
   assert.doesNotMatch(text, /Safe-code gate\s+100%/);
   assert.doesNotMatch(text, /Quality/);
 
@@ -405,6 +405,25 @@ test('esc and q both mean leave, at every level', () => {
   assert.match(footer.text(), /esc · q\s+back/, 'and so does a panel');
 });
 
+test('a header pill and a dialog chip both react to a mouse click', () => {
+  const f = fixture();
+  // The header pills sit right after the brand mark; clicking one does what its number key does.
+  assert.doesNotMatch(f.text(), /Models[─\s]+\d+ of \d+ enabled/);
+  assert.ok(f.ui.click('header', 1, 30), 'the Models pill sits in this column range');
+  assert.match(f.text(), /Models[─\s]+\d+ of \d+ enabled/);
+
+  // A y/n dialog renders its choice as two clickable chips; clicking y does what pressing y does.
+  f.key('r', enter);
+  f.key(esc);
+  assert.match(f.text(), /Cancel this run\?/);
+  const bodyLines = f.ui.render(100, 'body');
+  const chipLine = bodyLines.findIndex(l => stripVTControlCharacters(l).includes('cancel run'));
+  assert.ok(chipLine >= 0, 'the chip line renders');
+  const x = stripVTControlCharacters(bodyLines[chipLine]!).indexOf('y cancel run');
+  assert.ok(f.ui.click('body', chipLine, x), 'the y chip is clickable at its own column');
+  assert.equal(f.aborted, true, 'clicking the y chip cancels the run, same as pressing y');
+});
+
 test('a half-solved task shows how much was right, without a second headline', () => {
   // The comparison page scrolls like the report, so a tall window is what shows it whole.
   const f = fixture('subscription', 200);
@@ -420,7 +439,7 @@ test('a half-solved task shows how much was right, without a second headline', (
   f.key('5', ' ', 'c');
   assert.match(f.text(120), /Checks passed\s+50%/, 'half the checks passed, and it says so');
   assert.match(f.text(120), /0\/1 ✗ \(50%\)/, 'and the task row shows how close it came');
-  assert.match(f.text(120), /Example model\s+[█░]+\s+0%/, 'the headline is still the task, not the checks');
+  assert.match(f.text(120), /Example model\s+[█▏▎▍▌▋▊▉░]+\s+0%/, 'the headline is still the task, not the checks');
 
   // Nothing half-right means no second number, so the headline is never ambiguous.
   f.key(esc);
@@ -456,19 +475,19 @@ test('the comparison page ranks with ties, splits by difficulty and names each h
   // opus (100% + 75%) / 2, not 11 of 12 tasks.
   assert.match(text, /Each difficulty level counts equally/);
   // Decluttered: the harness is stated once on the context line instead of tagged on every row.
-  assert.match(text, /^\s+1\s+Claude opus\s+[█░]+\s+88% ±/m);
-  assert.match(text, /^\s+1\s+Claude sonnet\s+[█░]+\s+75% ±/m, 'inside the noise, so it shares first place');
-  assert.match(text, /^\s+3\s+qwen-local\s+[█░]+\s+25% ±/m);
-  assert.match(text, /^\s+–\s+Reference · synthetic\s+[█░]+\s+100%\s*$/m, 'a control is shown, never ranked, and carries no ±');
+  assert.match(text, /^\s+1\s+Claude opus\s+[█▏▎▍▌▋▊▉░]+\s+88% ±/m);
+  assert.match(text, /^\s+1\s+Claude sonnet\s+[█▏▎▍▌▋▊▉░]+\s+75% ±/m, 'inside the noise, so it shares first place');
+  assert.match(text, /^\s+3\s+qwen-local\s+[█▏▎▍▌▋▊▉░]+\s+25% ±/m);
+  assert.match(text, /^\s+–\s+Reference · synthetic\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m, 'a control is shown, never ranked, and carries no ±');
   // One bar per model in Overall and in each of the two difficulty groups: pooled, so never a second Sonnet line per group.
-  assert.equal(text.match(/Claude sonnet\s+[█░]/g)?.length, 3, 'pooled into one card');
+  assert.equal(text.match(/Claude sonnet\s+[█▏▎▍▌▋▊▉░]/g)?.length, 3, 'pooled into one card');
   assert.match(text, /Claude opus and Claude sonnet are tied: 13 points apart/);
   assert.match(text, /different harnesses, so each gap includes the harness/);
   // The difficulty table became one chart: a bar per model under each difficulty heading. Places
   // were dropped when the page was decluttered; the verdict still says which gaps are real.
   const basic = text.slice(text.indexOf('Basic · 8 tasks'), text.indexOf('Hard · 4 tasks')), hard = text.slice(text.indexOf('Hard · 4 tasks'), text.indexOf('\n\n', text.indexOf('Hard · 4 tasks')));
-  for (const [pattern, where] of [[/Claude opus\s+[█░]+\s+100%/, basic], [/Claude sonnet\s+[█░]+\s+100%/, basic], [/qwen-local\s+[█░]+\s+50%/, basic], [/Reference · synthetic\s+[█░]+\s+100%\s*$/m, basic],
-    [/Claude opus\s+[█░]+\s+75%/, hard], [/Claude sonnet\s+[█░]+\s+50%/, hard], [/qwen-local\s+[█░]+\s+0%/, hard], [/Reference · synthetic\s+[█░]+\s+100%\s*$/m, hard]] as const) assert.match(where, pattern);
+  for (const [pattern, where] of [[/Claude opus\s+[█▏▎▍▌▋▊▉░]+\s+100%/, basic], [/Claude sonnet\s+[█▏▎▍▌▋▊▉░]+\s+100%/, basic], [/qwen-local\s+[█▏▎▍▌▋▊▉░]+\s+50%/, basic], [/Reference · synthetic\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m, basic],
+    [/Claude opus\s+[█▏▎▍▌▋▊▉░]+\s+75%/, hard], [/Claude sonnet\s+[█▏▎▍▌▋▊▉░]+\s+50%/, hard], [/qwen-local\s+[█▏▎▍▌▋▊▉░]+\s+0%/, hard], [/Reference · synthetic\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m, hard]] as const) assert.match(where, pattern);
   assert.match(text, /Edge cases right \(12\)/);
   assert.match(text, /Task number 11\s+0\/3 ✗\s+0\/6 ✗\s+0\/3 ✗\s+3\/3 ✓/, 'hardest first, one column per model');
   assert.match(text, /4 tasks every model solved/, 'rows with no difference fold away');
@@ -496,7 +515,7 @@ test('a model that ran out of turns says so beside its score', () => {
   assert.match(text, /ran out of turns or time on 1 try \(counted as unsolved\)/);
   // Changed 2026-09-27: a stall used to be left out of the score. Tasks now size their own budget,
   // so running out is an unsolved try and the score says 50%, not 100%.
-  assert.match(text, /Example model\s+[█░]+\s+50%/);
+  assert.match(text, /Example model\s+[█▏▎▍▌▋▊▉░]+\s+50%/);
   assert.match(text, /1\/2 out×1/, 'the grid names the stalled try inside the denominator, compact in a narrow column');
   assert.doesNotMatch(text, /1 not run/, 'a stall is the model, not the provider');
 
@@ -523,11 +542,11 @@ test('a tier or skill cell the provider left short says so, and earns no place',
   f.key('5', ' ', 'c');
   const text = f.text(120);
   // Decluttered: stars, footnotes and places became an inline "1/2" wherever tasks lack a finished try.
-  assert.match(text, /refused model\s+[█░]+\s+100% ±\d+ 1\/2/, 'the rank line says what the score rests on');
+  assert.match(text, /refused model\s+[█▏▎▍▌▋▊▉░]+\s+100% ±\d+ 1\/2/, 'the rank line says what the score rests on');
   const hard = text.slice(text.indexOf('Hard · 2 tasks'));
-  assert.match(hard, /refused model\s+[█░]+\s+100% 1\/2/);
-  assert.match(hard, /solves model\s+[█░]+\s+100%\s*$/m);
-  assert.match(hard, /stalls model\s+[█░]+\s+50%\s*$/m, 'a stall is scored, not a gap');
+  assert.match(hard, /refused model\s+[█▏▎▍▌▋▊▉░]+\s+100% 1\/2/);
+  assert.match(hard, /solves model\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m);
+  assert.match(hard, /stalls model\s+[█▏▎▍▌▋▊▉░]+\s+50%\s*$/m, 'a stall is scored, not a gap');
   assert.match(text, /Hard one\s+·\s+2\/2 ✓\s+0\/2 ✗ out×2/, 'a stalled try sits in the denominator, compact when narrow');
   for (const width of [40, 80, 120]) f.ui.render(width).forEach(row => assert.ok(visibleWidth(row) <= width, `width ${width}: ${visibleWidth(row)}`));
   assert.match(f.text(40), /100% ±\d+ 1\/2/, 'coverage survives a narrow terminal');
