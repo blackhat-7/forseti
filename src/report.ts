@@ -261,36 +261,44 @@ export function trialKey(run: Run, trial: Trial): string {
   return `${modelKey(run, run.models.find(m => m.id === trial.model)!)} ${conditionsKey(run, trial.task)}`;
 }
 /**
- * Every finished try that is still comparable, from every run, as one virtual run the comparison
- * page renders unchanged. Per task, the conditions of its newest try decide, and only tries made
- * under exactly those conditions count, so every model on a task is judged on the same footing.
- * Controls are left out: they check the grader, not a model. The current suite decides which
- * tasks count and at which difficulty, because tiers are relabelled as evidence arrives.
+ * Every model's newest finished tries, from every run, as one virtual run the comparison page
+ * renders unchanged. Per model and task, only tries made under that pair's newest conditions
+ * count, so an old try never mixes with a new one. Models can differ in conditions — a newer
+ * harness, another lane — and when they do the run is marked `conditions: mixed`, which the page
+ * states, exactly as it does for any comparison across unlike runs. Controls are left out: they
+ * check the grader, not a model. The current suite decides which tasks count and at which
+ * difficulty, because tiers are relabelled as evidence arrives.
  */
 export function leaderboard(runs: Run[], suite: Pick<Task, 'id' | 'title' | 'tier' | 'capabilities'>[]): Run | null {
   const live = new Map(suite.map(t => [t.id, t]));
   const newestFirst = runs.toSorted((a, b) => b.created.localeCompare(a.created));
-  const current = new Map<string, { key: string; task: Run['tasks'][number] }>();
   const model = (run: Run, t: Trial) => run.models.find(m => m.id === t.model)!;
+  const counted = (run: Run, t: Trial) => live.has(t.task) && FINISHED.includes(t.status) && model(run, t).provider !== 'control';
+  const current = new Map<string, string>(), entries = new Map<string, Run['tasks'][number]>();
   for (const run of newestFirst) for (const t of run.trials) {
-    if (current.has(t.task) || !live.has(t.task) || !FINISHED.includes(t.status) || model(run, t).provider === 'control') continue;
-    const { title, tier, capabilities } = live.get(t.task)!;
-    current.set(t.task, { key: conditionsKey(run, t.task), task: { ...run.tasks.find(x => x.id === t.task)!, title, tier, capabilities } });
+    const pair = `${modelKey(run, model(run, t))} ${t.task}`;
+    if (!counted(run, t) || current.has(pair)) continue;
+    current.set(pair, conditionsKey(run, t.task));
+    if (!entries.has(t.task)) entries.set(t.task, { ...run.tasks.find(x => x.id === t.task)!, ...live.get(t.task)! });
   }
   const models = new Map<string, ModelConfig>(), tries = new Map<string, number>(), trials: Trial[] = [];
   for (const run of newestFirst) for (const t of run.trials) {
-    const m = model(run, t);
-    if (m.provider === 'control' || !FINISHED.includes(t.status) || current.get(t.task)?.key !== conditionsKey(run, t.task)) continue;
-    const id = modelKey(run, m), n = (tries.get(`${id} ${t.task}`) ?? 0) + 1;
+    if (!counted(run, t)) continue;
+    const m = model(run, t), id = modelKey(run, m), pair = `${id} ${t.task}`;
+    if (current.get(pair) !== conditionsKey(run, t.task)) continue;
+    const n = (tries.get(pair) ?? 0) + 1;
     if (!models.has(id)) models.set(id, { ...m, id });
-    tries.set(`${id} ${t.task}`, n);
+    tries.set(pair, n);
     trials.push({ ...t, model: id, repetition: n });
   }
   const latest = newestFirst[0];
   if (!latest || !trials.length) return null;
+  const perTask = Map.groupBy([...current], ([pair]) => pair.slice(pair.lastIndexOf(' ') + 1));
+  const mixed = [...perTask.values()].some(pairs => new Set(pairs.map(([, key]) => key)).size > 1);
   const { agent: _, ...environment } = latest.environment;
-  return { ...latest, id: 'leaderboard', status: 'completed', environment, options: { ...latest.options, repeat: Math.max(...tries.values()) },
-    models: [...models.values()], tasks: suite.flatMap(t => current.get(t.id)?.task ?? []), planned: trials.length, trials };
+  return { ...latest, id: 'leaderboard', status: 'completed', environment: { ...environment, ...(mixed ? { conditions: 'mixed' } : {}) },
+    options: { ...latest.options, repeat: Math.max(...tries.values()) }, models: [...models.values()],
+    tasks: suite.flatMap(t => entries.get(t.id) ?? []), planned: trials.length, trials };
 }
 export function comparisonKey(run: Run): string {
   return hash({ suite: run.suiteHash, tasks: run.tasks.map(t => t.hash).sort(), harness: run.harnessHash, lane: run.options.lane, maxTurns: run.options.maxTurns, maxTokens: run.options.maxTokens, timeout: run.options.timeout, seed: run.options.seed, cache: run.options.cache, judge: judgeIdentity(run.judge ?? null), agent: run.environment.agent ?? 'pi', agentFlags: run.environment.agentFlags ?? '', os: run.environment.os, python: run.environment.python, pythonVersion: run.environment.pythonVersion, proxyConfigured: run.environment.proxyConfigured, node: run.environment.node });
@@ -325,7 +333,7 @@ export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks
   const when = (id: string) => (/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}/.test(id) ? `${id.slice(5, 10)} ${id.slice(11, 16).replace('-', ':')}` : id);
   const shared = new Set(cards.map(c => c.card.label).filter((label, i, all) => all.indexOf(label) !== i));
   for (const { run, card } of cards) if (shared.has(card.label)) card.label = `${card.label} · ${when(run.id)}`;
-  return { cards: cards.map(c => c.card), tasks, mixed: new Set(runs.map(comparisonKey)).size > 1 };
+  return { cards: cards.map(c => c.card), tasks, mixed: new Set(runs.map(comparisonKey)).size > 1 || runs.some(r => r.environment.conditions === 'mixed') };
 }
 /**
  * Rank with ties, best first: a model's rank is one more than the number of models that clearly

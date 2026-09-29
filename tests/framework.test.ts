@@ -764,7 +764,7 @@ test('a try already on record under the same conditions is never run again', asy
   } finally { if (saved === undefined) delete process.env.CEREBRAS_API_KEY; else process.env.CEREBRAS_API_KEY = saved; }
 });
 
-test('the leaderboard pools every run under the newest conditions and nothing else', () => {
+test('the leaderboard keeps each model\'s newest tries and says when conditions differ', () => {
   const base = (id: string, created: string, harnessHash: string, models: ModelConfig[], trials: [string, string, Trial['status']][]): Run => ({
     schema: 1, id, created, status: 'completed', suite: 's', suiteHash: id, harnessHash, environment: { os: 'linux 7.2.6 x64' }, judge: null,
     options: { ...DEFAULT_OPTIONS }, models, tasks: [{ id: 'a', title: 'A', hash: 'ha', tier: 'hard' }, { id: 'b', title: 'B', hash: 'hb', tier: 'basic' }], planned: trials.length,
@@ -779,11 +779,15 @@ test('the leaderboard pools every run under the newest conditions and nothing el
   const board = leaderboard([older, newer], suite)!;
   assert.deepEqual(board.models.map(x => x.model).sort(), ['haiku', 'opus'], 'models from different runs, controls left out');
   assert.equal(board.trials.length, 3, 'the not-run try is not a try');
-  // A newer harness on task a leaves only its tries on the board for a; b keeps its own newest.
+  assert.equal(board.environment.conditions, undefined, 'one set of conditions, nothing to warn about');
+  // Rule changed on purpose: newest conditions are kept per model and task, not per task, so one
+  // model rerun under a newer harness no longer evicts every other model; the board says it is mixed.
   const rebuilt = base('r3', '2026-03-01', 'H2', [haiku], [['haiku', 'a', 'passed']]);
   const moved = leaderboard([older, newer, rebuilt], suite)!;
-  assert.deepEqual(moved.trials.filter(t => t.task === 'a').map(t => t.status), ['passed']);
+  assert.deepEqual(moved.trials.filter(t => t.task === 'a').map(t => [t.model.split('/')[1], t.status]).sort(), [['haiku', 'passed'], ['opus', 'passed']], "haiku's older try on a is replaced; opus's stays");
   assert.equal(moved.trials.filter(t => t.task === 'b').length, 1);
+  assert.equal(moved.environment.conditions, 'mixed');
+  assert.equal(scorecards([moved]).mixed, true, 'the page states it');
   assert.equal(conditionsKey(older, 'a'), conditionsKey({ ...older, environment: { os: 'linux 7.3.0 x64' } }, 'a'), 'a kernel update is not a new condition');
   assert.notEqual(modelKey(older, opus), modelKey(older, { ...opus, thinking: 'high' }), 'thinking is part of the model');
   // The suite decides tiers and membership: a relabelled task moves, a removed one leaves.
