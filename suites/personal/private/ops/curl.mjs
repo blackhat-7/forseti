@@ -45,9 +45,10 @@ export function makeCurl(ctx, routes) {
     if (!m) return { err: [`curl: (3) URL using bad/illegal format or missing URL`], code: 3 };
     const [, , host, , rawPath, query = ''] = m;
     const path = rawPath || '/';
-    const handler = routes[`${host}${path.replace(/\/$/, '') || '/'}`] ?? routes[`${host}${path}`] ?? routes[host];
+    const handler = routes[`${host}${path.replace(/\/$/, '') || '/'}`] ?? routes[`${host}${path}`] ?? routes[host] ?? (host.endsWith('.googleapis.com') ? googleFrontEnd : undefined);
     ctx.wait(1);
-    const errOut = (code, message) => ({ err: silent && !showError ? [] : [`curl: (${code}) ${message}`], code });
+    // A failed transfer still prints --write-out, with the code curl had: 000 when nothing answered.
+    const errOut = (code, message) => ({ err: silent && !showError ? [] : [`curl: (${code}) ${message}`], code, out: write ? expand(write, '000', '').split('\n').filter((l, k, all) => k < all.length - 1 || l !== '') : [] });
     if (!handler && !Object.keys(routes).some(k => k.split('/')[0] === host)) return errOut(6, `Could not resolve host: ${host}`);
     const request = { method: method ?? (body !== null ? 'POST' : head ? 'HEAD' : 'GET'), path, query: Object.fromEntries(new URLSearchParams(query)), headers, body, host };
     const res = handler ? handler(request) : { status: 404, body: '{"error":"not found"}\n' };
@@ -73,6 +74,14 @@ export function makeCurl(ctx, routes) {
     if (write) { const w = expand(write, status, text); if (out.length && !text.endsWith('\n') && !head && !output) out[out.length - 1] += w.split('\n')[0]; else out.push(...w.split('\n').filter((_, k, all) => k < all.length - 1 || all[k] !== '')); }
     return { out, err };
   };
+}
+/**
+ * Google's API hosts resolve from anywhere. A path the estate does not model answers the way
+ * Google's front end answers an unknown URL; a request without a token is refused first.
+ */
+function googleFrontEnd(request) {
+  if (!request.headers.authorization) return { status: 401, body: `${JSON.stringify({ error: { code: 401, message: 'Request is missing required authentication credential. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.', status: 'UNAUTHENTICATED' } }, null, 2)}\n` };
+  return { status: 404, contentType: 'text/html; charset=UTF-8', body: `<!DOCTYPE html>\n<html lang=en>\n  <meta charset=utf-8>\n  <title>Error 404 (Not Found)!!1</title>\n  <p><b>404.</b> <ins>That’s an error.</ins>\n  <p>The requested URL <code>${request.path}</code> was not found on this server.  <ins>That’s all we know.</ins>\n` };
 }
 function expand(format, status, text) {
   return format.replace(/%\{http_code\}/g, String(status)).replace(/%\{response_code\}/g, String(status)).replace(/%\{size_download\}/g, String(Buffer.byteLength(text))).replace(/%\{time_total\}/g, '0.084512').replace(/\\n/g, '\n');

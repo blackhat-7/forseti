@@ -74,7 +74,7 @@ export function schedulerGroup(ctx) {
     if (verb === 'create') return err('HTTPError 403: The principal (user or service account) lacks IAM permission "cloudscheduler.jobs.create" for the resource (or the resource may not exist).');
     if (verb === 'update') {
       const jobName = rest.filter(a => !a.startsWith('-'))[1];
-      if (!['http', 'pubsub', 'app-engine'].includes(name ?? '')) return { err: [`ERROR: (gcloud.scheduler.jobs.update) Invalid choice: '${name ?? ''}'.`], code: 2 };
+      if (!['http', 'pubsub', 'app-engine'].includes(name ?? '')) return { err: [`ERROR: (gcloud.scheduler.jobs.update) Invalid choice: '${name ?? ''}'.`, 'Maybe you meant:', '  gcloud scheduler jobs update app-engine', '  gcloud scheduler jobs update http', '  gcloud scheduler jobs update pubsub', '', 'To search the help text of gcloud commands, run:', '  gcloud help -- SEARCH_TERMS'], code: 2 };
       if (!jobName) return err('argument JOB: Must be specified.', 2);
       if (typeof location !== 'string') return noLocation();
       const j = jobs().find(x => x.name === jobName);

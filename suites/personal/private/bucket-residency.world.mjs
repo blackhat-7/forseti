@@ -52,9 +52,9 @@ export function createWorld({ home, fs }) {
       const storage = makeStorageGroups(ctx);
       const gcloud = makeGcloud(ctx, { storage: storage.storage, compute: storage.compute, pubsub: storage.pubsub, container: containerGroup, logging: loggingGroup, iam: iamGroup, services: servicesGroup, transfer: transferGroup });
       const kubectl = makeKubectl(ctx, { logs: (cname, ns, pod, opts) => podLogs(ctx, cname, ns, pod, opts), readyDelay: () => 25 });
-      const curl = makeCurl(ctx, { 'cdn.quillmart.com': (req) => cdnRequest(ctx, req) });
+      const curl = makeCurl(ctx, { 'cdn.quillmart.com': (req) => cdnRequest(ctx, req), 'storage.googleapis.com': (req) => storageApi(ctx, req) });
       const git = makeGit(ctx, { remote: 'git@github.com:quillmart/infra.git', initial, log: history(ctx) });
-      return { gcloud, gsutil: storage.gsutil, kubectl, curl, git };
+      return { gcloud, gsutil: storage.gsutil, kubectl, curl, git, gh: git.gh };
     },
     tick(ctx) { kubeTick(ctx); traffic(ctx); },
     report: (ctx) => summarize(ctx),
@@ -355,4 +355,55 @@ function yamlLines(v, indent = '') {
     else out.push(`${indent}${k}: ${typeof x === 'string' && /[:#{}[\],&*?|<>=!%@`'"]|^\s|\s$/.test(x) ? `'${x.replace(/'/g, "''")}'` : x}`);
   }
   return out;
+}
+
+/**
+ * The Cloud Storage JSON API for what an operator reaches for with curl: list, describe and create
+ * buckets. Each call runs the matching gcloud command, so both ways in behave the same, including
+ * the organization's policies. Anything else answers as the API does for a path it does not have.
+ */
+function storageApi(ctx, req) {
+  const json = (status, body) => ({ status, body: `${JSON.stringify(body, null, 2)}\n` });
+  const error = (code, message) => json(code, { error: { code, message, errors: [{ message, domain: 'global', reason: { 400: 'invalid', 401: 'required', 403: 'forbidden', 404: 'notFound', 409: 'conflict', 412: 'conditionNotMet' }[code] ?? 'invalid' }] } });
+  if (!req.headers.authorization) return error(401, 'Anonymous caller does not have storage.buckets.get access to the Google Cloud Storage bucket. Permission \'storage.buckets.get\' denied on resource (or it may not exist).');
+  const run = (argv) => {
+    const out = [], err = [];
+    const code = ctx.shell.exec(argv, null, { write: (l) => out.push(l) }, { write: (l) => err.push(l) });
+    return { code, out: out.join('\n'), err: err.join('\n') };
+  };
+  const failed = (text, fallback) => {
+    const m = /(?:HTTPError |Exception: )(\d{3})[: ]+(.*)$/m.exec(text);
+    return error(m ? Number(m[1]) : fallback, (m?.[2] ?? text.replace(/^ERROR: \([^)]*\) /, '')).trim());
+  };
+  const toApi = (d) => ({
+    kind: 'storage#bucket', selfLink: `https://www.googleapis.com/storage/v1/b/${d.name}`, id: d.name, name: d.name, projectNumber: NUMBER,
+    metageneration: String(d.metageneration ?? 1), location: d.location, storageClass: d.default_storage_class, etag: 'CAE=',
+    timeCreated: String(d.creation_time ?? '').replace(/\+0000$/, 'Z').replace(/(\d{2})Z$/, '$1.000Z'), updated: String(d.update_time ?? d.creation_time ?? '').replace(/\+0000$/, 'Z').replace(/(\d{2})Z$/, '$1.000Z'),
+    ...(d.labels ? { labels: d.labels } : {}), ...(d.versioning_enabled !== undefined ? { versioning: { enabled: Boolean(d.versioning_enabled) } } : {}),
+    iamConfiguration: { bucketPolicyOnly: { enabled: Boolean(d.uniform_bucket_level_access) }, uniformBucketLevelAccess: { enabled: Boolean(d.uniform_bucket_level_access) }, publicAccessPrevention: d.public_access_prevention ?? 'inherited' },
+    locationType: d.location_type, rpo: 'DEFAULT',
+  });
+  const one = /^\/storage\/v1\/b\/([^/]+)\/?$/.exec(req.path);
+  if (req.method === 'GET' && one) {
+    const r = run(['gcloud', 'storage', 'buckets', 'describe', `gs://${decodeURIComponent(one[1])}`, '--format=json']);
+    return r.code ? failed(r.err, 404) : json(200, toApi(JSON.parse(r.out)));
+  }
+  if (/^\/storage\/v1\/b\/?$/.test(req.path) && (req.method === 'GET' || req.method === 'POST')) {
+    if (!req.query.project) return error(400, 'Required parameter: project');
+    if (req.method === 'GET') {
+      const r = run(['gcloud', 'storage', 'buckets', 'list', '--format=json', `--project=${req.query.project}`]);
+      return r.code ? failed(r.err, 403) : json(200, { kind: 'storage#buckets', items: JSON.parse(r.out || '[]').map(toApi) });
+    }
+    let spec;
+    try { spec = JSON.parse(req.body ?? ''); } catch { return error(400, 'Parse Error'); }
+    if (!spec?.name) return error(400, 'Required');
+    const argv = ['gcloud', 'storage', 'buckets', 'create', `gs://${spec.name}`, `--project=${req.query.project}`];
+    if (spec.location) argv.push(`--location=${spec.location}`);
+    if (spec.storageClass) argv.push(`--default-storage-class=${spec.storageClass}`);
+    if (spec.iamConfiguration?.uniformBucketLevelAccess?.enabled || spec.iamConfiguration?.bucketPolicyOnly?.enabled) argv.push('--uniform-bucket-level-access');
+    const r = run(argv);
+    if (r.code) return failed(r.err, 400);
+    return json(200, toApi(JSON.parse(run(['gcloud', 'storage', 'buckets', 'describe', `gs://${spec.name}`, '--format=json']).out)));
+  }
+  return error(404, 'Not Found');
 }

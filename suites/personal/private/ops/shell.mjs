@@ -319,6 +319,7 @@ export class Shell {
     this.now = now;
     this.status = 0;
     this.scratch = new Map();
+    checkedOut = strftime('%b %e 08:12', now());
   }
   /** Runs one command line the way a non-interactive `bash -c` would, returning what a terminal shows. */
   run(source) {
@@ -578,7 +579,12 @@ export class Shell {
   }
   readFile(path) {
     const rel = this.relative(path);
-    if (rel === null) { const scratch = this.scratchPath(path); return scratch && this.scratch.has(scratch) ? this.scratch.get(scratch) : null; }
+    if (rel === null) {
+      const installed = INSTALLED[this.absolute(path)];
+      if (installed) return installed.script ?? installed.binary;
+      const scratch = this.scratchPath(path);
+      return scratch && this.scratch.has(scratch) ? this.scratch.get(scratch) : null;
+    }
     if (rel === '') return null;
     try { return this.fs.read(rel); } catch { return null; }
   }
@@ -727,7 +733,7 @@ const BUILTINS = {
   test: (args) => ({ code: testExpr(args) ? 0 : 1 }),
   '[': (args) => ({ code: testExpr(args.slice(0, -1)) ? 0 : 1 }),
   type(args, { sh }) {
-    return { out: args.map(a => (BUILTINS[a] ? `${a} is a shell builtin` : sh.programs[a] || TOOLS[a] ? `${a} is /usr/bin/${a}` : `bash: type: ${a}: not found`)) };
+    return { out: args.map(a => (BUILTINS[a] ? `${a} is a shell builtin` : sh.programs[a] || TOOLS[a] ? `${a} is ${programPath(a)}` : `bash: type: ${a}: not found`)) };
   },
   history: () => ({}),
   clear: () => ({}),
@@ -932,7 +938,7 @@ export const TOOLS = {
         if (!sh.outsideDir(abs)) { err.push(`ls: cannot ${abs.startsWith('/tmp') ? `access '${t}': No such file or directory` : `open directory '${t}': Permission denied`}`); continue; }
         const names = sh.outsideEntries(abs);
         if (targets.length > 1) out.push(`${t}:`);
-        if (set.has('l')) { out.push(`total ${names.length * 4}`); for (const n of names) { const p = `${abs}/${n}`; out.push(sh.scratch.has(p) ? long(n, sh.scratch.get(p), sh.env.USER) : `drwx------ 3 ${sh.env.USER} ${sh.env.USER}  4096 Sep 29 08:12 ${n}`); } }
+        if (set.has('l')) { out.push(`total ${names.length * 4}`); for (const n of names) { const p = `${abs}/${n}`; out.push(sh.scratch.has(p) ? long(n, sh.scratch.get(p), sh.env.USER) : `drwx------ 3 ${sh.env.USER} ${sh.env.USER}  4096 ${checkedOut} ${n}`); } }
         else out.push(...names);
         continue;
       }
@@ -949,7 +955,7 @@ export const TOOLS = {
       if (targets.length > 1) out.push(`${t}:`);
       if (set.has('l')) {
         out.push(`total ${entries.length * 4}`);
-        for (const e of entries) out.push(sh.isDir(prefix + e) ? `drwxr-xr-x 2 ${sh.env.USER} ${sh.env.USER}  4096 Sep 29 08:12 ${e}` : long(e, sh.fs.read(prefix + e), sh.env.USER));
+        for (const e of entries) out.push(sh.isDir(prefix + e) ? `drwxr-xr-x 2 ${sh.env.USER} ${sh.env.USER}  4096 ${checkedOut} ${e}` : long(e, sh.fs.read(prefix + e), sh.env.USER));
       } else out.push(...(set.has('1') || true ? entries : []));
     }
     return { out, err, code: err.length ? 2 : 0 };
@@ -1007,17 +1013,23 @@ export const TOOLS = {
   },
   cp(args, io) {
     const [, files] = flags(args);
-    const [from, to] = files;
+    const [from] = files;
+    let to = files[1];
     const text = io.sh.readFile(from ?? '');
     if (text === null) return { err: [`cp: cannot stat '${from}': No such file or directory`], code: 1 };
+    // Into a directory, the file keeps its name.
+    const toRel = io.sh.relative(to ?? '');
+    if (to && (to.endsWith('/') || (toRel !== null ? io.sh.isDir(toRel) : io.sh.outsideDir(io.sh.absolute(to))))) to = `${to.replace(/\/$/, '')}/${from.split('/').pop()}`;
     const problem = io.sh.writeFile(to ?? '', text);
     return problem ? { err: [`cp: cannot create regular file '${to}': ${problem}`], code: 1 } : {};
   },
   mv(args, io) {
-    const r = TOOLS.cp(args, io);
-    if (r.code) return r;
     const [, files] = flags(args);
-    io.sh.fs.remove?.(io.sh.relative(files[0]));
+    const r = TOOLS.cp(args, io);
+    if (r.code) return { err: r.err.map(l => l.replace(/^cp: cannot (stat|create regular file)/, (_, what) => (what === 'stat' ? 'mv: cannot stat' : 'mv: cannot move'))), code: r.code };
+    const rel = io.sh.relative(files[0]);
+    if (rel !== null) io.sh.fs.remove?.(rel);
+    else io.sh.scratch.delete(io.sh.absolute(files[0]));
     return {};
   },
   date(args, io) {
@@ -1043,8 +1055,19 @@ export const TOOLS = {
   env(_a, io) { return { out: Object.entries(io.sh.env).map(([k, v]) => `${k}=${v}`) }; },
   printenv(args, io) { return args.length ? { out: args.filter(a => a in io.sh.env).map(a => io.sh.env[a]), code: args.every(a => a in io.sh.env) ? 0 : 1 } : TOOLS.env(args, io); },
   which(args, io) {
-    const found = args.filter(a => io.sh.programs[a] || TOOLS[a]);
-    return { out: found.map(a => (io.sh.programs[a] ? `/usr/lib/google-cloud-sdk/bin/${a}`.replace('google-cloud-sdk/bin/psql', 'postgresql/15/bin/psql') : `/usr/bin/${a}`)), code: found.length === args.length ? 0 : 1 };
+    const found = args.filter(a => !a.startsWith('-') && (io.sh.programs[a] || TOOLS[a]));
+    return { out: found.map(a => programPath(a)), code: found.length === args.filter(a => !a.startsWith('-')).length ? 0 : 1 };
+  },
+  file(args, io) {
+    const out = [];
+    for (const f of args.filter(a => !a.startsWith('-'))) {
+      const abs = io.sh.absolute(f), text = io.sh.readFile(f), name = abs.split('/').pop();
+      if (INSTALLED[abs]) out.push(`${f}: ${INSTALLED[abs].script ? 'POSIX shell script, ASCII text executable' : 'ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, stripped'}`);
+      else if (text === null) out.push(`${f}: cannot open \`${f}' (No such file or directory)`);
+      else if (!text.length) out.push(`${f}: empty`);
+      else out.push(`${f}: ${/^\s*[[{]/.test(text) && /\.json$/.test(name) ? 'JSON data' : /^#!.*(ba)?sh/.test(text) ? 'Bourne-Again shell script, ASCII text executable' : /^#!.*python/.test(text) ? 'Python script, ASCII text executable' : /[^\x00-\x7f]/.test(text) ? 'Unicode text, UTF-8 text' : 'ASCII text'}`);
+    }
+    return { out };
   },
   seq(args) { const [a, b] = args.length === 1 ? [1, Number(args[0])] : [Number(args[0]), Number(args[1])]; return { out: Array.from({ length: Math.max(0, Math.min(10000, b - a + 1)) }, (_, k) => String(a + k)) }; },
   xargs(args, io) {
@@ -1116,7 +1139,20 @@ export const TOOLS = {
   ssh: (args) => ({ err: [`ssh: connect to host ${args.find(a => !a.startsWith('-')) ?? ''} port 22: Connection timed out`], code: 255 }),
 };
 function* take(iterable, n) { if (n <= 0) return; let k = 0; for (const x of iterable) { yield x; if (++k >= n) return; } }
-function long(name, text, user = 'oncall') { return `-rw-r--r-- 1 ${user} ${user} ${String(Buffer.byteLength(text)).padStart(5)} Sep 29 08:12 ${name}`; }
+/** When the checkout was made: this morning, whatever day the session runs on. */
+let checkedOut = 'Jan  1 08:12';
+function long(name, text, user = 'oncall') { return `-rw-r--r-- 1 ${user} ${user} ${String(Buffer.byteLength(text)).padStart(5)} ${checkedOut} ${name}`; }
+/** Where each program lives, as `which` and `type` report it. */
+export function programPath(name) {
+  if (['gcloud', 'gsutil', 'bq', 'kubectl', 'gke-gcloud-auth-plugin'].includes(name)) return `/usr/lib/google-cloud-sdk/bin/${name}`;
+  if (name === 'cloud-sql-proxy') return '/usr/local/bin/cloud-sql-proxy';
+  return `/usr/bin/${name}`;
+}
+/** Installed programs read as what they are: the Cloud SDK launchers are shell scripts, the rest binaries. */
+const LAUNCHER = (tool) => `#!/bin/sh\n#\n# Copyright 2013 Google Inc. All Rights Reserved.\n#\n\n# <cloud-sdk-sh-preamble>\n#\n#  CLOUDSDK_ROOT_DIR            (a)  installation root dir\n#  CLOUDSDK_PYTHON              (u)  python interpreter path\n#  CLOUDSDK_PYTHON_ARGS         (u)  python interpreter arguments\n#  CLOUDSDK_PYTHON_SITEPACKAGES (u)  use python site packages\n#\n# (a) always defined by the preamble\n# (u) user definition overrides preamble\n\n_cloudsdk_root_dir() {\n  case $0 in\n  */*)   link=$0\n         ;;\n  *)     link=$(command -v "$0")\n         ;;\n  esac\n  case $link in\n  */*) ;;\n  *) link=./$link\n     ;;\n  esac\n  while [ -L "$link" ]; do\n    link=$(readlink "$link")\n  done\n  echo "$(dirname "$link")/.."\n}\n\nCLOUDSDK_ROOT_DIR=$(_cloudsdk_root_dir "$0")\n\n# </cloud-sdk-sh-preamble>\n\n"$CLOUDSDK_PYTHON" $CLOUDSDK_PYTHON_ARGS "\${CLOUDSDK_ROOT_DIR}/lib/${tool}.py" "$@"\n`;
+const ELF = '\u007fELF\u0002\u0001\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0003\u0000>\u0000\u0001\u0000\u0000\u0000\u00a0\u0063\u0000\u0000\u0000\u0000\u0000\u0000@\u0000\u0000\u0000\u0000\u0000\u0000\u0000';
+const INSTALLED = Object.fromEntries(['gcloud', 'gsutil', 'bq', 'kubectl', 'gke-gcloud-auth-plugin', 'cloud-sql-proxy', 'psql', 'curl', 'git', 'jq', 'gh', 'ssh', 'grep', 'awk', 'sed', 'bash', 'sh']
+  .map(n => [programPath(n), ['gcloud', 'gsutil', 'bq'].includes(n) ? { script: LAUNCHER(n === 'gcloud' ? 'googlecloudsdk/gcloud' : n === 'gsutil' ? 'gsutil/gsutil' : 'bq/bq') } : { binary: ELF }]));
 /** Basic regular expressions as grep reads them, translated to JavaScript's. */
 function toJsRegex(pattern, extended) {
   if (extended) return pattern.replace(/\[\[:(\w+):\]\]/g, (_, c) => ({ digit: '\\d', space: '\\s', alpha: '[A-Za-z]', alnum: '[A-Za-z0-9]', upper: '[A-Z]', lower: '[a-z]' }[c] ?? '.'));

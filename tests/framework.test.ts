@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { App } from '../src/app.ts';
 import { authInfo, catalogModels, validateCredential } from '../src/auth.ts';
-import { failureStatus, runAgent, safeError, taskTools } from '../src/adapter.ts';
+import { failureStatus, runAgent, safeError, taskTools, toolLimit } from '../src/adapter.ts';
 import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
@@ -921,6 +921,26 @@ test('a world try runs in a checkout named like one, records its estate for grad
   writeFileSync(join(dir, 'suites/personal/private/mini.world.mjs'), `${MINI_WORLD}\nexport const louder = 1;\n`);
   assert.notEqual(hash(), before);
   assert.equal(conditionsNow(dir, cfg(), DEFAULT_OPTIONS, '3').tasks.filter(t => t.id !== id).map(t => t.hash).join(), others, 'and no other task\'s');
+});
+
+test('a task may raise its own tool budget, never lower it, and both lanes enforce the same number', async () => {
+  assert.equal(toolLimit({}), 64);
+  assert.equal(toolLimit({ tools: 120 }), 120);
+  assert.equal(toolLimit({ tools: 10 }), 64, 'a task cannot make the budget stricter than the run default');
+  const dir = temp(), full = () => Array.from({ length: 64 }, () => ({ tool: 'list_files', args: {}, ok: true, ms: 0, output: '' }));
+  const list = (trace: ToolEvent[], limit?: number) => taskTools(dir, trace, new AbortController().signal, () => {}, undefined, limit).find(t => t.name === 'list_files')!;
+  await assert.rejects(list(full()).execute('1', {}), /budget exhausted \(64\)/);
+  const raised = full();
+  await list(raised, 120).execute('1', {});
+  assert.equal(raised.length, 65);
+  const events: ToolEvent[] = [];
+  const handle = createHandler(dir, e => events.push(e), 65);
+  for (let k = 0; k < 66; k++) await handle({ id: k, method: 'tools/call', params: { name: 'python', arguments: { source: 'pass' } } });
+  assert.deepEqual([events.at(-2)!.ok, events.at(-1)!.ok], [true, false], 'the CLI lane stops at the same number');
+  const ws = workspace(), suitePath = join(ws, 'suites/personal/suite.json'), suite = JSON.parse(readFileSync(suitePath, 'utf8'));
+  suite.tasks[0].tools = 0;
+  writeFileSync(suitePath, JSON.stringify(suite));
+  assert.throws(() => loadSuite(ws, 'suites/personal/suite.json'), /tools 1–300/);
 });
 
 test('suspicion that an ops estate is staged is listed for fixing, from ops tries only', () => {

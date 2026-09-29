@@ -46,8 +46,8 @@ export type Capability = 'evidence' | 'restraint' | 'exactness' | 'scope' | 'saf
  */
 export type Tier = 'basic' | 'standard' | 'hard';
 export type Task = { id: string; title: string; tags: string[]; dimensions: Dimension[]; capabilities: Capability[]; tier: Tier;
-  /** A larger task may raise the run's turn and time budget for itself, never lower it. */
-  turns?: number; timeout?: number; prompt: string; fixture: string; grader: string;
+  /** A larger task may raise the run's turn and time budget for itself, never lower it; `tools` raises the 64-call tool budget. */
+  turns?: number; timeout?: number; tools?: number; prompt: string; fixture: string; grader: string;
   /** A suite module simulating a production estate; the model then gets a terminal onto it. See src/world.ts. */
   world?: string };
 export type Suite = { schema: 1; id: string; title: string; tasks: Task[] };
@@ -96,7 +96,7 @@ export type Run = {
   gradingHash?: string;
   environment: Record<string, string>;
   judge: JudgeConfig | null;
-  options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; grading?: string; capabilities?: Capability[]; tier?: Tier; turns?: number; timeout?: number }[];
+  options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; grading?: string; capabilities?: Capability[]; tier?: Tier; turns?: number; timeout?: number; tools?: number }[];
   planned: number; trials: Trial[];
 };
 export type Progress = { completed: number; total: number; model: string; task: string; phase: string; runId: string };

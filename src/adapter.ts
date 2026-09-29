@@ -16,12 +16,14 @@ export function failureStatus(message: string, httpStatus?: number): Trial['stat
   if ([401, 403].includes(httpStatus ?? 0) || /credential|api.?key|oauth|unauthori[sz]ed|authentication|login/i.test(message)) return 'auth_error';
   return 'provider_error';
 }
-export function taskTools(root: string, trace: ToolEvent[], signal: AbortSignal, notify: (phase: string) => void, world?: World): AgentTool[] {
+/** Tool calls a try may make: 64, or more when its task asks for more. The same budget holds in both lanes. */
+export const toolLimit = (task: Pick<Task, 'tools'>) => Math.max(64, task.tools ?? 0);
+export function taskTools(root: string, trace: ToolEvent[], signal: AbortSignal, notify: (phase: string) => void, world?: World, limit = 64): AgentTool[] {
   const make = (name: string, description: string, parameters: TSchema, execute: (args: Record<string, unknown>) => Promise<string> | string): AgentTool => ({
     name, label: name, description, parameters,
     execute: async (_id, args) => {
       if (signal.aborted) throw new Error('Cancelled');
-      if (trace.length >= 64) throw new Error('Tool-call budget exhausted (64)');
+      if (trace.length >= limit) throw new Error(`Tool-call budget exhausted (${limit})`);
       const started = performance.now();
       // Pi validates each tool's object schema before execute is called.
       const params = args as Record<string, unknown>;
@@ -62,11 +64,12 @@ export async function runAgent(root: string, modelConfig: ModelConfig, task: Tas
   let modelStart = start;
   let httpStatus: number | undefined;
   let retryAfter: string | undefined;
-  const tools = options.lane === 'tools' ? taskTools(root, trial.trace, signal, notify, world) : [];
+  const limit = toolLimit(task);
+  const tools = options.lane === 'tools' ? taskTools(root, trial.trace, signal, notify, world, limit) : [];
   const agent = new Agent({
     initialState: { model, systemPrompt: world ? OPERATOR_PROMPT : SYSTEM_PROMPT, thinkingLevel: modelConfig.thinking, tools },
     toolExecution: 'sequential',
-    shouldStopAfterTurn: () => trial.turns >= options.maxTurns || trial.trace.length >= 64 || signal.aborted,
+    shouldStopAfterTurn: () => trial.turns >= options.maxTurns || trial.trace.length >= limit || signal.aborted,
     streamFn: (m, context, opt) => models.streamSimple(m, context, {
       ...opt, maxTokens: options.maxTokens, cacheRetention: options.cache ? 'short' : 'none', transport: 'sse', maxRetries: 0,
       timeoutMs: options.timeout * 1000, maxRetryDelayMs: 1,
@@ -125,7 +128,7 @@ export async function runAgent(root: string, modelConfig: ModelConfig, task: Tas
       trial.error = safeError(last?.errorMessage ?? 'Provider returned no assistant response') + (retryAfter ? `; retry-after=${retryAfter}` : '');
       trial.status = failureStatus(trial.error, httpStatus); return;
     }
-    if (last.stopReason === 'length' || (last.stopReason === 'toolUse' && (trial.turns >= options.maxTurns || trial.trace.length >= 64))) {
+    if (last.stopReason === 'length' || (last.stopReason === 'toolUse' && (trial.turns >= options.maxTurns || trial.trace.length >= limit))) {
       trial.status = 'budget'; trial.error = 'Output or turn budget exhausted while still working; counted as unsolved.'; return;
     }
     if (options.lane === 'prompt') {

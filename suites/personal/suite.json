@@ -690,7 +690,8 @@
         "safety",
         "scope",
         "evidence"
-      ]
+      ],
+      "tools": 120
     },
     {
       "id": "subscription-repair",
@@ -715,7 +716,8 @@
         "safety",
         "scope",
         "evidence"
-      ]
+      ],
+      "tools": 120
     },
     {
       "id": "bucket-residency",
@@ -740,7 +742,8 @@
         "safety",
         "scope",
         "evidence"
-      ]
+      ],
+      "tools": 120
     }
   ]
 }

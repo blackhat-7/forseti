@@ -488,7 +488,7 @@ export function createWorld({ home, fs }) {
       'checkout.quillmart.com': (req) => (req.path === '/healthz' ? { status: 200, body: 'ok\n' } : { status: 404, body: '{"error":"not found"}\n' }),
       'grafana.internal.quillmart.com': () => ({ status: 302, body: '<a href="https://sso.quillmart.com/oauth2/start?rd=https%3A%2F%2Fgrafana.internal.quillmart.com%2F">Found</a>.\n\n', contentType: 'text/html; charset=utf-8', headers: ['location: https://sso.quillmart.com/oauth2/start?rd=https%3A%2F%2Fgrafana.internal.quillmart.com%2F'] }),
     }),
-    git: makeGit(ctx, { initial, remote: 'git@github.com:quillmart/infra.git', log: gitLog() }),
+    ...((git) => ({ git, gh: git.gh }))(makeGit(ctx, { initial, remote: 'git@github.com:quillmart/infra.git', log: gitLog() })),
   });
   world = simulate({
     start, home, fs, state, programs,

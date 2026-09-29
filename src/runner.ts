@@ -42,7 +42,7 @@ function claudeVersion(): string {
   return /versions\/([\d.]+)/.exec(binary)?.[1] ?? spawnSync(binary, ['--version'], { encoding: 'utf8' }).stdout.trim().split(/\s/)[0] ?? '';
 }
 function taskEntry(t: Task, contents: Record<string, string>): Run['tasks'][number] {
-  return { id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, turns: t.turns, timeout: t.timeout, hash: taskFingerprint(t, contents), grading: taskGrading(t, contents) };
+  return { id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, turns: t.turns, timeout: t.timeout, tools: t.tools, hash: taskFingerprint(t, contents), grading: taskGrading(t, contents) };
 }
 /**
  * The conditions a try would run under now, with these options: the code, every task in the suite

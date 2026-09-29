@@ -450,7 +450,7 @@ export function createWorld({ home, fs }) {
       return {
         gcloud: makeGcloud(c, groups),
         psql: makePsql(c, { resolve }),
-        git: makeGit(c, { branch: 'main', remote: 'git@github.com:quillmart/billing.git', initial, log: gitLog(initial) }),
+        ...((git) => ({ git, gh: git.gh }))(makeGit(c, { branch: 'main', remote: 'git@github.com:quillmart/billing.git', initial, log: gitLog(initial) })),
         curl: makeCurl(c, {}),
         'cloud-sql-proxy': (args) => cloudSqlProxy(c, state, args),
         kubectl: kubectlUnconfigured(c),

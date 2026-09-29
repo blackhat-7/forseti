@@ -11,9 +11,10 @@
  *   g.error(message)             `ERROR: (gcloud.<command>) message`, exit 1
  */
 import { table } from './world.mjs';
+import { helpPage } from './gcloud-help.mjs';
 
 /** Flags that never take a value, so `--quiet sql` is not read as `--quiet=sql`. */
-const BOOLEAN = new Set(['quiet', 'q', 'async', 'verbosity-debug', 'help', 'all', 'recursive', 'r', 'no-user-output-enabled', 'uniform-bucket-level-access', 'no-uniform-bucket-level-access', 'versioning', 'no-versioning', 'dry-run', 'delete-unmatched-destination-objects', 'no-clobber', 'no-backup', 'enable-bin-log', 'no-enable-bin-log', 'clear-database-flags', 'internal-ip', 'no-promote', 'summarize', 'long', 'l', 'full', 'update', 'wait', 'no-wait', 'enable-cdn', 'no-enable-cdn', 'skip-if-exists', 'continue-on-error', 'dry_run', 'execute-now', 'follow', 'freshness', 'include-managed-folders', 'soft-deleted', 'include-labels', 'overwrite', 'all-versions', 'public-access-prevention', 'readable-sizes', 'enable-autoclass', 'requester-pays', 'default-event-based-hold', 'skip-if-dest-has-newer-mtime', 'checksums-only', 'exclude-symlinks', 'preserve-posix', 'no-ignore-symlinks']);
+const BOOLEAN = new Set(['version', 'quiet', 'q', 'async', 'verbosity-debug', 'help', 'all', 'recursive', 'r', 'no-user-output-enabled', 'uniform-bucket-level-access', 'no-uniform-bucket-level-access', 'versioning', 'no-versioning', 'dry-run', 'delete-unmatched-destination-objects', 'no-clobber', 'no-backup', 'enable-bin-log', 'no-enable-bin-log', 'clear-database-flags', 'internal-ip', 'no-promote', 'summarize', 'long', 'l', 'full', 'update', 'wait', 'no-wait', 'enable-cdn', 'no-enable-cdn', 'skip-if-exists', 'continue-on-error', 'dry_run', 'execute-now', 'follow', 'freshness', 'include-managed-folders', 'soft-deleted', 'include-labels', 'overwrite', 'all-versions', 'public-access-prevention', 'readable-sizes', 'enable-autoclass', 'requester-pays', 'default-event-based-hold', 'skip-if-dest-has-newer-mtime', 'checksums-only', 'exclude-symlinks', 'preserve-posix', 'no-ignore-symlinks']);
 
 export function makeGcloud(ctx, groups) {
   return function gcloud(argv, io) {
@@ -48,8 +49,11 @@ export function makeGcloud(ctx, groups) {
       /** With no terminal, gcloud takes the prompt's default and says so. */
       confirm: (message, fallback = true) => ({ ok: flags.quiet ? true : fallback, lines: flags.quiet ? [] : [message, '', 'Do you want to continue (Y/n)?  ', ''] }),
     };
+    if (!group && (flags.version || flags.v)) return BUILTIN.version();
+    if (!group && flags.help) return { out: helpPage([]).map(l => l.replace('gcloud  - ', 'gcloud - manage Google Cloud resources and developer workflow')) };
     if (!group) return { err: ['ERROR: (gcloud) Command name argument expected.', '', 'Available groups for gcloud:', ...Object.keys({ ...BUILTIN, ...groups }).sort().map(n => `      ${n}`), '', "For detailed information on this command and its flags, run:", '  gcloud --help'], code: 2 };
-    if (flags.help || group === 'help') return { out: [`NAME`, `    gcloud ${words.join(' ')}`, '', 'SYNOPSIS', `    gcloud ${words.join(' ')} [FLAGS]`] };
+    // Help covers the command path only, not its operands.
+    if (flags.help || group === 'help') return { out: helpPage((group === 'help' ? words.slice(1) : words).filter(w => /^[a-z][a-z0-9-]*$/.test(w) && !w.includes('--')).slice(0, 4).filter((w, k, all) => k < 2 || !/\d/.test(w) || all.length < 3)) };
     ctx.wait(2);
     const handler = groups[group] ?? BUILTIN[group];
     if (!handler) return { err: [`ERROR: (gcloud) Invalid choice: '${group}'.`, 'Maybe you meant:', '  gcloud config', '', 'To search the help text of gcloud commands, run:', `  gcloud help -- SEARCH_TERMS`], code: 2 };

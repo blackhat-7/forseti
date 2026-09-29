@@ -457,8 +457,10 @@ export function makeGsutil(ctx) {
         else if (a === '-b') ubla = (args[++k] ?? '').toLowerCase() === 'on';
         else if (a === '-p') proj = args[++k];
         else if (a === '--pap') pap = args[++k] === 'enforced' ? 'enforced' : 'inherited';
-        else if (a === '--autoclass' || a === '--placement' || a === '--retention' || a === '--rpo') k++;
-        else if (!a.startsWith('-')) urls.push(a);
+        else if (a === '--autoclass') { /* a switch */ }
+        else if (a === '-k' || a === '--placement' || a === '--retention' || a === '--rpo') k++;
+        else if (a.startsWith('-')) return { err: ['CommandException: Incorrect option(s) specified. Usage:', '', '  gsutil mb [-b (on|off)] [-c <class>] [-k <key>] [-l <location>] [-p <project>]', '            [--autoclass] [--retention <time>] [--pap <setting>]', '            [--placement <region1>,<region2>]', '            [--rpo {ASYNC_TURBO|DEFAULT}] gs://<bucket_name>...', '', 'For additional help run:', '  gsutil help mb'], code: 1 };
+        else urls.push(a);
       }
       const out = [], err = [];
       for (const url of urls) {

@@ -2,7 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { safeError } from './adapter.ts';
+import { safeError, toolLimit } from './adapter.ts';
 import { files, inside } from './files.ts';
 import { MCP_ALLOWED, MCP_SERVER } from './mcpserver.ts';
 import { TERMINAL } from './world.ts';
@@ -201,7 +201,7 @@ export async function runClaudeCode(
   const server = world ? TERMINAL.server : MCP_SERVER;
   writeFileSync(configPath, JSON.stringify({ mcpServers: { [server]: {
     command: process.execPath,
-    args: [fileURLToPath(new URL('mcpserver.ts', import.meta.url)), root, tracePath, ...(world ? [world.module, world.report] : [])],
+    args: [fileURLToPath(new URL('mcpserver.ts', import.meta.url)), root, tracePath, ...(world ? [world.module, world.report] : []), ...(task.tools ? [`--calls=${toolLimit(task)}`] : [])],
   } } }), { mode: 0o600 });
   const prompt = world ? task.prompt : `${task.prompt}\n\nWork only inside this directory. Public files:\n${Object.keys(files(root)).join('\n') || '(empty)'}`;
   const args = claudeCodeArgs(model.model, options.maxTurns, configPath, world ? `Read,Write,Edit,Glob,Grep,mcp__${TERMINAL.server}__${TERMINAL.name}` : CLAUDE_CODE_ALLOWED);
