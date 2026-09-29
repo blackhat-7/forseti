@@ -91,6 +91,9 @@ export class Dashboard implements Component, Focusable {
   private get live(): Run | undefined { return this.watcher.run; }
   private watch(): void {
     const was = this.watcher.id, changed = this.watcher.poll(), ended = was && !this.watcher.id, second = Math.floor(Date.now() / 1000);
+    // A run started elsewhere (the CLI, another terminal) opens Live, as one started here does,
+    // unless the user is in the middle of a panel.
+    if (!was && this.watcher.id && !this.dialog && this.tab !== LIVE) { this.tab = LIVE; this.resetScroll(); }
     // A run started elsewhere just ended: its results are new, so the leaderboard reloads.
     if (ended && !this.controller) void this.app.refresh().then(() => this.repaint());
     if (changed || ended || (this.watcher.id && second !== this.second)) { this.second = second; this.repaint(); }

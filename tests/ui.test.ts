@@ -889,8 +889,26 @@ test('opening the TUI during a run does not repaint before the screen exists', (
   mkdirSync(join(root, 'runs', 'live', 'trials'), { recursive: true });
   writeFileSync(join(root, '.state', 'run.lock'), JSON.stringify({ pid: process.pid, runId: 'live' }));
   writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', status: 'running', planned: 2, trials: [] }));
-  const ui = new Dashboard({ ...f.app, root }, () => { throw new Error('repainted during construction'); }, () => {}, () => 40);
+  let built = false;
+  const ui = new Dashboard({ ...f.app, root }, () => { if (!built) throw new Error('repainted during construction'); }, () => {}, () => 40);
+  built = true;
   assert.match(flat(ui.render(80)), /Running[─\s]+0 of 2 tries/, 'and the first render already shows the run');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('a run started from the CLI while the TUI sits on Home opens Live', async () => {
+  const f = fixture();
+  const root = mkdtempSync(join(process.cwd(), '.tmp/ui-elsewhere-'));
+  const ui = new Dashboard({ ...f.app, root }, () => {}, () => {}, () => 40);
+  assert.match(flat(ui.render(80)), /Leaderboard/);
+  mkdirSync(join(root, '.state'), { recursive: true });
+  mkdirSync(join(root, 'runs', 'live', 'trials'), { recursive: true });
+  writeFileSync(join(root, '.state', 'run.lock'), JSON.stringify({ pid: process.pid, runId: 'live' }));
+  writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', status: 'running', planned: 2, trials: [] }));
+  // The lock is looked at about once a second, so give the timer that long.
+  await new Promise(resolve => setTimeout(resolve, 1300));
+  assert.match(flat(ui.render(80)), /Running[─\s]+0 of 2 tries/);
+  assert.doesNotMatch(flat(ui.render(80)), /Leaderboard/, 'Home would show the leaderboard under its running card');
   rmSync(root, { recursive: true, force: true });
 });
 
