@@ -56,7 +56,7 @@ export function checkShare(trials: Trial[]): number | null {
  * has not earned.
  */
 export function scoreError(card: Scorecard): number | null {
-  const scored = card.tasks.filter(t => t.rate !== null);
+  const scored = card.tasks.filter(t => t.rate !== null && (!card.levels || card.levels.includes(t.tier!)));
   if (!scored.length) return null;
   // The score is a weighted mean of independent task rates, so its variance is Σ w² · var.
   const w = weights(scored, card.weighting);
@@ -111,6 +111,8 @@ export type Scorecard = {
   evaluated: number; planned: number; notRun: number; stalled: number; tasks: TaskScore[];
   /** 'tier': each difficulty tier counts equally. 'task': every task counts equally. */
   weighting: 'tier' | 'task';
+  /** Set when models cover different difficulty levels: the headline uses only these. */
+  levels?: Tier[];
 };
 /**
  * Per-task weights for a mean over `tasks`. Under 'tier' each tier present counts equally and each
@@ -333,6 +335,14 @@ export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks
   const when = (id: string) => (/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}/.test(id) ? `${id.slice(5, 10)} ${id.slice(11, 16).replace('-', ':')}` : id);
   const shared = new Set(cards.map(c => c.card.label).filter((label, i, all) => all.indexOf(label) !== i));
   for (const { run, card } of cards) if (shared.has(card.label)) card.label = `${card.label} · ${when(run.id)}`;
+  // A level only some models have tries on would lift or sink only their overall score, so when
+  // coverage differs the headline is taken over the levels every model shares.
+  const has = (c: ModelCard) => new Set(c.tasks.filter(t => t.rate !== null && t.tier).map(t => t.tier!));
+  const real = cards.map(c => c.card).filter(c => !c.synthetic && c.weighting === 'tier');
+  const common = TIERS.filter(tier => real.length && real.every(c => has(c).has(tier)));
+  if (common.length && real.some(c => has(c).size > common.length)) {
+    for (const { card } of cards) Object.assign(card, { levels: common }, headline(card.tasks.filter(t => common.includes(t.tier!)), 'tier'));
+  }
   return { cards: cards.map(c => c.card), tasks, mixed: new Set(runs.map(comparisonKey)).size > 1 || runs.some(r => r.environment.conditions === 'mixed') };
 }
 /**
@@ -391,6 +401,11 @@ export function stallNote(card: Scorecard): string | null {
   return card.stalled ? `${card.label} ran out of turns or time on ${tries(card.stalled)} (counted as unsolved).` : null;
 }
 /** How the headline weighs tasks, in one plain phrase, so the page states what its number means. */
+/** Says which levels the headline covers when models do not all have tries on every level. */
+export function levelsNote(cards: Scorecard[]): string | null {
+  const levels = cards.find(c => c.levels)?.levels;
+  return levels ? `${levels.map(t => TIER_NAME[t]).join(' and ')} only: not every model has tries on every level` : null;
+}
 export function weighting(runTasks: RunTask[]): string {
   return tierSlices(runTasks).length ? 'Each difficulty level counts equally, and each task within its level' : 'Every task counts equally';
 }
@@ -413,6 +428,8 @@ function summaryMarkdown(runs: Run[]): string[] {
   const table = (first: string) => [`| ${first} | ${names.join(' | ')} |`, `|---|${cards.map(() => '---:').join('|')}|`];
   const lines = ['# Model comparison', '', `${cards.some(c => !c.synthetic) ? plural(cards.filter(c => !c.synthetic).length, 'model') : plural(cards.length, 'synthetic control')} · ${plural(tasks.length, 'task')} · ${triesLabel(cards)}${tagged || cards.every(c => c.synthetic) ? '' : ` · ${cards[0]!.harness}`}`, ''];
   if (tagged) lines.push(`> **${HARNESS_WARNING}**`, '');
+  const levels = levelsNote(cards);
+  if (levels) lines.push(`> **Overall covers ${levels}.**`, '');
   else if (mixed) lines.push('> **Not one controlled comparison:** suite, selected tasks, lane or settings differ between these runs. See Details for each group.', '');
   lines.push(`## Who is best overall`, '', `**${LABEL.solved}**: the share of tasks a model got completely right. ${weighting(tasks)}. **±** is how far the number could move if the run were repeated. A model's **rank** is 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart.`, '',
     `| Rank | Model |${tagged ? ' Harness |' : ''} ${LABEL.solved} | | ± |${lost ? ' Not run |' : ''}${caveat ? ' Caveat |' : ''}`, `|---:|---|${tagged ? '---|' : ''}---:|---|---:|${lost ? '---:|' : ''}${caveat ? '---|' : ''}`);

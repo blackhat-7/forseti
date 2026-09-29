@@ -12,7 +12,7 @@ import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
-import { byTier, comparisonKey, conditionsKey, leaderboard, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
+import { byTier, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
 import { agentOf, applicableDimensions, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -797,4 +797,17 @@ test('the leaderboard keeps each model\'s newest tries and says when conditions 
   // The suite decides tiers and membership: a relabelled task moves, a removed one leaves.
   const now = leaderboard([older, newer], [{ ...suite[0]!, tier: 'standard' }])!;
   assert.deepEqual(now.tasks.map(t => [t.id, t.tier]), [['a', 'standard']]);
+});
+
+test('the overall score uses only the difficulty levels every model has tries on', () => {
+  const m = (id: string): ModelConfig => ({ id, label: id, provider: 'claude-code', model: id, auth: 'cli', enabled: true, thinking: 'off' });
+  const tasks = [{ id: 'b', title: 'B', hash: 'b', tier: 'basic' as const }, { id: 'h', title: 'H', hash: 'h', tier: 'hard' as const }];
+  const tri = (model: string, task: string, passed: boolean) => ({ ...blankTrial(`${model}-${task}`, m(model), { id: task } as never, 1), status: passed ? 'passed' as const : 'failed' as const, checks: [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }] });
+  // `wide` also ran the basic task and solved it; `narrow` never ran it. Both failed the hard task.
+  const run: Run = { schema: 1, id: 'r', created: '2026-01-01', status: 'completed', suite: 's', suiteHash: 's', harnessHash: 'h', environment: {}, judge: null,
+    options: { ...DEFAULT_OPTIONS }, models: [m('wide'), m('narrow')], tasks, planned: 3, trials: [tri('wide', 'b', true), tri('wide', 'h', false), tri('narrow', 'h', false)] };
+  const { cards } = scorecards([run]);
+  assert.deepEqual(cards.map(c => [c.label, c.score, c.levels]), [['wide', 0, ['hard']], ['narrow', 0, ['hard']]], 'a level only one model ran cannot lift its overall score');
+  assert.equal(levelsNote(cards), 'Hard only: not every model has tries on every level');
+  assert.equal(byTier(cards[0]!, tasks)[0]!.rate, 1, 'the level itself is still shown');
 });

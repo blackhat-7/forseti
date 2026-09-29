@@ -5,7 +5,7 @@ import {
   type Component, type Focusable,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { comparisonReport, leaderboard, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
+import { comparisonReport, leaderboard, levelsNote, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
@@ -154,7 +154,8 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnl
   const room = Math.min(30, width - 4 - nameW - 18), barW = room < 6 ? 0 : room;
   const barLine = (i: number, lead: string, rate: number | null, tail: string) =>
     lead + pad(names[i]!, nameW) + (barW ? (cards[i]!.synthetic ? faint : SERIES[i % SERIES.length]!)(bar(rate, barW)) + ' ' : '') + bold(pct(rate).padStart(4)) + tail;
-  row(bold('Overall'));
+  const levels = levelsNote(cards);
+  row(bold('Overall') + (levels ? faint(`   ${levels}`) : ''));
   for (const [i, { card, rank }] of ranked.entries()) {
     // A control's answers are fixed, so a rerun spread would be a number about nothing.
     // A rerun spread means nothing for a control, or for a model not ranked yet.
