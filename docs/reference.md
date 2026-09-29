@@ -1,0 +1,186 @@
+# Forseti reference
+
+The full detail behind the [README](../README.md): every flag, lane, billing rule and check.
+
+**A small, evidence-first LLM benchmark with a Pi-powered terminal UI.**
+
+Two independent parts:
+- **`src/`** — reusable runner, CLI, TUI, isolation, accounting and comparisons.
+- **`suites/personal/`** — sanitized tasks, public fixtures and private deterministic verifiers. No framework imports.
+
+## Start
+
+Requires **macOS** or **Linux** (kernel 6.12+, Landlock enabled, x86_64 or arm64), **Node 24+**, and **Python 3** installed through Homebrew, `/usr`, or `/Library`. Other operating systems fail closed; there is no unsandboxed fallback.
+
+```sh
+cd /path/to/forseti
+mkdir -p .tmp
+TMPDIR="$PWD/.tmp" npm ci
+npm start                 # TUI; opening it never sends a model prompt
+npm run demo              # 36 synthetic control trials, no provider needed
+npm run doctor            # exercise the real sandbox; inspect auth metadata
+```
+
+![Forseti terminal UI](tui-home.svg)
+
+**Keys:** `Tab` / `1–6` change views (Home, Live, Models, Tests, Runs, Settings); arrows or `j/k` navigate; `Space` enables/selects; `a` adds; `d` removes after confirmation. In Tests, `u` restores the last removed test. `+/-` changes repetitions; `l` switches tools/prompt lanes; `p` toggles prompt caching. `r` reviews a run before starting. `Esc` cancels while saving results. In Runs: `c` compares, `Enter` inspects evidence, `e` exports.
+
+Defaults are synthetic controls, two repetitions, seed 42, 90 seconds/trial, 12 turns, 4,096 output tokens/turn and **prompt caching on**. **Controls are not LLM rankings.**
+
+## Run a real model
+
+Use the model picker, or:
+
+```sh
+npm start -- models catalog openai-codex
+npm start -- models add openai-codex/gpt-5.5 --auth pi
+npm start -- run --models openai-codex-gpt-5-5 --tests shared-count,incident-window --repeat 2
+```
+
+`pi` reads existing `~/.pi/agent/auth.json` **without writing, refreshing or rotating it**. Pi's supported provider implementation makes the request. Tokens within five minutes of expiry are refused; renew them in your normal Pi session yourself, then retry. No credential files are copied into trials, results or prompts. Shell-command credentials are refused.
+
+## Use your Claude plan
+
+Claude models run through **your own Claude Code CLI**, under the login you already have:
+
+```sh
+npm start -- models add claude-code/sonnet
+npm start -- models add claude-code/haiku
+npm start -- run --models claude-code-sonnet,claude-code-haiku --tests shared-count,incident-window --repeat 3
+```
+
+No API key, no `--allow-metered`. Forseti spawns the first-party client (`claude -p`) in the trial directory and lets it authenticate itself — it never reads, copies or refreshes a Claude credential, and it deletes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and `ANTHROPIC_PROFILE` from the child so this path can never silently bill a metered key. Usage draws on your plan's limits; hitting one stops that provider for the run with no retry.
+
+Flags per trial: `--restricted --disable-slash-commands` (your settings, hooks, plugins, skills and `CLAUDE.md` don't leak into a benchmark, and the built-in shell and code runners are removed), `--strict-mcp-config --mcp-config` (only Forseti's own tool server is loaded, never the host's), `--permission-mode dontAsk --permission-prompts none` (anything that would prompt is denied, not queued), `--allowedTools Read,Write,Edit,Glob,Grep,mcp__forseti__python`, `--disallowedTools` removing `Bash` and the rest, and `--max-turns`. They are recorded in each run manifest.
+
+**Both lanes can run code, and each keeps its own file tools.** The Pi lane executes arbitrary sandboxed Python, so Claude Code is given that same interpreter over MCP — otherwise one lane could verify itself against `check_public.py` and iterate while the other could not, and a cross-lane score would compare capabilities rather than models. File access stays each client's own dialect: `Read`/`Write`/`Edit`/`Glob`/`Grep` here, `read_file`/`write_file`/`list_files` in the Pi lane. Those are one capability spelled twice, and swapping them measured which tools a client is tuned for. `Bash` stays denied: it is unsandboxed and networked, and the sandboxed interpreter is the fair equivalent.
+
+**This measures the model inside Claude Code, not the model.** Claude Code brings its own system prompt, agent loop, context management and tools. So:
+- A run may mix `claude-code` and Pi-adapter models; each runs in its own family's lane, and the page names each model's harness.
+- Reports tag the harness and never pool the two.
+- Tool checks are **N/A** here: the rubric names Forseti's `read_file`/`write_file`, which this lane does not use, and its native file calls are not observable. That is a process check, not a capability one — both lanes can run code, so correctness remains comparable.
+- The CLI process runs outside the sandbox, but its Python runs inside it, through the same sandbox as the Pi lane, and `--restricted` confines its file tools to the trial directory.
+- Reported cost is Claude Code's client-side list-price estimate, not what a subscription is billed.
+
+API keys are also supported:
+
+```sh
+export OPENAI_API_KEY=...                  # keep it out of files/history
+npm start -- models catalog openai
+npm start -- models add openai/MODEL_ID --auth env
+npm start -- run --models MODEL_CONFIG_ID --allow-metered
+```
+
+Use the ID printed by `models add`. Catalog presence/auth readiness **does not guarantee account access**. Forseti never switches credentials or paid routes after a failure.
+
+Authentication and billing are separate:
+- Codex OAuth uses subscription quota. Cost is **N/A**, not “$0.”
+- Claude OAuth in third-party harnesses uses **metered extra usage**, per the pinned Pi provider docs.
+- Metered/unknown billing needs `PAY` in the TUI or `--allow-metered`. This is consent, **not a dollar spending cap**.
+- Quota/auth failure stops that provider for the run. Other provider errors stop that model. Missing usage stays unknown; API costs are catalog estimates, never invoices.
+
+**Prompt caching is on by default** (`--no-cache`, or `p` in the TUI, turns it off). Without it the system prompt, tool schemas and transcript are re-sent uncached on every turn, which is where a third-party harness quietly costs 2x+ more than the vendor's own client. Caching reuses the prefix KV state and does not change sampling, so correctness is unaffected — but it does change repeated input cost and first-delta latency, so cached and uncached runs are never pooled in one comparison.
+
+## Use a local model
+
+Any OpenAI-compatible server on your own machine works: llama-server, Ollama, LM Studio, vLLM. Set the base address once, on **Settings** (`6`, then the Address row) or from the shell:
+
+```sh
+npm start -- local http://127.0.0.1:8080        # llama-server; Ollama is :11434, LM Studio :1234
+npm start -- models add local/MODEL_ID          # one of the IDs the line above printed
+npm start -- run --models local-MODEL --tests shared-count --repeat 2
+```
+
+Forseti asks the server only `GET /v1/models`, and only when you set the address or open the model picker, never on startup. Trials go to `POST /v1/chat/completions` in the plain dialect every such server speaks (`max_tokens`, `system` role, no `store`). No credential is sent, and the report shows billing as `local`. A local model runs through the same Pi adapter as every other API model, so it pools with them and never with Claude Code. The address is not part of a model's identity: the run manifest records which server answered, and changing the address changes where every local model is looked up. llama-server names a model by its file path unless you start it with `--alias`; Forseti shortens that to the file name for IDs and labels. A local model's `thinking` is `off` (the default) or `high`, sent as `chat_template_kwargs.enable_thinking`; llama.cpp, vLLM and SGLang honour it, Ollama and LM Studio ignore it and use their own default. Leave it off unless you also raise `--tokens`: a hybrid model like Qwen3 can spend the whole 4096-token turn thinking and run out of budget, which counts as an unsolved try.
+
+## Inspect results
+
+```sh
+npm start -- runs
+npm start -- compare RUN_ID                 # models within a run
+npm start -- compare RUN_A RUN_B
+npm start -- parallel 4                      # tries at once (default 1); local models still one at a time
+npm start -- leaderboard                    # every comparable try from every run; a run only makes missing tries (--fresh to force)
+npm start -- regrade                        # grade saved tries again after a grader change; calls no model
+npm start -- run --models MODEL_CONFIG_ID --lane prompt --repeat 2
+```
+
+Each run saves its schedule, settings, suite, harness source/lockfile, environment, per-trial events, final artifacts, check evidence and timing under `runs/`. Exported reports go in `reports/`. Each export writes its own `comparison-<timestamp>.md`; those stay on your machine, and only the two examples linked below are tracked in git. Model tool directories contain public fixtures only; graders and reference solutions remain outside that boundary.
+
+Comparisons show correctness, instruction adherence, tool behavior, judged design, timing and available tokens/cost. The `hygiene` gate (valid AST, stdlib-only imports, no eval/exec) reports pass/fail, never a percentage: every plausible submission clears it, so a rate there would be praise for something unmeasured. They include matched-check evidence and missing outcomes. Different task sets, suite/harness versions, lanes, budgets or environments are separated rather than silently ranked together. Prompt-only versus tools is an **elicitation/harness ablation**, not a pure model difference. Provider model aliases may change; repeat scheduling is deterministic, model responses are not guaranteed to be.
+
+Examples: [control comparison](../reports/example-comparison.md), [live verification](../reports/live-smoke.md), [verification record](verification.md).
+
+## Add, disable or remove
+
+```sh
+npm start -- models disable MODEL_CONFIG_ID
+npm start -- models enable MODEL_CONFIG_ID
+npm start -- models remove MODEL_CONFIG_ID
+npm start -- tests disable TEST_ID
+npm start -- tests remove TEST_ID           # unregister; keep fixture/results
+npm start -- tests restore TEST_ID
+npm start -- tests add json-seven --prompt 'Return an object with answer seven.' --expect '{"answer":7}'
+```
+
+For code tasks, add a manifest entry, public fixture directory and private `.mjs` verifier: [suite contract](suite-contract.md). A verifier receives final text/artifacts, tool evidence and a **read-only sandboxed** Python callback; expected values stay in trusted JavaScript. Declare rubric dimensions so rejected submissions cannot inflate correctness. Add a correct reference and flawed baseline to validate your verifier offline.
+
+`forseti.json` is the small editable configuration. Change `suite` to another **workspace-local** manifest, or edit a model's `thinking` field. Use distinct config IDs for reasoning variants; reports retain the exact settings. Config holds no secrets. New providers require Pi support; new catalog entries require a reviewed, pinned Pi dependency update, not arbitrary CLI execution.
+
+## Production operations tasks
+
+Three `hard` tasks put a model on call for a simulated production estate: stop a live checkout outage (`checkout-hotfix`), repair subscriptions a bad job cancelled in the production database (`subscription-repair`), and move a live uploads bucket to the EU (`bucket-residency`). The model gets a terminal with `gcloud`, `kubectl`, `psql`, `gsutil` and the usual Unix tools, and is not told the estate is simulated.
+
+Nothing real is reachable. Every command is answered by JavaScript over in-memory state; no process is started and no network is used, whatever the model types. Each command costs 20 virtual seconds plus its own duration, and the incident keeps moving meanwhile, so a slow, over-cautious fix loses orders just as a reckless one causes an outage. Graders read what the session did to the estate: whether it was fixed, how fast, and what else broke on the way. Contract: [world tasks](suite-contract.md#world-tasks).
+
+## Judge design quality
+
+Some things cannot be counted: whether an abstraction earns its place, whether a comment carries
+intent or just restates the line below it. Those are scored by a reviewer model in a separate
+`design` dimension, configured on the **Settings** tab (`6`).
+
+Off by default. When on, it reviews only submissions that already passed every correctness check,
+asks fixed yes/no questions against the reference solution as a scale anchor, and discards any
+defect whose cited line cannot be found in the submission. It never touches the correctness score,
+and a reviewer that cannot run leaves a note instead of failing a model.
+
+The reviewer can be any Pi-catalog model, or a Claude Code model under your own plan login (no
+tools, one turn) when that is the credential you have.
+
+```sh
+npm run test:judge                                       # agreement with your recorded standard
+npm run test:judge -- --judge claude-code/sonnet         # try a reviewer without saving it
+npm run test:judge -- --run RUN_ID --alt PROVIDER/MODEL  # measure self-preference
+```
+
+Validate a reviewer before trusting its scores: [judging design](judging.md).
+
+## Verify
+
+```sh
+npm run check
+npm test
+npm run test:suite
+TMPDIR="$PWD/.tmp" npm run test:terminal
+```
+
+The PTY check runs the real TUI through navigation → confirmation → isolated controls → comparison → export → evidence → clean exit, temporarily selecting controls and restoring configuration afterward.
+
+`npm run screenshot [home|live|models|tests|runs]` regenerates the pictures from the live dashboard, so it cannot drift from the code.
+
+What each check proves, plus the live-run record and current blockers: [verification.md](verification.md).
+
+Coverage: [transcript sampling and task rationale](transcript-research.md). Boundaries and limitations: [security](security.md). Existing-tool assessment: [tooling decision](tooling-decision.md).
+
+## Working on this
+
+Four short files carry everything a new session needs, so no one has to remember the last one.
+
+| | |
+|---|---|
+| [AGENTS.md](../AGENTS.md) | how to work here: commands, session routine, rules. `CLAUDE.md` is a symlink to it. |
+| [PROGRESS.md](../PROGRESS.md) | where things stand right now, and the traps. Rewritten each session. |
+| [PLAN.md](../PLAN.md) | the ordered task list. Top unchecked line is next. |
+| [DECISIONS.md](../DECISIONS.md) | why things are the way they are. Append only. |
+
+The finished milestone-by-milestone log is [docs/history.md](history.md). Read it for reasons the four files do not explain; nothing is added to it.

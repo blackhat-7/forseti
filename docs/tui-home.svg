@@ -1,287 +1,168 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1145" height="670" viewBox="0 0 1145 670" role="img" aria-label="Forseti terminal UI, home view">
+<svg xmlns="http://www.w3.org/2000/svg" width="1145" height="770" viewBox="0 0 1145 770" role="img" aria-label="Forseti terminal UI, home view">
 <rect width="100%" height="100%" rx="10" fill="#0d0c0c"/>
-<rect x="18" y="34" width="1108.8" height="600.0" fill="rgb(24,22,22)"/>
+<rect x="18" y="34" width="1108.8" height="700.0" fill="rgb(24,22,22)"/>
 <circle cx="24" cy="18" r="6" fill="#ff5f57"/><circle cx="44" cy="18" r="6" fill="#febc2e"/><circle cx="64" cy="18" r="6" fill="#28c840"/>
 <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve">
-<rect x="18.0" y="52.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="52.0" width="58.8" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="66.0" fill="rgb(197,201,197)" font-weight="600">forseti</text>
-<rect x="93.6" y="52.0" width="756.0" height="20" fill="rgb(24,22,22)"/>
-<rect x="849.6" y="52.0" width="260.4" height="20" fill="rgb(24,22,22)"/>
-<text x="849.6" y="66.0" fill="rgb(115,124,115)">2 models · 16 tests · 2 tries</text>
-<rect x="1110.0" y="52.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="72.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="72.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="86.0" fill="rgb(197,201,197)" font-weight="600">Home</text>
-<rect x="68.4" y="72.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<rect x="93.6" y="72.0" width="50.4" height="20" fill="rgb(24,22,22)"/>
-<text x="93.6" y="86.0" fill="rgb(166,166,156)">Models</text>
-<rect x="144.0" y="72.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<rect x="169.2" y="72.0" width="42.0" height="20" fill="rgb(24,22,22)"/>
-<text x="169.2" y="86.0" fill="rgb(166,166,156)">Tests</text>
-<rect x="211.2" y="72.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<rect x="236.4" y="72.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="236.4" y="86.0" fill="rgb(166,166,156)">Runs</text>
-<rect x="270.0" y="72.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<rect x="295.2" y="72.0" width="67.2" height="20" fill="rgb(24,22,22)"/>
-<text x="295.2" y="86.0" fill="rgb(166,166,156)">Settings</text>
-<rect x="362.4" y="72.0" width="764.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="92.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="92.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="106.0" fill="rgb(139,164,176)">────</text>
-<rect x="68.4" y="92.0" width="1058.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="112.0" width="1108.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="132.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="132.0" width="285.6" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="146.0" fill="rgb(197,201,197)" font-weight="600">Sanitized personal workflow checks</text>
-<rect x="320.4" y="132.0" width="604.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="925.2" y="132.0" width="184.8" height="20" fill="rgb(24,22,22)"/>
-<text x="925.2" y="146.0" fill="rgb(166,166,156)">64 trials · tools lane</text>
-<rect x="1110.0" y="132.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="152.0" width="1108.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="172.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="172.0" width="100.8" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="186.0" fill="rgb(166,166,156)">Run settings</text>
-<rect x="135.6" y="172.0" width="268.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="404.4" y="172.0" width="252.0" height="20" fill="rgb(24,22,22)"/>
-<text x="404.4" y="186.0" fill="rgb(166,166,156)">Will run · 2 models × 16 tests</text>
-<rect x="656.4" y="172.0" width="470.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="192.0" width="1108.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="212.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="212.0" width="92.4" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="226.0" fill="rgb(166,166,156)">Tries</text>
-<rect x="127.2" y="212.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<rect x="152.4" y="212.0" width="8.4" height="20" fill="rgb(24,22,22)"/>
-<text x="152.4" y="226.0" fill="rgb(139,164,176)">2</text>
-<rect x="160.8" y="212.0" width="109.2" height="20" fill="rgb(24,22,22)"/>
-<rect x="270.0" y="212.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="270.0" y="226.0" fill="rgb(115,124,115)">− +</text>
-<rect x="295.2" y="212.0" width="109.2" height="20" fill="rgb(24,22,22)"/>
-<rect x="404.4" y="212.0" width="8.4" height="20" fill="rgb(24,22,22)"/>
-<text x="404.4" y="226.0" fill="rgb(135,169,135)">●</text>
-<rect x="412.8" y="212.0" width="243.6" height="20" fill="rgb(24,22,22)"/>
-<text x="412.8" y="226.0" fill="rgb(197,201,197)"> Reference                   </text>
-<rect x="656.4" y="212.0" width="142.8" height="20" fill="rgb(24,22,22)"/>
-<text x="656.4" y="226.0" fill="rgb(115,124,115)">synthetic control</text>
-<rect x="799.2" y="212.0" width="327.6" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="232.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="232.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="246.0" fill="rgb(166,166,156)">Lane</text>
-<rect x="68.4" y="232.0" width="84.0" height="20" fill="rgb(24,22,22)"/>
-<rect x="152.4" y="232.0" width="42.0" height="20" fill="rgb(24,22,22)"/>
-<text x="152.4" y="246.0" fill="rgb(139,164,176)">tools</text>
-<rect x="194.4" y="232.0" width="75.6" height="20" fill="rgb(24,22,22)"/>
-<rect x="270.0" y="232.0" width="8.4" height="20" fill="rgb(24,22,22)"/>
-<text x="270.0" y="246.0" fill="rgb(115,124,115)">l</text>
-<rect x="278.4" y="232.0" width="126.0" height="20" fill="rgb(24,22,22)"/>
-<rect x="404.4" y="232.0" width="8.4" height="20" fill="rgb(24,22,22)"/>
-<text x="404.4" y="246.0" fill="rgb(135,169,135)">●</text>
-<rect x="412.8" y="232.0" width="243.6" height="20" fill="rgb(24,22,22)"/>
-<text x="412.8" y="246.0" fill="rgb(197,201,197)"> Flawed baseline             </text>
-<rect x="656.4" y="232.0" width="142.8" height="20" fill="rgb(24,22,22)"/>
-<text x="656.4" y="246.0" fill="rgb(115,124,115)">synthetic control</text>
-<rect x="799.2" y="232.0" width="327.6" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="252.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="252.0" width="42.0" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="266.0" fill="rgb(166,166,156)">Cache</text>
-<rect x="76.8" y="252.0" width="75.6" height="20" fill="rgb(24,22,22)"/>
-<rect x="152.4" y="252.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<text x="152.4" y="266.0" fill="rgb(142,164,162)">on</text>
-<rect x="169.2" y="252.0" width="100.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="270.0" y="252.0" width="8.4" height="20" fill="rgb(24,22,22)"/>
-<text x="270.0" y="266.0" fill="rgb(115,124,115)">p</text>
-<rect x="278.4" y="252.0" width="848.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="272.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="272.0" width="42.0" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="286.0" fill="rgb(166,166,156)">Limit</text>
-<rect x="76.8" y="272.0" width="75.6" height="20" fill="rgb(24,22,22)"/>
-<rect x="152.4" y="272.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="152.4" y="286.0" fill="rgb(139,164,176)">180s</text>
-<rect x="186.0" y="272.0" width="84.0" height="20" fill="rgb(24,22,22)"/>
-<rect x="270.0" y="272.0" width="8.4" height="20" fill="rgb(24,22,22)"/>
-<text x="270.0" y="286.0" fill="rgb(115,124,115)">t</text>
-<rect x="278.4" y="272.0" width="848.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="292.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="292.0" width="42.0" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="306.0" fill="rgb(166,166,156)">Turns</text>
-<rect x="76.8" y="292.0" width="75.6" height="20" fill="rgb(24,22,22)"/>
-<rect x="152.4" y="292.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<text x="152.4" y="306.0" fill="rgb(139,164,176)">12</text>
-<rect x="169.2" y="292.0" width="100.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="270.0" y="292.0" width="8.4" height="20" fill="rgb(24,22,22)"/>
-<text x="270.0" y="306.0" fill="rgb(115,124,115)">T</text>
-<rect x="278.4" y="292.0" width="848.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="312.0" width="1108.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="332.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="332.0" width="252.0" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="346.0" fill="rgb(115,124,115)">seed 42 · 4096 tokens per turn</text>
-<rect x="286.8" y="332.0" width="840.0" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="352.0" width="1108.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="372.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="372.0" width="537.6" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="386.0" fill="rgb(142,164,162)">Subscription logins only (1 call site). No API key will be used.</text>
-<rect x="572.4" y="372.0" width="554.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="392.0" width="1108.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="412.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="412.0" width="8.4" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="426.0" fill="rgb(139,164,176)">r</text>
-<rect x="43.2" y="412.0" width="1083.6" height="20" fill="rgb(24,22,22)"/>
-<text x="43.2" y="426.0" fill="rgb(197,201,197)">  run — preflight first, nothing is sent until you confirm                                                                       </text>
-<rect x="18.0" y="432.0" width="1108.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="452.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="452.0" width="92.4" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="466.0" fill="rgb(166,166,156)">Recent runs</text>
-<rect x="127.2" y="452.0" width="168.0" height="20" fill="rgb(24,22,22)"/>
-<text x="127.2" y="466.0" fill="rgb(115,124,115)">   4 for all of them</text>
-<rect x="295.2" y="452.0" width="831.6" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="472.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="472.0" width="92.4" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="486.0" fill="rgb(115,124,115)">09-20 15:08</text>
-<rect x="127.2" y="472.0" width="100.8" height="20" fill="rgb(24,22,22)"/>
-<text x="127.2" y="486.0" fill="rgb(197,201,197)">  Reference </text>
-<rect x="228.0" y="472.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="228.0" y="486.0" fill="rgb(135,169,135)">100%</text>
-<rect x="261.6" y="472.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="261.6" y="486.0" fill="rgb(115,124,115)"> · </text>
-<rect x="286.8" y="472.0" width="134.4" height="20" fill="rgb(24,22,22)"/>
-<text x="286.8" y="486.0" fill="rgb(197,201,197)">Flawed baseline </text>
-<rect x="421.2" y="472.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<text x="421.2" y="486.0" fill="rgb(196,116,110)">0%</text>
-<rect x="438.0" y="472.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="454.8" y="472.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="454.8" y="486.0" fill="rgb(115,124,115)">16×2</text>
-<rect x="488.4" y="472.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="505.2" y="472.0" width="58.8" height="20" fill="rgb(24,22,22)"/>
-<text x="505.2" y="486.0" fill="rgb(139,164,176)">running</text>
-<rect x="564.0" y="472.0" width="50.4" height="20" fill="rgb(24,22,22)"/>
-<text x="564.0" y="486.0" fill="rgb(115,124,115)"> 15/64</text>
-<rect x="614.4" y="472.0" width="512.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="492.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="492.0" width="92.4" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="506.0" fill="rgb(115,124,115)">09-20 14:31</text>
-<rect x="127.2" y="492.0" width="134.4" height="20" fill="rgb(24,22,22)"/>
-<text x="127.2" y="506.0" fill="rgb(197,201,197)">  Claude sonnet </text>
-<rect x="261.6" y="492.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="261.6" y="506.0" fill="rgb(135,169,135)">100%</text>
-<rect x="295.2" y="492.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="295.2" y="506.0" fill="rgb(115,124,115)"> · </text>
-<rect x="320.4" y="492.0" width="109.2" height="20" fill="rgb(24,22,22)"/>
-<text x="320.4" y="506.0" fill="rgb(197,201,197)">Claude haiku </text>
-<rect x="429.6" y="492.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="429.6" y="506.0" fill="rgb(196,178,138)">83%</text>
-<rect x="454.8" y="492.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="454.8" y="506.0" fill="rgb(115,124,115)"> · </text>
-<rect x="480.0" y="492.0" width="100.8" height="20" fill="rgb(24,22,22)"/>
-<text x="480.0" y="506.0" fill="rgb(197,201,197)">Claude opus </text>
-<rect x="580.8" y="492.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="580.8" y="506.0" fill="rgb(135,169,135)">100%</text>
-<rect x="614.4" y="492.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="631.2" y="492.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="631.2" y="506.0" fill="rgb(115,124,115)">2×3</text>
-<rect x="656.4" y="492.0" width="470.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="512.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="512.0" width="92.4" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="526.0" fill="rgb(115,124,115)">09-18 15:34</text>
-<rect x="127.2" y="512.0" width="134.4" height="20" fill="rgb(24,22,22)"/>
-<text x="127.2" y="526.0" fill="rgb(197,201,197)">  Claude sonnet </text>
-<rect x="261.6" y="512.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="261.6" y="526.0" fill="rgb(135,169,135)">100%</text>
-<rect x="295.2" y="512.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="295.2" y="526.0" fill="rgb(115,124,115)"> · </text>
-<rect x="320.4" y="512.0" width="109.2" height="20" fill="rgb(24,22,22)"/>
-<text x="320.4" y="526.0" fill="rgb(197,201,197)">Claude haiku </text>
-<rect x="429.6" y="512.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="429.6" y="526.0" fill="rgb(196,178,138)">50%</text>
-<rect x="454.8" y="512.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="454.8" y="526.0" fill="rgb(115,124,115)"> · </text>
-<rect x="480.0" y="512.0" width="100.8" height="20" fill="rgb(24,22,22)"/>
-<text x="480.0" y="526.0" fill="rgb(197,201,197)">Claude opus </text>
-<rect x="580.8" y="512.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="580.8" y="526.0" fill="rgb(135,169,135)">100%</text>
-<rect x="614.4" y="512.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="631.2" y="512.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="631.2" y="526.0" fill="rgb(115,124,115)">1×2</text>
-<rect x="656.4" y="512.0" width="470.4" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="532.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="532.0" width="92.4" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="546.0" fill="rgb(115,124,115)">09-18 15:29</text>
-<rect x="127.2" y="532.0" width="134.4" height="20" fill="rgb(24,22,22)"/>
-<text x="127.2" y="546.0" fill="rgb(197,201,197)">  Claude sonnet </text>
-<rect x="261.6" y="532.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<text x="261.6" y="546.0" fill="rgb(196,116,110)">0%</text>
-<rect x="278.4" y="532.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="278.4" y="546.0" fill="rgb(115,124,115)"> · </text>
-<rect x="303.6" y="532.0" width="109.2" height="20" fill="rgb(24,22,22)"/>
-<text x="303.6" y="546.0" fill="rgb(197,201,197)">Claude haiku </text>
-<rect x="412.8" y="532.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<text x="412.8" y="546.0" fill="rgb(196,116,110)">0%</text>
-<rect x="429.6" y="532.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="429.6" y="546.0" fill="rgb(115,124,115)"> · </text>
-<rect x="454.8" y="532.0" width="100.8" height="20" fill="rgb(24,22,22)"/>
-<text x="454.8" y="546.0" fill="rgb(197,201,197)">Claude opus </text>
-<rect x="555.6" y="532.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="555.6" y="546.0" fill="rgb(135,169,135)">100%</text>
-<rect x="589.2" y="532.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="606.0" y="532.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="606.0" y="546.0" fill="rgb(115,124,115)">1×1</text>
-<rect x="631.2" y="532.0" width="495.6" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="552.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="552.0" width="92.4" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="566.0" fill="rgb(115,124,115)">09-18 15:15</text>
-<rect x="127.2" y="552.0" width="134.4" height="20" fill="rgb(24,22,22)"/>
-<text x="127.2" y="566.0" fill="rgb(197,201,197)">  Claude sonnet </text>
-<rect x="261.6" y="552.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="261.6" y="566.0" fill="rgb(135,169,135)">100%</text>
-<rect x="295.2" y="552.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="295.2" y="566.0" fill="rgb(115,124,115)"> · </text>
-<rect x="320.4" y="552.0" width="109.2" height="20" fill="rgb(24,22,22)"/>
-<text x="320.4" y="566.0" fill="rgb(197,201,197)">Claude haiku </text>
-<rect x="429.6" y="552.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="429.6" y="566.0" fill="rgb(135,169,135)">100%</text>
-<rect x="463.2" y="552.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="463.2" y="566.0" fill="rgb(115,124,115)"> · </text>
-<rect x="488.4" y="552.0" width="100.8" height="20" fill="rgb(24,22,22)"/>
-<text x="488.4" y="566.0" fill="rgb(197,201,197)">Claude opus </text>
-<rect x="589.2" y="552.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="589.2" y="566.0" fill="rgb(135,169,135)">100%</text>
-<rect x="622.8" y="552.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="639.6" y="552.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="639.6" y="566.0" fill="rgb(115,124,115)">1×1</text>
-<rect x="664.8" y="552.0" width="462.0" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="572.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="572.0" width="92.4" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="586.0" fill="rgb(115,124,115)">09-18 15:11</text>
-<rect x="127.2" y="572.0" width="134.4" height="20" fill="rgb(24,22,22)"/>
-<text x="127.2" y="586.0" fill="rgb(197,201,197)">  Claude sonnet </text>
-<rect x="261.6" y="572.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="261.6" y="586.0" fill="rgb(135,169,135)">100%</text>
-<rect x="295.2" y="572.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="295.2" y="586.0" fill="rgb(115,124,115)"> · </text>
-<rect x="320.4" y="572.0" width="109.2" height="20" fill="rgb(24,22,22)"/>
-<text x="320.4" y="586.0" fill="rgb(197,201,197)">Claude haiku </text>
-<rect x="429.6" y="572.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="429.6" y="586.0" fill="rgb(135,169,135)">100%</text>
-<rect x="463.2" y="572.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="463.2" y="586.0" fill="rgb(115,124,115)"> · </text>
-<rect x="488.4" y="572.0" width="100.8" height="20" fill="rgb(24,22,22)"/>
-<text x="488.4" y="586.0" fill="rgb(197,201,197)">Claude opus </text>
-<rect x="589.2" y="572.0" width="33.6" height="20" fill="rgb(24,22,22)"/>
-<text x="589.2" y="586.0" fill="rgb(135,169,135)">100%</text>
-<rect x="622.8" y="572.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="639.6" y="572.0" width="25.2" height="20" fill="rgb(24,22,22)"/>
-<text x="639.6" y="586.0" fill="rgb(115,124,115)">1×1</text>
-<rect x="664.8" y="572.0" width="462.0" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="592.0" width="1108.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="612.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="612.0" width="445.2" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="626.0" fill="rgb(166,166,156)">Local-first. No prompts sent until you confirm a run.</text>
-<rect x="480.0" y="612.0" width="646.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="18.0" y="632.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
-<rect x="34.8" y="632.0" width="487.2" height="20" fill="rgb(24,22,22)"/>
-<text x="34.8" y="646.0" fill="rgb(115,124,115)">r run   − + tries   l lane   t limit   T turns   p cache</text>
-<rect x="522.0" y="632.0" width="403.2" height="20" fill="rgb(24,22,22)"/>
-<rect x="925.2" y="632.0" width="184.8" height="20" fill="rgb(24,22,22)"/>
-<text x="925.2" y="646.0" fill="rgb(115,124,115)">? keys   esc · q  quit</text>
-<rect x="1110.0" y="632.0" width="16.8" height="20" fill="rgb(24,22,22)"/>
+<text x="34.8" y="86.0" fill="rgb(139,164,176)" font-weight="600">◆ forseti</text>
+<rect x="127.2" y="72.0" width="50.4" height="20" fill="rgb(139,164,176)"/>
+<text x="127.2" y="86.0" fill="rgb(24,22,22)" font-weight="600"> Home </text>
+<text x="186.0" y="86.0" fill="rgb(166,166,156)"> Live </text>
+<text x="244.8" y="86.0" fill="rgb(166,166,156)"> Models </text>
+<text x="320.4" y="86.0" fill="rgb(166,166,156)"> Tests </text>
+<text x="387.6" y="86.0" fill="rgb(166,166,156)"> Runs </text>
+<text x="446.4" y="86.0" fill="rgb(166,166,156)"> Settings </text>
+<text x="866.4" y="86.0" fill="rgb(115,124,115)">2 models · 31 tests · 2 tries</text>
+<text x="34.8" y="106.0" fill="rgb(115,124,115)">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="34.8" y="126.0" fill="rgb(115,124,115)">╭─ </text>
+<text x="60.0" y="126.0" fill="rgb(139,164,176)" font-weight="600">Leaderboard</text>
+<text x="152.4" y="126.0" fill="rgb(115,124,115)"> ───────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="933.6" y="126.0" fill="rgb(166,166,156)">L for the full page</text>
+<text x="1101.6" y="126.0" fill="rgb(115,124,115)">╮</text>
+<text x="34.8" y="146.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="146.0" fill="rgb(166,166,156)">3 models · 31 tasks · 2 tries each</text>
+<text x="337.2" y="146.0" fill="rgb(196,178,138)"> · different harnesses, so each gap includes the harness</text>
+<text x="1101.6" y="146.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="166.0" fill="rgb(115,124,115)">│</text>
+<text x="1101.6" y="166.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="186.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="186.0" fill="rgb(197,201,197)" font-weight="600">Overall</text>
+<text x="1101.6" y="186.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="206.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="206.0" fill="rgb(166,166,156)"> 1</text>
+<text x="68.4" y="206.0" fill="rgb(197,201,197)">  Claude Sonnet 5.5                 </text>
+<text x="370.8" y="206.0" fill="rgb(139,164,176)">███████████████████████████▉░░</text>
+<text x="631.2" y="206.0" fill="rgb(197,201,197)" font-weight="600"> 93%</text>
+<text x="664.8" y="206.0" fill="rgb(115,124,115)"> ±8</text>
+<text x="690.0" y="206.0" fill="rgb(115,124,115)"> 27/31</text>
+<text x="1101.6" y="206.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="226.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="226.0" fill="rgb(166,166,156)"> 2</text>
+<text x="68.4" y="226.0" fill="rgb(197,201,197)">  Swift-Qwen3.8-27B-Q4_K_S · local  </text>
+<text x="370.8" y="226.0" fill="rgb(137,146,167)">██████████████████░░░░░░░░░░░░</text>
+<text x="631.2" y="226.0" fill="rgb(197,201,197)" font-weight="600"> 60%</text>
+<text x="664.8" y="226.0" fill="rgb(115,124,115)"> ±11</text>
+<text x="698.4" y="226.0" fill="rgb(115,124,115)"> 27/31</text>
+<text x="1101.6" y="226.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="246.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="246.0" fill="rgb(166,166,156)"> 2</text>
+<text x="68.4" y="246.0" fill="rgb(197,201,197)">  Claude Haiku 4.5                  </text>
+<text x="370.8" y="246.0" fill="rgb(135,169,135)">█████████████▌░░░░░░░░░░░░░░░░</text>
+<text x="631.2" y="246.0" fill="rgb(197,201,197)" font-weight="600"> 45%</text>
+<text x="664.8" y="246.0" fill="rgb(115,124,115)"> ±7</text>
+<text x="690.0" y="246.0" fill="rgb(115,124,115)"> 27/31</text>
+<text x="1101.6" y="246.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="266.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="266.0" fill="rgb(197,201,197)" font-weight="600">Basic</text>
+<text x="93.6" y="266.0" fill="rgb(115,124,115)"> · 11 tasks</text>
+<text x="1101.6" y="266.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="286.0" fill="rgb(115,124,115)">│</text>
+<text x="43.2" y="286.0" fill="rgb(197,201,197)">     Claude Sonnet 5.5                 </text>
+<text x="370.8" y="286.0" fill="rgb(139,164,176)">████████████████████████████▌░</text>
+<text x="631.2" y="286.0" fill="rgb(197,201,197)" font-weight="600"> 95%</text>
+<text x="664.8" y="286.0" fill="rgb(115,124,115)"> 10/11</text>
+<text x="1101.6" y="286.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="306.0" fill="rgb(115,124,115)">│</text>
+<text x="43.2" y="306.0" fill="rgb(197,201,197)">     Swift-Qwen3.8-27B-Q4_K_S · local  </text>
+<text x="370.8" y="306.0" fill="rgb(137,146,167)">███████████████████████████░░░</text>
+<text x="631.2" y="306.0" fill="rgb(197,201,197)" font-weight="600"> 90%</text>
+<text x="664.8" y="306.0" fill="rgb(115,124,115)"> 10/11</text>
+<text x="1101.6" y="306.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="326.0" fill="rgb(115,124,115)">│</text>
+<text x="43.2" y="326.0" fill="rgb(197,201,197)">     Claude Haiku 4.5                  </text>
+<text x="370.8" y="326.0" fill="rgb(135,169,135)">█████████████████████████▌░░░░</text>
+<text x="631.2" y="326.0" fill="rgb(197,201,197)" font-weight="600"> 85%</text>
+<text x="664.8" y="326.0" fill="rgb(115,124,115)"> 10/11</text>
+<text x="1101.6" y="326.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="346.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="346.0" fill="rgb(197,201,197)" font-weight="600">Standard</text>
+<text x="118.8" y="346.0" fill="rgb(115,124,115)"> · 14 tasks</text>
+<text x="1101.6" y="346.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="366.0" fill="rgb(115,124,115)">│</text>
+<text x="43.2" y="366.0" fill="rgb(197,201,197)">     Claude Sonnet 5.5                 </text>
+<text x="370.8" y="366.0" fill="rgb(139,164,176)">██████████████████████████████</text>
+<text x="631.2" y="366.0" fill="rgb(197,201,197)" font-weight="600">100%</text>
+<text x="1101.6" y="366.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="386.0" fill="rgb(115,124,115)">│</text>
+<text x="43.2" y="386.0" fill="rgb(197,201,197)">     Swift-Qwen3.8-27B-Q4_K_S · local  </text>
+<text x="370.8" y="386.0" fill="rgb(137,146,167)">█████████████████▏░░░░░░░░░░░░</text>
+<text x="631.2" y="386.0" fill="rgb(197,201,197)" font-weight="600"> 57%</text>
+<text x="1101.6" y="386.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="406.0" fill="rgb(115,124,115)">│</text>
+<text x="43.2" y="406.0" fill="rgb(197,201,197)">     Claude Haiku 4.5                  </text>
+<text x="370.8" y="406.0" fill="rgb(135,169,135)">███████████████░░░░░░░░░░░░░░░</text>
+<text x="631.2" y="406.0" fill="rgb(197,201,197)" font-weight="600"> 50%</text>
+<text x="1101.6" y="406.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="426.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="426.0" fill="rgb(197,201,197)" font-weight="600">Hard</text>
+<text x="85.2" y="426.0" fill="rgb(115,124,115)"> · 6 tasks</text>
+<text x="1101.6" y="426.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="446.0" fill="rgb(115,124,115)">│</text>
+<text x="43.2" y="446.0" fill="rgb(197,201,197)">     Claude Sonnet 5.5                 </text>
+<text x="370.8" y="446.0" fill="rgb(139,164,176)">█████████████████████████░░░░░</text>
+<text x="631.2" y="446.0" fill="rgb(197,201,197)" font-weight="600"> 83%</text>
+<text x="664.8" y="446.0" fill="rgb(115,124,115)"> 3/6</text>
+<text x="1101.6" y="446.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="466.0" fill="rgb(115,124,115)">│</text>
+<text x="43.2" y="466.0" fill="rgb(197,201,197)">     Swift-Qwen3.8-27B-Q4_K_S · local  </text>
+<text x="370.8" y="466.0" fill="rgb(137,146,167)">██████████░░░░░░░░░░░░░░░░░░░░</text>
+<text x="631.2" y="466.0" fill="rgb(197,201,197)" font-weight="600"> 33%</text>
+<text x="664.8" y="466.0" fill="rgb(115,124,115)"> 3/6</text>
+<text x="1101.6" y="466.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="486.0" fill="rgb(115,124,115)">│</text>
+<text x="43.2" y="486.0" fill="rgb(197,201,197)">     Claude Haiku 4.5                  </text>
+<text x="370.8" y="486.0" fill="rgb(135,169,135)">░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░</text>
+<text x="631.2" y="486.0" fill="rgb(197,201,197)" font-weight="600">  0%</text>
+<text x="664.8" y="486.0" fill="rgb(115,124,115)"> 3/6</text>
+<text x="1101.6" y="486.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="506.0" fill="rgb(115,124,115)">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="34.8" y="546.0" fill="rgb(115,124,115)">╭─ </text>
+<text x="60.0" y="546.0" fill="rgb(139,164,176)" font-weight="600">Next run</text>
+<text x="127.2" y="546.0" fill="rgb(115,124,115)"> ──────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="1000.8" y="546.0" fill="rgb(166,166,156)">r to review</text>
+<text x="1101.6" y="546.0" fill="rgb(115,124,115)">╮</text>
+<text x="34.8" y="566.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="566.0" fill="rgb(166,166,156)">2 models × 31 tests × 2 tries · tools lane · 180s · 12 turns · cache on · 4 at once           </text>
+<text x="1101.6" y="566.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="586.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="586.0" fill="rgb(115,124,115)">Tries already on record under the same conditions are skipped.                                </text>
+<text x="1101.6" y="586.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="606.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="606.0" fill="rgb(142,164,162)">Subscription logins only (3 call sites). No API key will be used.</text>
+<text x="1101.6" y="606.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="626.0" fill="rgb(115,124,115)">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="34.8" y="666.0" fill="rgb(115,124,115)">╭─ </text>
+<text x="60.0" y="666.0" fill="rgb(139,164,176)" font-weight="600">Last run</text>
+<text x="127.2" y="666.0" fill="rgb(115,124,115)"> ──────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="967.2" y="666.0" fill="rgb(166,166,156)">5 for every run</text>
+<text x="1101.6" y="666.0" fill="rgb(115,124,115)">╮</text>
+<text x="34.8" y="686.0" fill="rgb(115,124,115)">│</text>
+<text x="51.6" y="686.0" fill="rgb(115,124,115)">09-29 19:30</text>
+<text x="144.0" y="686.0" fill="rgb(197,201,197)">  Claude Sonnet 5.5 </text>
+<text x="312.0" y="686.0" fill="rgb(196,178,138)">67%</text>
+<text x="337.2" y="686.0" fill="rgb(115,124,115)"> · </text>
+<text x="362.4" y="686.0" fill="rgb(197,201,197)">Claude Haiku 4.5 </text>
+<text x="505.2" y="686.0" fill="rgb(196,116,110)">33%</text>
+<text x="547.2" y="686.0" fill="rgb(115,124,115)">3×1</text>
+<text x="1101.6" y="686.0" fill="rgb(115,124,115)">│</text>
+<text x="34.8" y="706.0" fill="rgb(115,124,115)">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="34.8" y="726.0" fill="rgb(115,124,115)">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="34.8" y="746.0" fill="rgb(139,164,176)">r</text>
+<text x="51.6" y="746.0" fill="rgb(115,124,115)">run</text>
+<text x="102.0" y="746.0" fill="rgb(139,164,176)">− +</text>
+<text x="135.6" y="746.0" fill="rgb(115,124,115)">tries</text>
+<text x="202.8" y="746.0" fill="rgb(139,164,176)">l</text>
+<text x="219.6" y="746.0" fill="rgb(115,124,115)">lane</text>
+<text x="278.4" y="746.0" fill="rgb(139,164,176)">t</text>
+<text x="295.2" y="746.0" fill="rgb(115,124,115)">limit</text>
+<text x="362.4" y="746.0" fill="rgb(139,164,176)">T</text>
+<text x="379.2" y="746.0" fill="rgb(115,124,115)">turns</text>
+<text x="446.4" y="746.0" fill="rgb(139,164,176)">p</text>
+<text x="463.2" y="746.0" fill="rgb(115,124,115)">cache</text>
+<text x="530.4" y="746.0" fill="rgb(139,164,176)">P</text>
+<text x="547.2" y="746.0" fill="rgb(115,124,115)">at once</text>
+<text x="933.6" y="746.0" fill="rgb(139,164,176)">?</text>
+<text x="950.4" y="746.0" fill="rgb(115,124,115)">keys</text>
+<text x="1009.2" y="746.0" fill="rgb(139,164,176)">esc · q</text>
+<text x="1076.4" y="746.0" fill="rgb(115,124,115)">quit</text>
 </g>
 </svg>
