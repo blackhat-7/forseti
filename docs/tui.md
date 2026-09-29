@@ -43,3 +43,5 @@ Run `node --test tests/ui.test.ts` from the workspace. To capture mock-only scre
 **Live conversation.** When the window has room, the running screen adds **Live**: the try in progress as a conversation — what the model says (◆, wrapped in full) and each tool call with its file or command (→, ✗ when it failed), newest at the bottom. The Pi agent's comes from the trial's `events.jsonl`; Claude Code's from its own session transcript under `~/.claude/projects/`, read-only. A short window keeps the short form.
 
 **Tries side by side.** `P` on Home cycles 1, 2, 4, 8 tries at once and saves it to forseti.json. The running screen lists every try in progress under Now, and Live gives each one a column when the window is wide enough (38+ characters each), stacks them when it is only tall, and shows none when it is small.
+
+**Layout.** One header line: the name, the tabs as pills (the active one filled), and the run status on the right. Every section is a rounded card with its title and a short note in the top border; on terminals under 60 columns cards drop their borders and keep the title. The footer is one line of keys, plus a status line only when there is a message.

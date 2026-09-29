@@ -21,6 +21,13 @@ const options: RunOptions = { repeat: 2, seed: 42, lane: 'tools', timeout: 90, m
 // real workspace may have a run going.
 const ISOLATED = mkdtempSync(join(process.cwd(), '.tmp/ui-'));
 test.after(() => rmSync(ISOLATED, { recursive: true, force: true }));
+/**
+ * A screen as text, with the cards' outer borders removed so assertions read the content the way
+ * a person does. One test checks the cards themselves.
+ */
+function flat(lines: string[]): string {
+  return lines.map(l => stripVTControlCharacters(l).replace(/^(\s*)[│╭╰]─?/, '$1').replace(/^(\s*) /, '$1').replace(/\s?[│╮╯]\s*$/, '')).join('\n');
+}
 function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
   const calls: RunOptions[] = [];
   let aborted = false;
@@ -77,7 +84,7 @@ function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
   let renders = 0;
   let exits = 0;
   const ui = new Dashboard(app, () => { renders++; }, () => { exits++; }, () => rows);
-  const text = (width = 80) => ui.render(width).map(stripVTControlCharacters).join('\n');
+  const text = (width = 80) => flat(ui.render(width));
   const key = (...keys: string[]) => keys.forEach(k => ui.handleInput(k));
   return { ui, app, run, calls, text, key, progress: (p: Progress) => emit?.(p), get saves() { return saves; }, get aborted() { return aborted; }, get renders() { return renders; }, get exits() { return exits; }, get refreshes() { return refreshes; }, get exported() { return exported; }, finish() { resolveRun?.({ ...run, status: aborted ? 'cancelled' : 'completed' }); } };
 }
@@ -812,11 +819,11 @@ test('a local server is set on Settings, listed in the picker and added with no 
 test('the leaderboard is the first thing on Home and opens in full from any tab', () => {
   const f = fixture('subscription', 200);
   const home = f.text(120);
-  assert.match(home, /Leaderboard\s+L for the full page/);
+  assert.match(home, /Leaderboard[─\s]+L for the full page/);
   assert.ok(home.indexOf('Overall') < home.indexOf('Next run'), 'the answer comes before the run controls');
   f.key('3', 'L');
   const page = f.text(120);
-  assert.match(page, /Leaderboard\s+every comparable try, all runs/);
+  assert.match(page, /Leaderboard[─\s]+every comparable try, all runs/);
   assert.match(page, /Per task/, 'the full page, not only the chart');
 });
 
@@ -840,11 +847,13 @@ test('the running screen shows results per model, the latest tries and the time 
     f.progress({ completed: i + 1, total: 4, model: 'x', task: 'y', phase: 'done', runId: 'live' });
   }
   const text = f.text(100);
-  assert.match(text, /3 of 4 · about .+ left/, 'time left comes from the pace so far');
-  assert.match(text, /Claude opus\s+[█░]+\s+1\/1 solved/);
-  assert.match(text, /Claude haiku\s+[█░]+\s+0\/2 solved\s+1 wrong\s+1 ran out/, 'wrong and ran out are told apart');
+  // Reworded with the card layout: 'tries' in the progress line, 'solved of finished' in the Results card's title.
+  assert.match(text, /3 of 4 tries · about .+ left/, 'time left comes from the pace so far');
+  assert.match(text, /Results[─\s]+solved of finished/);
+  assert.match(text, /Claude opus\s+[█░]+\s+1\/1/);
+  assert.match(text, /Claude haiku\s+[█░]+\s+0\/2\s+1 wrong\s+·\s+1 ran out/, 'wrong and ran out are told apart');
   assert.match(text, /◷\s+Claude haiku\s+Task three\s+ran out/, 'newest first');
-  assert.match(text, /✗\s+Claude haiku\s+Task two\s+1\/2 checks\s+1\.5m\s+3k tok/);
+  assert.match(text, /✗\s+Claude haiku\s+Task two\s+1\/2 checks\s+1\.5m\s+3k/);
   assert.match(text, /✓\s+Claude opus\s+Task one/);
   rmSync(root, { recursive: true, force: true });
   assert.doesNotMatch(text, /via Claude Code/, 'names, not provenance');
@@ -862,7 +871,7 @@ test('opening the TUI during a run does not repaint before the screen exists', (
   writeFileSync(join(root, '.state', 'run.lock'), JSON.stringify({ pid: process.pid, runId: 'live' }));
   writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', status: 'running', planned: 2, trials: [] }));
   const ui = new Dashboard({ ...f.app, root }, () => { throw new Error('repainted during construction'); }, () => {}, () => 40);
-  assert.match(ui.render(80).map(stripVTControlCharacters).join('\n'), /Running\s+0 of 2/, 'and the first render already shows the run');
+  assert.match(flat(ui.render(80)), /Running[─\s]+0 of 2 tries/, 'and the first render already shows the run');
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -878,14 +887,15 @@ test('a tall window shows the conversation of the try in progress; a short one k
     writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', status: 'running', models: [who], tasks, planned: 1, trials: [] }));
     return join(root, 'runs', 'live', 'trials', trial);
   };
-  const view = (rows: number) => new Dashboard({ ...f.app, root }, () => {}, () => {}, () => rows).render(100).map(stripVTControlCharacters).join('\n');
+  const view = (rows: number) => flat(new Dashboard({ ...f.app, root }, () => {}, () => {}, () => rows).render(100));
   // The Pi agent: replies and tool calls come from the trial's own events.jsonl.
   const pi = start(local, '0001-qwen-one');
   writeFileSync(join(pi, 'events.jsonl'), [{ type: 'started' }, { type: 'assistant', text: 'Reading the parser first.' }, { type: 'tool', event: { tool: 'read_file', args: { path: 'src/counts.py' }, ok: true } }, { type: 'tool', event: { tool: 'python', args: { source: 'run check' }, ok: false } }]
     .map(event => JSON.stringify({ at: '', event })).join('\n'));
   const tall = view(60);
   // Each try now has its own column under Live, headed by its model and task.
-  assert.match(tall, /Live\s*\n\s+Qwen\s*\n\s+Task one/);
+  // One try's conversation: its card title names the model and task.
+  assert.match(tall, /Live[─\s]+Qwen · Task one/);
   assert.match(tall, /◆ Reading the parser first\./);
   assert.match(tall, /→ read_file\s+counts\.py/, 'a path shows as its file name');
   assert.match(tall, /✗ python\s+run check/, 'a failed call is marked');
@@ -925,9 +935,9 @@ test('tries running side by side each get a live column, or stack when the windo
     mkdirSync(join(dir, 'public'), { recursive: true });
     writeFileSync(join(dir, 'events.jsonl'), [{ type: 'started' }, { type: 'assistant', text: said }].map(event => JSON.stringify({ at: '', event })).join('\n'));
   }
-  const view = (width: number) => new Dashboard({ ...f.app, root }, () => {}, () => {}, () => 60).render(width).map(stripVTControlCharacters).join('\n');
+  const view = (width: number) => flat(new Dashboard({ ...f.app, root }, () => {}, () => {}, () => 60).render(width));
   const wide = view(140);
-  assert.match(wide, /Now\s+Qwen A\s+Task one/); assert.match(wide, /^\s+Qwen B\s+Task one/m, 'every try in progress is listed');
+  assert.match(wide, /Now[─\s]+2 tries in progress/); assert.match(wide, /^\s*Qwen A\s+Task one/m); assert.match(wide, /^\s*Qwen B\s+Task one/m, 'every try in progress is listed');
   assert.match(wide, /◆ Alpha is reading\.\s+│ ◆ Beta is writing\./, 'side by side');
   const narrow = view(80);
   assert.ok(narrow.indexOf('Alpha is reading.') < narrow.indexOf('Beta is writing.') && !/│ ◆/.test(narrow), 'stacked');
@@ -935,3 +945,17 @@ test('tries running side by side each get a live column, or stack when the windo
   rmSync(root, { recursive: true, force: true });
 });
 
+
+test('sections are rounded cards with their title in the border, and plain headings on a narrow terminal', () => {
+  const f = fixture('subscription', 60);
+  f.key('2');
+  const wide = f.ui.render(100).map(stripVTControlCharacters);
+  const top = wide.findIndex(l => /╭─ Models ─+.* ╮\s*$/.test(l));
+  assert.ok(top > 0, 'a card opens with its title in the top border');
+  assert.match(wide[top + 1]!, /^\s+│ .* │\s*$/, 'its content sits between side borders');
+  assert.ok(wide.slice(top).some(l => /^\s+╰─+╯\s*$/.test(l)), 'and it closes');
+  assert.match(wide[1]!, /forseti\s+Home\s+Models/, 'the header is one line: name, then tabs');
+  const narrow = f.ui.render(50).map(stripVTControlCharacters).join('\n');
+  assert.doesNotMatch(narrow, /[╭╰│]/, 'under 60 columns borders would eat the content');
+  assert.match(narrow, /Models/);
+});

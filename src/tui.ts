@@ -104,6 +104,52 @@ function remaining(ms: number): string {
   const m = Math.round(ms / 60_000);
   return m < 1 ? 'under a minute' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 }
+/** Marks a line as the start of a card: its title and right-hand note follow. Never printed. */
+const CARD = '\u0000card\u0000';
+const pill = (s: string) => `\x1b[48;2;139;164;176m\x1b[38;2;24;22;22m\x1b[1m${s}\x1b[22m\x1b[39m\x1b[49m`;
+/**
+ * Draws a rounded card around each section a heading opened, trimming blank lines at its edges
+ * and leaving one blank line between cards. Lines outside any card pass through unchanged.
+ */
+function cards(lines: string[], outer: number, boxed = true): string[] {
+  const out: string[] = [];
+  let open: { title: string; right: string; body: string[] } | undefined;
+  const edge = (s: string) => faint(s);
+  const flush = () => {
+    if (!open) return;
+    const body = open.body.slice(open.body.findIndex(l => width_(l) > 0));
+    while (body.length && !width_(body.at(-1)!)) body.pop();
+    if (!open.body.some(l => width_(l) > 0)) body.length = 0;
+    while (out.length && !width_(out.at(-1)!)) out.pop();
+    if (out.length) out.push('');
+    if (!boxed) {
+      out.push(truncateToWidth(bold(accent(open.title)) + (open.right ? faint(`  ${open.right}`) : ''), outer), ...body);
+      open = undefined;
+      return;
+    }
+    let title = truncateToWidth(open.title, Math.max(1, outer - 8)), right = open.right;
+    if (width_(title) + width_(right) + 9 > outer) right = '';
+    const fill = Math.max(1, outer - 5 - width_(title) - (right ? width_(right) + 2 : 0) - 1);
+    out.push(edge('╭─ ') + bold(accent(title)) + edge(` ${'─'.repeat(fill)}`) + (right ? ` ${muted(right)} ` : '') + edge('╮'));
+    for (const line of body) { const t = truncateToWidth(line, outer - 4); out.push(`${edge('│')} ${t}${' '.repeat(Math.max(0, outer - 4 - width_(t)))} ${edge('│')}`); }
+    out.push(edge(`╰${'─'.repeat(Math.max(0, outer - 2))}╯`));
+    open = undefined;
+  };
+  for (const line of lines) {
+    if (line.startsWith(CARD)) { flush(); const [title = '', right = ''] = line.slice(CARD.length).split('\u0000'); open = { title, right, body: [] }; }
+    else if (open) open.body.push(line);
+    else out.push(line);
+  }
+  flush();
+  return out;
+}
+/** "r run   P at once" → each key in the accent, its meaning faint, so the eye finds keys first. */
+function keyHints(text: string, width: number): string {
+  const items = text.split(/ {3,}/).filter(Boolean).map(item => { const [key = '', ...rest] = item.split(/ (?=[a-z(])/); return rest.length ? `${accent(key)} ${faint(rest.join(' '))}` : faint(key); });
+  let out = '';
+  for (const item of items) { const next = out ? `${out}   ${item}` : item; if (width_(next) > width) break; out = next; }
+  return out;
+}
 /** Truncates or pads to a column, so feed rows line up at any width. */
 function padTo(text: string, w: number): string {
   const t = truncateToWidth(text, Math.max(1, w - 1));
@@ -165,8 +211,9 @@ function twoColumn(left: string[], right: string[], inner: number, leftWidth: nu
   if (!right.length) return left;
   if (inner < leftWidth + 32) return [...left, '', ...right];
   return Array.from({ length: Math.max(left.length, right.length) }, (_, i) => {
-    const cell = truncateToWidth(left[i] ?? '', leftWidth - 2);
-    return `${cell}${' '.repeat(Math.max(2, leftWidth - width_(cell)))}${right[i] ?? ''}`;
+    // A faint rule between the list and its details keeps two columns from reading as one.
+    const cell = truncateToWidth(left[i] ?? '', leftWidth - 3);
+    return `${cell}${' '.repeat(Math.max(1, leftWidth - 2 - width_(cell)))}${faint('│')} ${right[i] ?? ''}`;
   });
 }
 /**
@@ -199,7 +246,7 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnl
 
   // One line of context; the harness caveat is a clause on it, not a paragraph above the chart.
   const caveat = tagged ? ' · different harnesses, so each gap includes the harness' : mixed ? ' · runs differ in settings, so not one controlled comparison' : '';
-  row(muted(`${rivals.length ? count(rivals.length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}`) + amber(caveat));
+  row(muted(`${cards.some(c => !c.synthetic) ? count(cards.filter(c => !c.synthetic).length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}`) + amber(caveat));
   row();
 
   // One chart answers the page's question: who is ahead, by how much, and at which difficulty.
@@ -225,14 +272,9 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnl
     for (const [i, rows] of tiers.entries()) row(barLine(i, '    ', rows[t]!.rate, cover(rows[t]!.tasks, rows[t]!.total)));
   }
   if (chartOnly) return out;
-  row();
-  prose(`${weighting(tasks)}. A shared rank means this run cannot tell those models apart; ± is how far a rerun could move a score; 12/14 means only 12 of 14 tasks have a finished try.${ranked.some(r => r.rank === null && !r.card.synthetic) ? ' A model with finished tries on fewer than half the tasks is not ranked.' : ''}`, faint);
-  if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
-  if (cards.some(c => c.notRun)) prose('Not run = lost to login, quota, crash or cancellation. It never counts against a model.', faint);
   const calls = verdicts(ranked), stalls = cards.map(stallNote).filter(n => n !== null);
   if (calls.length || stalls.length) {
-    row();
-    row(bold('Verdict'));
+    out.push(`${CARD}Verdict\u0000a gap counts only when it beats two standard errors`);
     for (const call of calls) prose(call);
     for (const note of stalls) prose(note, amber);
   }
@@ -248,20 +290,22 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnl
   const heads = names.map(n => wrapTextWithAnsi(n, colW));
   const columns = () => out.push(...table(Array.from({ length: Math.max(...heads.map(h => h.length)) }, (_, i) => ['', ...heads.map(h => muted(h[i] ?? ''))]), widths));
   const line = (label: string, cells: string[], paint: (s: string) => string = s => s) => {
-    if (narrow || width_(label) > labelW) { row(paint(label)); out.push(...table([['', ...cells]], widths)); }
+    // A long label is shortened, not wrapped, so every row keeps to one line.
+    if (narrow) { row(paint(label)); out.push(...table([['', ...cells]], widths)); }
+    else if (width_(label) > labelW) out.push(...table([[paint(truncateToWidth(label, labelW - 1)), ...cells]], widths));
     else out.push(...table([[paint(label), ...cells]], widths));
   };
   const rates = (values: (number | null)[]) => values.map(v => rateInk(v)(pct(v)));
   const skills = cards.map(c => byCapability(c, tasks));
   if (skills[0]?.length) {
-    row(bold('By skill') + faint('   share of tasks fully solved'));
+    out.push(`${CARD}By skill\u0000share of tasks fully solved`);
     columns();
     for (const [i, { capability, ids }] of skillSlices(tasks).entries()) {
       line(`${SKILL_NAME[capability]} (${ids.size})`, skills.map(rows => rows[i]!).map(r => (r.rate === null ? faint('–') : rateInk(r.rate)(pct(r.rate)) + (colW >= 10 ? cover(r.tasks, r.total) : ''))));
     }
     row();
   }
-  row(bold('Per task') + faint('   hardest first'));
+  out.push(`${CARD}Per task\u0000hardest first`);
   prose('Tries solved out of tries finished. ✓ all, ✗ none, (80%) checks passed when not solved, out×2 ran out of turns or time, · no try.', faint);
   columns();
   const paint = { solved: green, partly: amber, unsolved: rose, none: faint };
@@ -287,7 +331,7 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnl
   const signals = (['instructions', 'tools', 'design'] as const).filter(d => cards.some(c => c.dimensions[d] !== null));
   const gated = cards.some(c => c.hygiene.total);
   if (partial || signals.length || gated) {
-    row(bold('Other signals') + faint('   never part of the rank'));
+    out.push(`${CARD}Other signals\u0000never part of the rank`);
     columns();
     if (partial) line(LABEL.checks, rates(cards.map(c => c.checkScore)));
     for (const d of signals) line(LABEL[d], rates(cards.map(c => c.dimensions[d])));
@@ -298,6 +342,11 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnl
       prose('Safe-code gate: valid Python, standard library only, no eval — a floor, not a score.', faint);
     }
   }
+  // How to read the page comes last: the numbers first, the fine print after.
+  out.push(`${CARD}How to read this\u0000`);
+  prose(`${weighting(tasks)}. A shared rank means this run cannot tell those models apart; ± is how far a rerun could move a score; 12/14 means only 12 of 14 tasks have a finished try.${ranked.some(r => r.rank === null && !r.card.synthetic) ? ' A model with finished tries on fewer than half the tasks is not ranked.' : ''}`, faint);
+  if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
+  if (cards.some(c => c.notRun)) prose('Not run = lost to login, quota, crash or cancellation. It never counts against a model.', faint);
   return out;
 }
 /** One line per run, wherever runs are listed: when, how each model did, and the run's shape. */
@@ -319,7 +368,7 @@ export class Dashboard implements Component, Focusable {
   private tab = 0;
   private selection = [0, 0, 0, 0, 0];
   private dialog?: Dialog;
-  private message = 'Local-first. No prompts sent until you confirm a run.';
+  private message = '';
   /** Why the last attempt produced no run at all. Cleared when the next one starts. */
   private lastFailure = '';
   private draft: string[] = [];
@@ -710,7 +759,9 @@ export class Dashboard implements Component, Focusable {
 
   render(width: number, region: 'all' | 'header' | 'body' | 'footer' = 'all'): string[] {
     if (width <= 0) return [''];
-    const inner = Math.max(1, width - 4);
+    // Content sits inside a card: two columns of margin, then a border and a space on each side.
+    // Under 60 columns borders would eat the content, so cards keep only their titles.
+    const boxed = width >= 60, outer = Math.max(1, width - 4), inner = Math.max(1, boxed ? outer - 4 : outer);
     const lines: string[] = [];
     const row = (text = '') => lines.push(text);
     const wrap = (text: string, w: number, paint: (s: string) => string = s => s) =>
@@ -719,99 +770,94 @@ export class Dashboard implements Component, Focusable {
       lines.push(...wrap(text, Math.min(inner, MAX_TEXT), paint));
     // Detail panes wrap to their own column when side by side, to the full width when stacked.
     const detailWidth = Math.min(inner >= LIST_WIDTH + 32 ? inner - LIST_WIDTH - 2 : inner, MAX_TEXT);
-    const spread = (left: string, right: string) => {
-      const gap = inner - width_(left) - width_(right);
+    const spreadAt = (left: string, right: string, w: number) => {
+      const gap = w - width_(left) - width_(right);
       return gap < 2 ? left : `${left}${' '.repeat(gap)}${right}`;
     };
-    const head = (title: string, right = '') => row(spread(bold(title), right && muted(right)));
+    const spread = (left: string, right: string) => spreadAt(left, right, inner);
+    // A heading opens a card; the frame is drawn around the section once the body is complete.
+    const head = (title: string, right = '') => row(`${CARD}${title}\u0000${right}`);
 
     // While a run is live the header carries it, so it is never out of sight on another tab.
     const p = this.progress;
     const summary = this.controller || this.live
       ? `${this.controller?.signal.aborted ? 'stopping' : 'running'} · ${this.live?.trials.length ?? 0}/${this.live?.planned ?? '?'}`
       : `${count(this.models().length, 'model')} · ${count(this.enabledTasks().length, 'test')} · ${tries(this.options.repeat)}`;
-    row(spread(bold('forseti'), width >= 60 ? (this.controller ? accent(summary) : faint(summary)) : ''));
-    // Tabs carry the only underline in the UI, so the active view is obvious without rules or boxes.
-    const labels = tabs.map((t, i) => (i === this.tab ? bold(t) : muted(t)));
-    row(labels.join('   '));
-    const before = tabs.slice(0, this.tab).reduce((n, t) => n + t.length + 3, 0);
-    row(' '.repeat(before) + accent('─'.repeat(tabs[this.tab]!.length)));
+    // One line: the name, the tabs as pills with the active one filled, and the run's status.
+    const busy = Boolean(this.controller || this.live);
+    const pills = tabs.map((t, i) => (i === this.tab ? pill(` ${t} `) : muted(` ${t} `))).join(' ');
+    const status = width >= 72 ? (busy ? green('● ') + accent(summary) : faint(summary)) : '';
+    row();
+    row(spreadAt(`${bold(accent('forseti'))}  ${pills}`, status, outer));
+    row();
 
     if (this.dialog) this.renderDialog(inner, row, prose, head);
     else if ((this.controller || this.live) && this.tab === 0) {
       const top = lines.length;
-      const run = this.live, done = run?.trials.length ?? 0, total = run?.planned ?? 0;
+      const run = this.live, done = run?.trials.length ?? 0, total = run?.planned ?? 0, share = total ? done / total : 0;
       // Time left from the pace so far: finished tries are the only honest predictor available.
       const left = run && done && total > done ? remaining((Date.now() - Date.parse(run.created)) / done * (total - done)) : '';
-      row();
-      head(this.controller?.signal.aborted ? 'Stopping safely' : 'Running', `${done} of ${total || '?'}${left ? ` · about ${left} left` : ''}`);
-      row();
-      const cells = Math.max(8, Math.min(60, inner));
-      row(accent('━'.repeat(Math.round(cells * (total ? done / total : 0)))) + faint('━'.repeat(cells - Math.round(cells * (total ? done / total : 0)))));
-      row();
+      head(this.controller?.signal.aborted ? 'Stopping safely' : 'Running', `${done} of ${total || '?'} tries${left ? ` · about ${left} left` : ''}`);
+      const label = ` ${Math.round(share * 100)}%`, cells = Math.max(8, inner - label.length);
+      row(accent('━'.repeat(Math.round(cells * share))) + faint('━'.repeat(cells - Math.round(cells * share))) + bold(label));
+      head('Now', this.nows.length ? `${tries(this.nows.length)} in progress` : '');
       if (this.nows.length) {
         const nameW = Math.min(20, Math.max(...this.nows.map(n => width_(nick(n.model)))) + 2);
-        for (const [i, n] of this.nows.entries()) {
-          const detail = faint(`  ${[duration(Date.now() - n.since), n.step].filter(Boolean).join(' · ')}`);
-          row(`${faint(i ? '     ' : 'Now  ')} ${bold(padTo(nick(n.model), nameW))}${truncateToWidth(plain(n.task), Math.max(8, inner - nameW - 8 - width_(detail)))}${detail}`);
+        for (const n of this.nows) {
+          const detail = [n.step, duration(Date.now() - n.since)].filter(Boolean).join(' · ');
+          row(`${bold(padTo(nick(n.model), nameW))}${padTo(plain(n.task), Math.max(8, inner - nameW - width_(detail) - 2))}  ${faint(detail)}`);
         }
-      }
-      else row(muted('Preparing isolated trial workspaces…'));
+      } else row(muted('Preparing isolated trial workspaces…'));
       const live = this.live;
       const feed = (live?.trials ?? []).map(trial => ({ model: live!.models.find(m => m.id === trial.model)?.label ?? trial.model, task: live!.tasks.find(t => t.id === trial.task)?.title ?? trial.task, trial }));
       if (feed.length) {
         // Solved means every correctness check passed, the same rule the leaderboard scores by.
         const solved = (t: Trial) => t.checks.some(c => c.dimension === 'correctness') && t.checks.filter(c => c.dimension === 'correctness').every(c => c.passed);
         const models = [...new Set(feed.map(f => nick(f.model)))];
-        const nameW = Math.min(30, Math.max(...models.map(m => width_(m))) + 2);
-        row();
-        row(bold('Results so far'));
+        const nameW = Math.min(20, Math.max(...models.map(m => width_(m))) + 2);
+        head('Results', 'solved of finished');
         for (const [i, model] of models.entries()) {
           const mine = feed.filter(f => nick(f.model) === model).map(f => f.trial), finished = mine.filter(t => FINISHED.includes(t.status));
-          const won = finished.filter(solved).length, out = finished.filter(t => STALL.includes(t.status)).length;
-          const barW = Math.max(0, Math.min(16, inner - nameW - 36));
-          row(`  ${padTo(model, nameW)}${barW ? SERIES[i % SERIES.length]!(bar(finished.length ? won / finished.length : 0, barW)) + '  ' : ''}${bold(`${won}/${finished.length}`.padStart(5))} ${faint('solved')}`
-            + (finished.length - won - out ? rose(`  ${finished.length - won - out} wrong`) : '') + (out ? amber(`  ${out} ran out`) : '') + (mine.length > finished.length ? faint(`  ${mine.length - finished.length} not run`) : ''));
+          const won = finished.filter(solved).length, out = finished.filter(t => STALL.includes(t.status)).length, wrong = finished.length - won - out;
+          const tail = [wrong ? rose(`${wrong} wrong`) : '', out ? amber(`${out} ran out`) : '', mine.length > finished.length ? faint(`${mine.length - finished.length} not run`) : ''].filter(Boolean).join(faint('  ·  '));
+          const barW = Math.max(0, Math.min(32, inner - nameW - 8 - 34));
+          row(`${bold(padTo(model, nameW))}${barW ? SERIES[i % SERIES.length]!(bar(finished.length ? won / finished.length : 0, barW)) + '  ' : ''}${bold(`${won}/${finished.length}`.padStart(5))}   ${tail}`);
         }
-        row();
-        row(bold('Latest'));
         const latest = feed.slice(-6).reverse();
         const note = (trial: Trial) => {
           const correct = trial.checks.filter(c => c.dimension === 'correctness');
           return !FINISHED.includes(trial.status) ? 'not run' : STALL.includes(trial.status) ? 'ran out' : solved(trial) ? '' : `${correct.filter(c => c.passed).length}/${correct.length} checks`;
         };
-        // The note column takes room only when a row has something to say in it.
-        const noteW = latest.some(f => note(f.trial)) ? 13 : 0;
+        head('Latest', 'newest first');
         for (const { model, task, trial } of latest) {
           const mark = !FINISHED.includes(trial.status) ? faint('·') : STALL.includes(trial.status) ? amber('◷') : solved(trial) ? green('✓') : rose('✗');
-          const tokens = trial.tokens ? `${Math.round(trial.tokens.output / 1000)}k tok` : '';
-          const tail = `${noteW ? padTo(note(trial), noteW) : ''}${padTo(duration(trial.wallMs), 7)}${tokens.padStart(7)}`;
-          const taskW = Math.max(10, inner - 4 - Math.min(18, nameW) - width_(tail) - 2);
-          row(`  ${mark}  ${padTo(nick(model), Math.min(18, nameW))}${padTo(plain(task), taskW)}${faint(tail)}`);
+          const out = trial.tokens?.output ?? 0, tokens = trial.tokens ? (out < 1000 ? '<1k' : `${Math.round(out / 1000)}k`) : '';
+          const tail = `${padTo(note(trial), 12)}${duration(trial.wallMs).padStart(6)}${tokens.padStart(6)}`;
+          row(`${mark} ${bold(padTo(nick(model), nameW))}${padTo(plain(task), Math.max(8, inner - 2 - nameW - width_(tail)))}${faint(tail)}`);
         }
       }
       // Each try's own conversation, when the window has room: side by side when it is wide enough for
       // a readable column each, stacked when it is tall, and the short form above when it is neither.
-      const room = this.bodyRows() - (lines.length - top) - 4, talking = this.nows.filter(n => n.chat.length);
+      const framed = lines.slice(top).filter(l => l.startsWith(CARD)).length;
+      const room = this.bodyRows() - (lines.length - top - framed) - 3 * framed - 4, talking = this.nows.filter(n => n.chat.length);
       const said = (l: Line, w: number) => l.say
-        ? wrap(plain(l.say).replace(/\s+/g, ' '), Math.max(12, w - 2)).map((t, i) => `${i ? ' ' : faint('◆')} ${muted(t)}`)
-        : [`${l.failed ? rose('✗') : faint('→')} ${accent(padTo(l.tool ?? '', 10))}${truncateToWidth(l.target ?? '', Math.max(4, w - 13))}`];
-      const column = (n: typeof talking[number], w: number, height: number) =>
-        [bold(truncateToWidth(nick(n.model), w)), faint(truncateToWidth(plain(n.task), w)), ...n.chat.flatMap(l => said(l, w)).slice(-(height - 2))];
-      const colW = talking.length ? Math.floor((inner - 2 - 3 * (talking.length - 1)) / talking.length) : 0;
-      if (talking.length && room >= 10 && (talking.length === 1 || colW >= 38)) {
-        row();
-        row(bold('Live'));
-        const cols = talking.map(n => column(n, talking.length === 1 ? inner - 2 : colW, room - 2));
-        const cell = (text: string, w: number) => { const t = truncateToWidth(text, w); return t + ' '.repeat(Math.max(0, w - width_(t))); };
-        for (let r = 0; r < Math.max(...cols.map(c => c.length)); r++) row('  ' + cols.map(c => cell(c[r] ?? '', talking.length === 1 ? inner - 2 : colW)).join(faint(' │ ')));
-      } else if (talking.length > 1 && room >= 10 && Math.floor((room - 2) / talking.length) >= 5) {
-        row();
-        row(bold('Live'));
-        for (const n of talking) for (const line of column(n, inner - 2, Math.floor((room - 2) / talking.length))) row(`  ${line}`);
+        ? wrap(plain(l.say).replace(/\s+/g, ' '), Math.max(12, w - 2)).map((t, i) => `${i ? ' ' : faint('◆')} ${t}`)
+        : [`${l.failed ? rose('✗') : faint('→')} ${accent(padTo(l.tool ?? '', 13))}${faint(truncateToWidth(l.target ?? '', Math.max(4, w - 16)))}`];
+      const column = (n: typeof talking[number], w: number, height: number, titled: boolean) =>
+        [...(titled ? [bold(truncateToWidth(nick(n.model), w)) + faint(truncateToWidth(`  ${plain(n.task)}`, Math.max(0, w - width_(nick(n.model)))))] : []), ...n.chat.flatMap(l => said(l, w)).slice(-(height - (titled ? 1 : 0)))];
+      const colW = talking.length ? Math.floor((inner - 3 * (talking.length - 1)) / talking.length) : 0;
+      const cell = (text: string, w: number) => { const t = truncateToWidth(text, w); return t + ' '.repeat(Math.max(0, w - width_(t))); };
+      if (talking.length === 1 && room >= 7) {
+        head('Live', `${nick(talking[0]!.model)} · ${plain(talking[0]!.task)}`);
+        column(talking[0]!, inner, room - 3, false).forEach(line => row(line));
+      } else if (talking.length > 1 && room >= 8 && colW >= 38) {
+        head('Live', 'side by side');
+        const cols = talking.map(n => column(n, colW, room - 3, true));
+        for (let r = 0; r < Math.max(...cols.map(c => c.length)); r++) row(cols.map(c => cell(c[r] ?? '', colW)).join(faint(' │ ')));
+      } else if (talking.length > 1 && room >= 8 && Math.floor((room - 3) / talking.length) >= 4) {
+        head('Live');
+        for (const [i, n] of talking.entries()) { if (i) row(); column(n, inner, Math.floor((room - 3) / talking.length) - 1, true).forEach(line => row(line)); }
       }
-      row();
-      row(faint(this.controller ? 'esc cancels · finished tries are kept' : 'started elsewhere · esc cancels it · q leaves, the run keeps going'));
     } else if (this.tab === 0) {
       const enabled = this.models();
       // The answer comes first: how the models compare, from every comparable try on record.
@@ -918,21 +964,24 @@ export class Dashboard implements Component, Focusable {
       row();
       head('Runs', `${this.selectedRuns.size} selected`);
       row();
-      this.listRows(this.app.runs.map(r => `${dot(this.selectedRuns.has(r.id))} ${runLine(r)}`), Math.max(4, this.bodyRows() - detail.length - 7)).forEach(row);
-      row();
+      this.listRows(this.app.runs.map(r => `${dot(this.selectedRuns.has(r.id))} ${runLine(r)}`), Math.max(4, this.bodyRows() - detail.length - 10)).forEach(row);
+      if (this.app.runs.length) head('Selected run');
       detail.forEach(row);
     }
+    const body = cards(lines.splice(3), outer, boxed);
+    lines.push(...body);
     const footerStart = lines.length;
     row();
-    // Long provider errors remain terminal-safe. The same two keys do the same thing at every
-    // level, so the hint names both every time.
-    row(muted(truncateToWidth(plain(this.message), inner)));
-    const leave = this.dialog ? (this.typing() ? 'esc back' : 'esc · q  back') : this.controller ? 'esc cancel' : '? keys   esc · q  quit';
-    row(spread(faint(truncateToWidth(this.keys(), Math.max(1, inner - leave.length - 3))), faint(leave)));
+    // Long provider errors remain terminal-safe; the line appears only when there is something to say.
+    if (this.message) row(muted(truncateToWidth(plain(this.message), outer)));
+    // The same two keys do the same thing at every level, so the hint names both every time.
+    const leave = this.dialog ? (this.typing() ? `${accent('esc')} ${faint('back')}` : `${accent('esc · q')} ${faint('back')}`)
+      : busy && this.tab === 0 ? `${accent('esc')} ${faint('cancel')}` : `${accent('?')} ${faint('keys')}   ${accent('esc · q')} ${faint('quit')}`;
+    row(spreadAt(keyHints(this.keys(), Math.max(1, outer - width_(leave) - 3)), leave, outer));
     const regionLines = region === 'header' ? lines.slice(0, 3) : region === 'body' ? lines.slice(3, footerStart) : region === 'footer' ? lines.slice(footerStart) : lines;
     return regionLines.map(line => {
-      const content = truncateToWidth(line, inner);
-      const padded = `  ${content}${' '.repeat(Math.max(0, inner - visibleWidth(content)))}  `;
+      const content = truncateToWidth(line, outer);
+      const padded = `  ${content}${' '.repeat(Math.max(0, outer - visibleWidth(content)))}  `;
       return `${BACKDROP}${truncateToWidth(padded, width, '')}\x1b[0m`;
     });
   }
