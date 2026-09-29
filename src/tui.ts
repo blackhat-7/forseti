@@ -321,10 +321,11 @@ export class Dashboard implements Component, Focusable {
     this.repaint = repaint;
     this.exit = exit;
     this.rows = rows;
-    this.watch();
+    // Read now without repainting: nothing is on screen yet, and the caller's render hook may not exist until this returns.
+    this.watch(false);
     setInterval(() => this.watch(), 2000).unref();
   }
-  private watch(): void {
+  private watch(repaint = true): void {
     const id = activeRunId(this.app.root), ended = this.live && !id;
     this.live = id ? readRun(this.app.root, id) : undefined;
     this.now = undefined;
@@ -341,6 +342,7 @@ export class Dashboard implements Component, Focusable {
       }
     }
     // A run started elsewhere just ended: its results are new, so the leaderboard reloads.
+    if (!repaint) return;
     if (ended && !this.controller) void this.app.refresh().then(() => this.repaint());
     if (this.live || ended) this.repaint();
   }

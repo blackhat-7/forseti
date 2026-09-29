@@ -843,3 +843,17 @@ test('the running screen shows results per model, the latest tries and the time 
   for (const width of [40, 80, 120]) f.ui.render(width).forEach(row => assert.ok(visibleWidth(row) <= width, `width ${width}: ${visibleWidth(row)}`));
 });
 
+
+test('opening the TUI during a run does not repaint before the screen exists', () => {
+  // launchTui's repaint hook reads a view created after the Dashboard, so a repaint from the
+  // constructor crashed startup whenever a run was in progress.
+  const f = fixture();
+  const root = mkdtempSync(join(process.cwd(), '.tmp/ui-open-'));
+  mkdirSync(join(root, '.state'), { recursive: true });
+  mkdirSync(join(root, 'runs', 'live', 'trials'), { recursive: true });
+  writeFileSync(join(root, '.state', 'run.lock'), JSON.stringify({ pid: process.pid, runId: 'live' }));
+  writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', status: 'running', planned: 2, trials: [] }));
+  const ui = new Dashboard({ ...f.app, root }, () => { throw new Error('repainted during construction'); }, () => {}, () => 40);
+  assert.match(ui.render(80).map(stripVTControlCharacters).join('\n'), /Running\s+0 of 2/, 'and the first render already shows the run');
+  rmSync(root, { recursive: true, force: true });
+});
