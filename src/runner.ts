@@ -254,7 +254,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
       atomicJson(trialDir, 'result.json', trial);
       run.trials.push(trial);
       atomicJson(runDir, 'run.json', run);
-      onProgress({ completed: i + 1, total: jobs.length, task: job.task.title, model: job.model.label, phase: trial.status, runId: id });
+      onProgress({ completed: i + 1, total: jobs.length, task: job.task.title, model: job.model.label, phase: trial.status, runId: id, trial });
     }
     run.status = signal.aborted ? 'cancelled' : 'completed'; run.finished = new Date().toISOString();
     atomicJson(runDir, 'run.json', run);

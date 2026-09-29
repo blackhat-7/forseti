@@ -7,7 +7,7 @@ import { Dashboard, terminalText } from '../src/tui.ts';
 import { DEFAULT_JUDGE } from '../src/config.ts';
 import { leaderboard } from '../src/report.ts';
 import type { CatalogEntry } from '../src/app.ts';
-import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite } from '../src/types.ts';
+import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite, Trial } from '../src/types.ts';
 
 const enter = '\r';
 const esc = '\x1b';
@@ -23,6 +23,7 @@ function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
   let refreshes = 0;
   let exported: string[] = [];
   let resolveRun: ((run: Run) => void) | undefined;
+  let emit: ((p: Progress) => void) | undefined;
   const run: Run = {
     schema: 1, id: 'run-001', created: '2026-01-01', status: 'completed', suite: 'suite', suiteHash: 'a', harnessHash: 'b', environment: {}, judge: null,
     options, models: [model], tasks: [{ id: 'json', title: 'JSON test', hash: 'c' }], planned: 2,
@@ -56,6 +57,7 @@ function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
     async refresh() { refreshes++; },
     run(opts: RunOptions, progress: (p: Progress) => void, signal: AbortSignal): Promise<Run> {
       calls.push(opts);
+      emit = progress;
       progress({ completed: 1, total: 2, model: 'Example', task: 'json', phase: 'grading', runId: run.id });
       signal.addEventListener('abort', () => { aborted = true; }, { once: true });
       return new Promise(resolve => { resolveRun = resolve; });
@@ -72,7 +74,7 @@ function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
   const ui = new Dashboard(app, () => { renders++; }, () => { exits++; }, () => rows);
   const text = (width = 80) => ui.render(width).map(stripVTControlCharacters).join('\n');
   const key = (...keys: string[]) => keys.forEach(k => ui.handleInput(k));
-  return { ui, app, run, calls, text, key, get saves() { return saves; }, get aborted() { return aborted; }, get renders() { return renders; }, get exits() { return exits; }, get refreshes() { return refreshes; }, get exported() { return exported; }, finish() { resolveRun?.({ ...run, status: aborted ? 'cancelled' : 'completed' }); } };
+  return { ui, app, run, calls, text, key, progress: (p: Progress) => emit?.(p), get saves() { return saves; }, get aborted() { return aborted; }, get renders() { return renders; }, get exits() { return exits; }, get refreshes() { return refreshes; }, get exported() { return exported; }, finish() { resolveRun?.({ ...run, status: aborted ? 'cancelled' : 'completed' }); } };
 }
 
 test('all views and dialogs fit 40/80/120 columns with clean content', () => {
@@ -802,3 +804,23 @@ test('the leaderboard is the first thing on Home and opens in full from any tab'
   assert.match(page, /Leaderboard\s+every comparable try, all runs/);
   assert.match(page, /Per task/, 'the full page, not only the chart');
 });
+
+test('the running screen shows results per model, the latest tries and the time left', () => {
+  const f = fixture('subscription', 60);
+  f.key('r', enter);
+  const tried = (status: Trial['status'], passed: boolean) => ({ ...f.run.trials[0]!, status, wallMs: 90_000, tokens: { input: 0, output: 3000, cacheRead: 0, cacheWrite: 0 },
+    checks: [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }, { id: 'd', dimension: 'correctness' as const, passed: true, evidence: '' }] });
+  f.progress({ completed: 1, total: 4, model: 'Claude opus · via Claude Code', task: 'Task one', phase: 'passed', runId: 'r', trial: tried('passed', true) });
+  f.progress({ completed: 2, total: 4, model: 'Claude haiku · via Claude Code', task: 'Task two', phase: 'failed', runId: 'r', trial: tried('failed', false) });
+  f.progress({ completed: 3, total: 4, model: 'Claude haiku · via Claude Code', task: 'Task three', phase: 'timeout', runId: 'r', trial: { ...tried('timeout', false), checks: [] } });
+  const text = f.text(100);
+  assert.match(text, /3 of 4 · about .+ left/, 'time left comes from the pace so far');
+  assert.match(text, /Claude opus\s+[█░]+\s+1\/1 solved/);
+  assert.match(text, /Claude haiku\s+[█░]+\s+0\/2 solved\s+1 wrong\s+1 ran out/, 'wrong and ran out are told apart');
+  assert.match(text, /◷\s+Claude haiku\s+Task three\s+ran out/, 'newest first');
+  assert.match(text, /✗\s+Claude haiku\s+Task two\s+1\/2 checks\s+1\.5m\s+3k tok/);
+  assert.match(text, /✓\s+Claude opus\s+Task one/);
+  assert.doesNotMatch(text, /via Claude Code/, 'names, not provenance');
+  for (const width of [40, 80, 120]) f.ui.render(width).forEach(row => assert.ok(visibleWidth(row) <= width, `width ${width}: ${visibleWidth(row)}`));
+});
+

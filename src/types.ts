@@ -77,4 +77,5 @@ export type Run = {
   options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; capabilities?: Capability[]; tier?: Tier; turns?: number; timeout?: number }[];
   planned: number; trials: Trial[];
 };
-export type Progress = { completed: number; total: number; model: string; task: string; phase: string; runId: string };
+/** `trial` arrives once, when a try has finished, so the running screen can show results as they land. */
+export type Progress = { completed: number; total: number; model: string; task: string; phase: string; runId: string; trial?: Trial };

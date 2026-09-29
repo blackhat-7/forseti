@@ -5,10 +5,10 @@ import {
   type Component, type Focusable,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { comparisonReport, levelsNote, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
+import { FINISHED, comparisonReport, levelsNote, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { LOCAL } from './local.ts';
-import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
+import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
 
 // Strip whole terminal strings first, then remaining controls (including bidi).
 export function terminalText(value: unknown): string {
@@ -58,6 +58,21 @@ const dot = (on: boolean) => (on ? green('●') : faint('○'));
 const runWhen = (id: string) => (/^\d{4}-\d{2}-\d{2}T/.test(id) ? `${id.slice(5, 10)} ${id.slice(11, 13)}:${id.slice(14, 16)}` : id);
 /** "Claude sonnet · via Claude Code / 14-31-08" is provenance; a column needs "Claude sonnet". */
 const nick = (label: string) => plain(label).split(' / ')[0]!.split(' · ')[0]!.trim();
+/** "under a minute", "46 min", "1 h 20 min": an estimate, so no false precision. */
+function remaining(ms: number): string {
+  const m = Math.round(ms / 60_000);
+  return m < 1 ? 'under a minute' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+/** Truncates or pads to a column, so feed rows line up at any width. */
+function padTo(text: string, w: number): string {
+  const t = truncateToWidth(text, Math.max(1, w - 1));
+  return t + ' '.repeat(Math.max(0, w - width_(t)));
+}
+/** "45s", "4.2m", "1h 20m": short enough for a feed column, exact enough to plan around. */
+function duration(ms: number): string {
+  const s = ms / 1000;
+  return s < 60 ? `${Math.max(1, Math.round(s))}s` : s < 3600 ? `${(s / 60).toFixed(1)}m` : `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
+}
 function statusInk(status: string): (s: string) => string {
   if (['passed', 'completed'].includes(status)) return green;
   if (['failed', 'cancelled', 'interrupted'].includes(status)) return amber;
@@ -276,6 +291,9 @@ export class Dashboard implements Component, Focusable {
   private reportOffset = 0;
   private reportMode: 'summary' | 'full' = 'summary';
   private reportRuns: Run[] = [];
+  /** Tries finished in the current run, oldest first, for the running screen. */
+  private feed: { model: string; task: string; trial: Trial }[] = [];
+  private runStart = 0;
   private reportLength = 0;
   private reportPage = 12;
   private everyTask = false;
@@ -563,11 +581,13 @@ export class Dashboard implements Component, Focusable {
     this.close();
     this.controller = new AbortController();
     this.progress = undefined;
+    this.feed = [];
+    this.runStart = Date.now();
     this.lastFailure = '';
     this.message = 'Starting run… Esc cancels safely.';
     this.repaint();
     try {
-      const run = await this.app.run(options, p => { this.progress = p; this.repaint(); }, this.controller.signal);
+      const run = await this.app.run(options, p => { this.progress = p; if (p.trial) this.feed.push({ model: p.model, task: p.task, trial: p.trial }); this.repaint(); }, this.controller.signal);
       // A reviewer that was switched on and scored nothing is worth saying out loud. Its
       // failures are per-trial notes by design, which is easy to miss when every trial otherwise
       // looks fine.
@@ -634,20 +654,52 @@ export class Dashboard implements Component, Focusable {
 
     if (this.dialog) this.renderDialog(inner, row, prose, head);
     else if (this.controller && this.tab === 0) {
-      const ratio = p && p.total ? Math.min(1, Math.max(0, p.completed / p.total)) : 0;
-      const cells = Math.max(8, Math.min(40, inner - 10));
-      const done = Math.round(cells * ratio);
+      const done = p?.completed ?? 0, total = p?.total ?? 0;
+      // Time left from the pace so far: finished tries are the only honest predictor available.
+      const left = done && total > done ? remaining((Date.now() - this.runStart) / done * (total - done)) : '';
       row();
-      head(this.controller.signal.aborted ? 'Stopping safely' : 'Running', `${p?.completed ?? 0} / ${p?.total ?? '?'}`);
+      head(this.controller.signal.aborted ? 'Stopping safely' : 'Running', `${done} of ${total || '?'}${left ? ` · about ${left} left` : ''}`);
       row();
-      row(accent('█'.repeat(done)) + faint('░'.repeat(cells - done)));
+      const cells = Math.max(8, Math.min(60, inner));
+      row(accent('━'.repeat(Math.round(cells * (total ? done / total : 0)))) + faint('━'.repeat(cells - Math.round(cells * (total ? done / total : 0)))));
       row();
-      if (p) { row(plain(`${p.model}  →  ${p.task}`)); row(muted(plain(p.phase))); }
-      else row(muted('Preparing isolated trial workspaces…'));
+      if (p) {
+        row(`${faint('Now')}   ${bold(nick(p.model))}${faint('  ·  ')}${plain(p.task)}`);
+        row(`      ${muted(plain(p.phase))}`);
+      } else row(muted('Preparing isolated trial workspaces…'));
+      if (this.feed.length) {
+        // Solved means every correctness check passed, the same rule the leaderboard scores by.
+        const solved = (t: Trial) => t.checks.some(c => c.dimension === 'correctness') && t.checks.filter(c => c.dimension === 'correctness').every(c => c.passed);
+        const models = [...new Set(this.feed.map(f => nick(f.model)))];
+        const nameW = Math.min(30, Math.max(...models.map(m => width_(m))) + 2);
+        row();
+        row(bold('Results so far'));
+        for (const [i, model] of models.entries()) {
+          const mine = this.feed.filter(f => nick(f.model) === model).map(f => f.trial), finished = mine.filter(t => FINISHED.includes(t.status));
+          const won = finished.filter(solved).length, out = finished.filter(t => STALL.includes(t.status)).length;
+          const barW = Math.max(0, Math.min(16, inner - nameW - 36));
+          row(`  ${padTo(model, nameW)}${barW ? SERIES[i % SERIES.length]!(bar(finished.length ? won / finished.length : 0, barW)) + '  ' : ''}${bold(`${won}/${finished.length}`.padStart(5))} ${faint('solved')}`
+            + (finished.length - won - out ? rose(`  ${finished.length - won - out} wrong`) : '') + (out ? amber(`  ${out} ran out`) : '') + (mine.length > finished.length ? faint(`  ${mine.length - finished.length} not run`) : ''));
+        }
+        row();
+        row(bold('Latest'));
+        const latest = this.feed.slice(-6).reverse();
+        const note = (trial: Trial) => {
+          const correct = trial.checks.filter(c => c.dimension === 'correctness');
+          return !FINISHED.includes(trial.status) ? 'not run' : STALL.includes(trial.status) ? 'ran out' : solved(trial) ? '' : `${correct.filter(c => c.passed).length}/${correct.length} checks`;
+        };
+        // The note column takes room only when a row has something to say in it.
+        const noteW = latest.some(f => note(f.trial)) ? 11 : 0;
+        for (const { model, task, trial } of latest) {
+          const mark = !FINISHED.includes(trial.status) ? faint('·') : STALL.includes(trial.status) ? amber('◷') : solved(trial) ? green('✓') : rose('✗');
+          const tokens = trial.tokens ? `${Math.round(trial.tokens.output / 1000)}k tok` : '';
+          const tail = `${noteW ? padTo(note(trial), noteW) : ''}${padTo(duration(trial.wallMs), 7)}${tokens.padStart(7)}`;
+          const taskW = Math.max(10, inner - 4 - Math.min(18, nameW) - width_(tail) - 2);
+          row(`  ${mark}  ${padTo(nick(model), Math.min(18, nameW))}${padTo(plain(task), taskW)}${faint(tail)}`);
+        }
+      }
       row();
-      if (p) row(faint(`saved as ${plain(runWhen(p.runId))} · visible on Runs while it works`));
-      row();
-      row(faint('esc cancels · completed trials are kept · 4 watches the run'));
+      row(faint('esc cancels · finished tries are kept'));
     } else if (this.tab === 0) {
       const enabled = this.models();
       // The answer comes first: how the models compare, from every comparable try on record.
