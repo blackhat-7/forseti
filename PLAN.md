@@ -31,7 +31,7 @@ Each line carries its own done-check. A task too big for one session gets split 
 - [ ] Add a second entitled live model when quota allows. Done when one run compares two live models under the same harness, with no recorded provider failure standing in for a result.
 - [ ] **Measure the rebuilt hard tier properly.** Run Haiku, Sonnet and Opus on `due-dates,sheet-eval,lock-refresh,crew-schedule,log-query` at `--repeat 3`; tries already recorded under the same conditions are skipped. Done when the page calls Opus over Sonnet and Sonnet over Haiku a separation, or the tier is rebuilt. Run it alone: no parallel subagents, and check `/usage` first.
 
-- [ ] **Pilot the three ops tasks.** Run Haiku and Sonnet once on `checkout-hotfix,subscription-repair,bucket-residency`, read each transcript for anything that reveals the simulation or a command the estate answers wrongly, fix, then set the tier from results. Done when both have one graded try each and no realism bug is open.
+- [~] **Pilot the three ops tasks.** First pilot done: Sonnet passed checkout and subscriptions, failed the bucket move on a 20-minute gap of missing recent images; Haiku failed all three for real reasons. It exposed background jobs, `nohup`, `mkdir` and `cd /tmp` as tells; fixed, which made those tries stale. Run Haiku and Sonnet once on `checkout-hotfix,subscription-repair,bucket-residency`, read each transcript for anything that reveals the simulation or a command the estate answers wrongly, fix, then set the tier from results. Done when both have one graded try each and no realism bug is open.
 
 ## Later
 

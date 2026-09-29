@@ -13,7 +13,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **The rebuilt hard tier separates, on one try each.** `lock-refresh` and `sheet-eval`: Haiku ✗, Sonnet ✗, Opus ✓. `crew-schedule` and `log-query`: Haiku ✗, Sonnet ✓. Detail in `docs/transcript-research.md`. Not yet a measurement.
 - **The leaderboard is strict.** Only tries under today's fingerprints and default settings count. It holds Claude Sonnet 5.5 and Haiku 4.5 (56 tries each) and local Qwen (28).
 - **A run only makes missing tries.** Same model + same task and harness submission fingerprints + same settings = already done; `--fresh` forces a rerun. A grading-only change is regraded from saved files (`npm start -- regrade`, also run before every run).
-- **Three production-ops tasks on a simulated estate** (`checkout-hotfix`, `subscription-repair`, `bucket-residency`). A task's `world` module answers gcloud/kubectl/psql/gsutil in-process; nothing real is reachable, and the model is not told. Engine: `suites/personal/private/ops/`. Contract: `docs/suite-contract.md#world-tasks`. Never run on a model yet.
+- **Three production-ops tasks on a simulated estate** (`checkout-hotfix`, `subscription-repair`, `bucket-residency`). A task's `world` module answers gcloud/kubectl/psql/gsutil in-process; nothing real is reachable, and the model is not told. Engine: `suites/personal/private/ops/`. Contract: `docs/suite-contract.md#world-tasks`. Pilot (one try each, now stale after shell fixes): Sonnet 2/3 solved, Haiku 0/3.
 - Battery on Linux: `npm run check` clean · `npm test` **90/90** · `npm run test:suite` passes · `test:terminal`, `test:judge` not run this session.
 
 ## Done this session

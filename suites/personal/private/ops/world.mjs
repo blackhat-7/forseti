@@ -41,17 +41,51 @@ export function simulate({ start, home, fs, state, programs, tick = () => {}, re
     now: () => new Date(origin + ctx.t * 1000),
     at: (t = ctx.t) => new Date(origin + t * 1000),
     event(kind, detail = {}) { ctx.events.push({ t: ctx.t, kind, ...detail }); },
+    /** Changes waiting for their moment: what a background job does lands when the job gets there. */
+    timers: [],
+    /** The background job running now, whose time is its own and not the operator's. */
+    job: null,
+    jobs: 0,
     wait(seconds) {
+      if (ctx.job) { ctx.job.elapsed += Math.max(0, seconds); return; }
       const end = ctx.t + Math.max(0, seconds);
+      const due = () => {
+        for (;;) {
+          const k = ctx.timers.findIndex(x => x.at <= ctx.t);
+          if (k < 0) return;
+          ctx.timers.splice(k, 1)[0].apply();
+        }
+      };
+      due();
       while (ctx.t < end) {
         const next = Math.min(end, (Math.floor(ctx.t / STEP) + 1) * STEP);
         ctx.t = next;
         if (next % STEP === 0) tick(ctx);
+        due();
       }
     },
+    /**
+     * A change that takes `seconds` to land, like a copy that applies what it copied at the end.
+     * In the foreground the operator waits for it; in a background job it lands at the job's own
+     * time while the operator carries on.
+     */
+    after(seconds, apply) {
+      if (!ctx.job) { ctx.wait(seconds); return apply(); }
+      ctx.job.elapsed += Math.max(0, seconds);
+      ctx.timers.push({ at: ctx.t + ctx.job.elapsed, apply, job: ctx.job.id });
+      return undefined;
+    },
   };
+  const detach = (run) => {
+    const job = { id: ++ctx.jobs, elapsed: 0 }, outer = ctx.job;
+    ctx.job = job;
+    try { run(); } finally { ctx.job = outer; }
+    return { id: job.id, end: ctx.t + job.elapsed };
+  };
+  const later = (at, apply, job) => { if (at <= ctx.t) apply(); else ctx.timers.push({ at, apply, job }); };
+  const cancel = (job) => { ctx.timers = ctx.timers.filter(x => x.job !== job); };
   const tools = { jq, ...programs(ctx) };
-  const shell = new Shell({ programs: tools, env, fs, home, wait: ctx.wait, now: ctx.now, hostname, user });
+  const shell = new Shell({ programs: tools, env, fs, home, wait: ctx.wait, now: ctx.now, detach, later, cancel, clock: () => ctx.t, hostname, user });
   ctx.shell = shell;
   return {
     exec(command) {

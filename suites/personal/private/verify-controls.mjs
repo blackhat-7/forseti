@@ -104,6 +104,25 @@ for (const task of suite.tasks.filter(t => !process.env.ONLY || t.id === process
   }
 }
 /**
+ * A background job in a simulated terminal runs on its own clock: the prompt returns at once, and
+ * what the job changes and writes lands when it would really finish, not when it was started.
+ */
+{
+  const {simulate} = await import('./ops/world.mjs');
+  const files = {};
+  const fs = {read: p => { if (!Object.hasOwn(files, p)) throw Error('missing'); return files[p]; }, write: (p, t) => { files[p] = t; }, list: () => Object.keys(files), remove: p => { delete files[p]; }};
+  const state = {done: false};
+  const w = simulate({start: '2030-01-01T10:00:00Z', home: '/tmp/ws-check/repo', fs, state, report: () => ({}),
+    programs: ctx => ({copy: () => { ctx.after(600, () => { state.done = true; }); return {out: ['copied']}; }})});
+  w.exec('copy > log 2>&1 &');
+  assert(!state.done && files.log === '', 'a background job has not finished when the prompt returns');
+  w.exec('sleep 300');
+  assert(!state.done, 'nor five minutes later');
+  assert.equal(w.exec('wait; cat log').output, 'copied\n', 'wait lets it finish, and its log fills in then');
+  assert(state.done);
+  assert.equal(w.exec('mkdir -p /tmp/x/y && cd /tmp/x && ls').output, 'y\n', 'scratch directories exist');
+}
+/**
  * Calibration cases are checked here, without a model, so that `npm run test:judge` only ever
  * adds the reviewer's opinion. Every case must be fully labelled and behaviourally correct:
  * correctness gates the reviewer in a real run, so a broken case would calibrate on code that

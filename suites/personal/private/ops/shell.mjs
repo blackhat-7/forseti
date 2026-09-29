@@ -147,7 +147,7 @@ function dollar(src, i) {
     if (!m) return { part: { t: 'var', name: body }, end: end + 1 };
     return { part: { t: 'var', name: m[1], op: m[2], arg: m[3] }, end: end + 1 };
   }
-  if (n === '?' || n === '$' || n === '#') return { part: { t: 'var', name: n }, end: i + 2 };
+  if (n === '?' || n === '$' || n === '#' || n === '!') return { part: { t: 'var', name: n }, end: i + 2 };
   const m = /^[A-Za-z_]\w*|^\d/.exec(src.slice(i + 1));
   if (!m) return null;
   return { part: { t: 'var', name: m[0] }, end: i + 1 + m[0].length };
@@ -179,7 +179,7 @@ function parse(tokens) {
       while (at()?.op === '\n') i++;
       chain.push({ op, pipe: pipeline() });
     }
-    if (at()?.op === '&') i++;
+    if (at()?.op === '&') { i++; chain.background = true; }
     return chain;
   }
   function pipeline() {
@@ -295,8 +295,21 @@ export class Shell {
    * @param {string} o.home  absolute path shown for the workspace
    * @param {(seconds: number) => void} o.wait  advances the world's clock
    * @param {() => Date} o.now
+   * @param {(run: () => void) => { id: number, end: number }} [o.detach]  runs a job off the operator's clock; see simulate()
+   * @param {(at: number, apply: () => void, job?: number) => void} [o.later]  applies a change at a virtual second
+   * @param {() => number} [o.clock]  the virtual second it is now
    */
-  constructor({ programs, env, fs, home, wait, now, hostname = 'localhost', user = 'oncall' }) {
+  constructor({ programs, env, fs, home, wait, now, detach, later, clock, cancel, hostname = 'localhost', user = 'oncall' }) {
+    this.detach = detach ?? ((run) => { run(); return { id: 0, end: 0 }; });
+    this.later = later ?? ((_at, apply) => apply());
+    this.clock = clock ?? (() => 0);
+    this.cancel = cancel ?? (() => {});
+    /** Background jobs, as `jobs` lists them. */
+    this.jobs = [];
+    /** Directories made with mkdir: the workspace only holds files, so empty ones live here. */
+    this.dirs = new Set();
+    /** File writes a background job makes, held until the job gets that far. */
+    this.deferred = null;
     this.programs = programs;
     this.env = { HOME: home, PWD: home, USER: user, LOGNAME: user, SHELL: '/bin/bash', HOSTNAME: hostname, PATH: '/usr/local/bin:/usr/bin:/bin:/usr/lib/google-cloud-sdk/bin', LANG: 'C.UTF-8', TERM: 'dumb', ...env };
     this.fs = fs;
@@ -309,6 +322,7 @@ export class Shell {
   }
   /** Runs one command line the way a non-interactive `bash -c` would, returning what a terminal shows. */
   run(source) {
+    this.source = source;
     let program;
     try { program = parse(lex(source)); }
     catch (e) { this.status = 2; return { output: `bash: ${e.message}\n`, code: 2 }; }
@@ -326,6 +340,7 @@ export class Shell {
   }
   list(items, stdin, out, err) {
     for (const chain of items) {
+      if (chain.background) { this.status = this.background(chain, stdin); continue; }
       let status = 0;
       for (const [k, link] of chain.entries()) {
         if (k > 0 && ((link.op === '&&' && status !== 0) || (link.op === '||' && status === 0))) continue;
@@ -334,6 +349,35 @@ export class Shell {
       this.status = status;
     }
     return this.status;
+  }
+  /**
+   * `cmd &`: the prompt comes back at once while the job runs on its own clock. Its output goes
+   * nowhere unless redirected, and a redirected file only fills in once the job has got that far,
+   * as a real log would. What the job changes lands when it would really happen (see `after` in
+   * world.mjs), not when it was started.
+   */
+  background(chain, stdin) {
+    const writes = [], saved = this.deferred;
+    this.deferred = writes;
+    const nul = { write() {} };
+    // The job's own words: the command line up to its `&`, from the last separator before it.
+    const source = this.source ?? '', amp = /(^|[^&>|])&(?![&>])/.exec(source);
+    const head = amp ? source.slice(0, amp.index + amp[1].length) : source;
+    const text = head.slice(Math.max(head.lastIndexOf('\n'), head.lastIndexOf(';'), head.lastIndexOf('&&') + 1) + 1).trim();
+    let job;
+    try {
+      job = this.detach(() => {
+        let status = 0;
+        for (const [k, link] of chain.entries()) {
+          if (k > 0 && ((link.op === '&&' && status !== 0) || (link.op === '||' && status === 0))) continue;
+          status = this.pipeline(link.pipe, stdin, nul, nul);
+        }
+      });
+    } finally { this.deferred = saved; }
+    this.later(job.end, () => { for (const w of writes) this.writeFile(w.target, (w.append ? this.readFile(w.target) ?? '' : '') + w.text); }, job.id);
+    this.jobs.push({ id: job.id, end: job.end, pid: 31000 + job.id * 7, text });
+    this.env['!'] = String(31000 + job.id * 7);
+    return 0;
   }
   pipeline({ cmds, negate }, stdin, out, err) {
     let input = stdin, status = 0;
@@ -374,14 +418,21 @@ export class Shell {
       const append = r.op === '>>' || r.op === '2>>';
       const prior = append ? this.readFile(target) ?? '' : '';
       const sink = { write: (l) => buffer.push(l) };
-      files.push({ target, buffer, prior });
+      files.push({ target, buffer, prior, append });
       if (r.op === '2>' || r.op === '2>>') err = sink;
       else if (r.op === '&>') { out = sink; err = sink; }
       else out = sink;
     }
     const status = body(stdin, out, err);
     for (const f of files) {
-      const problem = this.writeFile(f.target, f.prior + f.buffer.map(l => `${l}\n`).join(''));
+      const text = f.buffer.map(l => `${l}\n`).join('');
+      if (this.deferred) {
+        // Created now, as the shell opens it; filled when the job has written it.
+        if (!f.append) this.writeFile(f.target, '');
+        this.deferred.push({ target: f.target, text, append: true });
+        continue;
+      }
+      const problem = this.writeFile(f.target, f.prior + text);
       if (problem) { err.write(`bash: ${f.target}: ${problem}`); return 1; }
     }
     return status;
@@ -505,7 +556,7 @@ export class Shell {
   relative(path) {
     let p = path;
     if (p === '~' || p.startsWith('~/')) p = this.home + p.slice(1);
-    const absolute = p.startsWith('/') ? p : `${this.home}${this.cwd ? `/${this.cwd}` : ''}/${p}`;
+    const absolute = p.startsWith('/') ? p : `${this.env.PWD}/${p}`;
     const segments = [];
     for (const s of absolute.split('/')) {
       if (!s || s === '.') continue;
@@ -543,7 +594,25 @@ export class Shell {
     if (rel === '' || this.isDir(rel)) return 'Is a directory';
     try { this.fs.write(rel, text); return undefined; } catch (e) { return /128 KiB/.test(String(e?.message)) ? 'File too large' : 'Permission denied'; }
   }
-  isDir(rel) { return rel === '' || this.fs.list().some(f => f.startsWith(`${rel}/`)); }
+  isDir(rel) { return rel === '' || this.dirs.has(`${this.home}/${rel}`) || this.fs.list().some(f => f.startsWith(`${rel}/`)); }
+  /** An absolute path, `..` and `~` resolved against the working directory. */
+  absolute(path) {
+    let p = path;
+    if (p === '~' || p.startsWith('~/')) p = this.home + p.slice(1);
+    const segments = [];
+    for (const s of (p.startsWith('/') ? p : `${this.env.PWD}/${p}`).split('/')) { if (!s || s === '.') continue; if (s === '..') segments.pop(); else segments.push(s); }
+    return `/${segments.join('/')}`;
+  }
+  /** A directory outside the checkout that exists: /tmp, what mkdir made there, and the folders above the checkout. */
+  outsideDir(abs) {
+    return abs === '/tmp' || abs === '/var/tmp' || this.dirs.has(abs) || this.home.startsWith(`${abs}/`) || [...this.scratch.keys()].some(k => k.startsWith(`${abs}/`));
+  }
+  /** Names directly inside an outside directory. */
+  outsideEntries(abs) {
+    const names = new Set();
+    for (const p of [...this.scratch.keys(), ...this.dirs, this.home]) if (p.startsWith(`${abs}/`)) names.add(p.slice(abs.length + 1).split('/')[0]);
+    return [...names].sort();
+  }
 }
 /** `${v:-x}`, `${v#p}`, `${v##p}`, `${v%p}`, `${v%%p}`, `${v/a/b}`, `${v//a/b}`, `${#v}`. */
 function varOp(v, op, arg) {
@@ -575,15 +644,50 @@ function arith(src, env) {
 /** Shell builtins: they change the session itself. */
 const BUILTINS = {
   cd(args, { sh }) {
-    const target = args[0] ?? '~';
+    const target = args[0] === '-' ? sh.env.OLDPWD ?? sh.env.PWD : args[0] ?? '~';
     const rel = sh.relative(target);
-    if (rel === null) return { err: [`bash: cd: ${target}: Permission denied`], code: 1 };
+    if (rel === null) {
+      const abs = sh.absolute(target);
+      if (!sh.outsideDir(abs)) return { err: [`bash: cd: ${target}: ${abs.startsWith('/tmp/') || abs.startsWith('/var/tmp/') ? 'No such file or directory' : 'Permission denied'}`], code: 1 };
+      sh.env.OLDPWD = sh.env.PWD;
+      sh.cwd = null;
+      sh.env.PWD = abs;
+      return {};
+    }
+    sh.env.OLDPWD = sh.env.PWD;
     if (!sh.isDir(rel)) return { err: [`bash: cd: ${target}: ${sh.fs.list().includes(rel) ? 'Not a directory' : 'No such file or directory'}`], code: 1 };
     sh.cwd = rel;
     sh.env.PWD = rel ? `${sh.home}/${rel}` : sh.home;
     return {};
   },
   pwd(_a, { sh }) { return { out: [sh.env.PWD] }; },
+  /** Waits, on the virtual clock, for the background jobs to finish. */
+  wait(_a, { sh }) {
+    const end = Math.max(sh.clock(), ...sh.jobs.map(j => j.end));
+    if (end > sh.clock()) sh.wait(end - sh.clock());
+    sh.jobs = [];
+    return {};
+  },
+  jobs(args, { sh }) {
+    const now = sh.clock(), out = [];
+    sh.jobs.forEach((j, k) => {
+      const mark = k === sh.jobs.length - 1 ? '+' : k === sh.jobs.length - 2 ? '-' : ' ';
+      out.push(`[${j.id}]${mark}  ${args.includes('-l') ? `${j.pid} ` : ''}${(j.end > now ? 'Running' : 'Done').padEnd(24)}${j.text}${j.end > now ? ' &' : ''}`);
+    });
+    sh.jobs = sh.jobs.filter(j => j.end > now);
+    return { out };
+  },
+  disown(_a, { sh }) { sh.jobs = []; return {}; },
+  kill(args, { sh }) {
+    const err = [];
+    for (const a of args.filter(x => !x.startsWith('-'))) {
+      const job = sh.jobs.find(j => (a.startsWith('%') ? String(j.id) === a.slice(1) : String(j.pid) === a) && j.end > sh.clock());
+      if (!job) { err.push(a.startsWith('%') ? `bash: kill: ${a}: no such job` : `bash: kill: (${a}) - No such process`); continue; }
+      sh.cancel(job.id);
+      job.end = sh.clock();
+    }
+    return { err, code: err.length ? 1 : 0 };
+  },
   export(args, { sh }) {
     for (const a of args) { const m = /^([A-Za-z_]\w*)=(.*)$/s.exec(a); if (m) sh.env[m[1]] = m[2]; }
     return {};
@@ -822,7 +926,16 @@ export const TOOLS = {
     const out = [], err = [];
     for (const t of targets) {
       const rel = sh.relative(t);
-      if (rel === null) { err.push(`ls: cannot open directory '${t}': Permission denied`); continue; }
+      if (rel === null) {
+        const abs = sh.absolute(t);
+        if (sh.scratch.has(abs)) { out.push(set.has('l') ? long(t, sh.scratch.get(abs), sh.env.USER) : t); continue; }
+        if (!sh.outsideDir(abs)) { err.push(`ls: cannot ${abs.startsWith('/tmp') ? `access '${t}': No such file or directory` : `open directory '${t}': Permission denied`}`); continue; }
+        const names = sh.outsideEntries(abs);
+        if (targets.length > 1) out.push(`${t}:`);
+        if (set.has('l')) { out.push(`total ${names.length * 4}`); for (const n of names) { const p = `${abs}/${n}`; out.push(sh.scratch.has(p) ? long(n, sh.scratch.get(p), sh.env.USER) : `drwx------ 3 ${sh.env.USER} ${sh.env.USER}  4096 Sep 29 08:12 ${n}`); } }
+        else out.push(...names);
+        continue;
+      }
       if (!sh.isDir(rel)) {
         if (sh.fs.list().includes(rel)) out.push(set.has('l') ? long(t, sh.fs.read(rel)) : t);
         else err.push(`ls: cannot access '${t}': No such file or directory`);
@@ -852,7 +965,34 @@ export const TOOLS = {
     const found = sh.fs.list().filter(f => f.startsWith(prefix)).filter(f => !pattern || pattern.test(f.split('/').pop())).sort();
     return { out: found.map(f => `${root.replace(/\/$/, '')}/${f.slice(prefix.length)}`) };
   },
-  mkdir: () => ({}),
+  mkdir(args, io) {
+    const [set, operands] = flags(args, 'm');
+    const err = [];
+    for (const d of operands) {
+      const abs = io.sh.absolute(d), rel = io.sh.relative(d);
+      const writable = rel !== null || /^\/(tmp|var\/tmp)\//.test(abs);
+      if (!writable) { err.push(`mkdir: cannot create directory '${d}': Permission denied`); continue; }
+      const exists = rel !== null ? io.sh.isDir(rel) || io.sh.fs.list().includes(rel) : io.sh.outsideDir(abs) || io.sh.scratch.has(abs);
+      if (exists) { if (!set.has('p')) err.push(`mkdir: cannot create directory '${d}': File exists`); continue; }
+      const parent = abs.slice(0, abs.lastIndexOf('/')) || '/';
+      const parentExists = io.sh.relative(parent) !== null ? io.sh.isDir(io.sh.relative(parent)) : io.sh.outsideDir(parent);
+      if (!parentExists && !set.has('p')) { err.push(`mkdir: cannot create directory '${d}': No such file or directory`); continue; }
+      for (let p = abs; p.length > 1 && !(p === io.sh.home || (io.sh.relative(p) === null && io.sh.outsideDir(p) && p !== abs)); p = p.slice(0, p.lastIndexOf('/'))) io.sh.dirs.add(p);
+    }
+    return { err, code: err.length ? 1 : 0 };
+  },
+  nohup(args, io) {
+    if (!args.length) return { err: ["nohup: missing operand", "Try 'nohup --help' for more information."], code: 125 };
+    const out = [], err = [];
+    const code = io.sh.exec(args, io.stdin, { write: (l) => out.push(l) }, { write: (l) => err.push(l) });
+    return { out, err, code };
+  },
+  setsid(args, io) { return TOOLS.nohup(args, io); },
+  stdbuf(args, io) { return TOOLS.nohup(args.filter(a => !a.startsWith('-')), io); },
+  timeout(args, io) {
+    const rest = args.filter(a => !a.startsWith('-'));
+    return TOOLS.nohup(rest.slice(1), io);
+  },
   touch(args, io) { for (const f of args.filter(a => !a.startsWith('-'))) if (io.sh.readFile(f) === null) io.sh.writeFile(f, ''); return {}; },
   rm(args, io) {
     const [, files] = flags(args);

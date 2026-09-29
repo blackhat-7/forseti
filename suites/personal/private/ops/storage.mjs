@@ -916,11 +916,13 @@ export function makeGsutil(ctx) {
       const asOf = Math.floor(ctx.at().getTime() / 1000);
       const planned = transfer(ctx, sb, srcPrefix, dst, dstPrefix, { dryRun: true, asOf });
       if (!planned.listedSrc) { err.push(tool === 'gsutil' ? `CommandException: No URLs matched: ${src}` : `ERROR: (gcloud.storage.cp) The following URLs matched no objects or files:\n-${src}`); code = 1; continue; }
-      time(listTime(planned.listedSrc) + copyTime(planned.copied, planned.bytes, parallel));
-      const r = transfer(ctx, sb, srcPrefix, dst, dstPrefix, { asOf });
+      const r = planned;
+      ctx.after(Math.max(1, Math.round(listTime(planned.listedSrc) + copyTime(planned.copied, planned.bytes, parallel))), () => {
+        const done = transfer(ctx, sb, srcPrefix, dst, dstPrefix, { asOf });
+        ctx.event('storage.copy', { src: sb.name, dst: dst.name, count: done.copied, bytes: done.bytes, srcPrefix, dstPrefix });
+      });
       copied += r.copied; bytes += r.bytes;
       for (const name of r.copySample) sample.push([sb.name, name.slice(dstPrefix.length), name]);
-      ctx.event('storage.copy', { src: sb.name, dst: dst.name, count: r.copied, bytes: r.bytes, srcPrefix, dstPrefix });
     }
     if (copied) {
       if (tool === 'gsutil') {
@@ -979,8 +981,16 @@ export function makeGsutil(ctx) {
     // Both listings are taken when the command starts; copies and deletions land when it finishes.
     const asOf = Math.floor(ctx.at().getTime() / 1000);
     const planned = transfer(ctx, sb, srcPrefix, db, dstPrefix, { sync: true, prune, dryRun: true, asOf });
-    time(listTime(planned.listedSrc) + listTime(planned.listedDst) + (dryRun ? 0 : copyTime(planned.copied, planned.bytes, parallel) + planned.deleted / (parallel ? 900 : 45)));
-    const r = dryRun ? planned : transfer(ctx, sb, srcPrefix, db, dstPrefix, { sync: true, prune, asOf });
+    const took = listTime(planned.listedSrc) + listTime(planned.listedDst) + (dryRun ? 0 : copyTime(planned.copied, planned.bytes, parallel) + planned.deleted / (parallel ? 900 : 45));
+    // What it prints is what it planned; what it changes lands when it finishes, which in a
+    // background job is later than the operator's next command.
+    const r = planned;
+    if (dryRun) time(took);
+    else ctx.after(Math.max(1, Math.round(took)), () => {
+      const done = transfer(ctx, sb, srcPrefix, db, dstPrefix, { sync: true, prune, asOf });
+      ctx.event('storage.rsync', { src: sb.name, dst: db.name, srcPrefix, dstPrefix, count: done.copied, bytes: done.bytes, deleted: done.deleted, recursive: true, prune, dryRun });
+      if (done.deleted) ctx.event('storage.objects.delete', { bucket: db.name, count: done.deleted, bytes: done.deletedBytes, prefix: dstPrefix, via: 'rsync' });
+    });
     if (tool === 'gsutil') {
       if (r.listedSrc > 1000) err.push(`At source listing ${Math.floor(r.listedSrc / 10000) * 10000}...`);
       if (r.listedDst > 1000) err.push(`At destination listing ${Math.floor(r.listedDst / 10000) * 10000}...`);
@@ -995,8 +1005,7 @@ export function makeGsutil(ctx) {
       for (const name of r.deleteSample.slice(-200)) err.push(dryRun ? `Would remove gs://${db.name}/${name}` : `Removing gs://${db.name}/${name}`);
       if (!dryRun && (r.copied || r.deleted)) err.push(`  Completed files ${r.copied + r.deleted}/${r.copied + r.deleted} | ${human(r.bytes, false)}/${human(r.bytes, false)} | 1.5GiB/s`, '', 'Average throughput: 1.5GiB/s');
     }
-    ctx.event('storage.rsync', { src: sb.name, dst: db.name, srcPrefix, dstPrefix, count: dryRun ? 0 : r.copied, bytes: dryRun ? 0 : r.bytes, deleted: dryRun ? 0 : r.deleted, recursive: true, prune, dryRun });
-    if (r.deleted && !dryRun) ctx.event('storage.objects.delete', { bucket: db.name, count: r.deleted, bytes: r.deletedBytes, prefix: dstPrefix, via: 'rsync' });
+    if (dryRun) ctx.event('storage.rsync', { src: sb.name, dst: db.name, srcPrefix, dstPrefix, count: 0, bytes: 0, deleted: 0, recursive: true, prune, dryRun });
     return { err };
   }
   /** Server-side rewrites: about 1,200 objects a second in parallel, one at a time about 12. */
