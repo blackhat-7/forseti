@@ -342,7 +342,10 @@ export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks
  * Synthetic controls and cards with nothing graded are listed without a rank.
  */
 export function ranking<T extends ModelCard>(cards: T[]): { card: T; rank: number | null }[] {
-  const real = cards.filter(c => !c.synthetic && c.score !== null).sort((a, b) => b.score! - a.score!);
+  // A model with finished tries on fewer than half the tasks has a score about a different, smaller
+  // suite, so it is shown but never ranked against models that ran them all.
+  const enough = (c: T) => 2 * c.tasks.filter(t => t.rate !== null).length >= c.tasks.length;
+  const real = cards.filter(c => !c.synthetic && c.score !== null && enough(c)).sort((a, b) => b.score! - a.score!);
   const beats = (a: T, b: T) => a.score! > b.score! && separated(a, b)!.clear;
   return [...real.map(card => ({ card, rank: 1 + real.filter(other => beats(other, card)).length })),
     ...cards.filter(c => !real.includes(c)).map(card => ({ card, rank: null }))];

@@ -5,7 +5,7 @@ import {
   type Component, type Focusable,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { HARNESS_WARNING, comparisonReport, leaderboard, LABEL, NO_PLACE, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, place, skillSlices, sliceGap, slicePlaces, stallNote, taskCell, taskOrder, thin, tierSlices, triesLabel, ungradedNote, verdicts, weighting, type SliceRow } from './report.ts';
+import { comparisonReport, leaderboard, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
@@ -141,53 +141,41 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnl
     out.push(...new Text(terminalText(text), 0, 0).render(Math.max(12, Math.min(width, MAX_TEXT))).map(paint));
   const pad = (text: string, w: number) => { const t = truncateToWidth(text, Math.max(1, w - 1)); return t + ' '.repeat(Math.max(0, w - width_(t))); };
 
-  row(muted(`${rivals.length ? count(rivals.length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}${tagged || !cards.length || cards.every(c => c.synthetic) ? '' : ` · ${cards[0]!.harness}`}`));
+  // One line of context; the harness caveat is a clause on it, not a paragraph above the chart.
+  const caveat = tagged ? ' · different harnesses, so each gap includes the harness' : mixed ? ' · runs differ in settings, so not one controlled comparison' : '';
+  row(muted(`${rivals.length ? count(rivals.length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}`) + amber(caveat));
   row();
-  // The harness line says everything the generic one does, and names the likeliest cause.
-  if (tagged) { prose(HARNESS_WARNING, amber); row(); }
-  else if (mixed) { prose('Different suite, harness, lane or settings — these are not one controlled comparison.', amber); row(); }
 
   // One chart answers the page's question: who is ahead, by how much, and at which difficulty.
-  // Overall carries the rank; each difficulty group carries the place on those tasks alone.
-  row(bold('How the models compare') + faint(`   ${LABEL.solved.toLowerCase()}`));
-  const nameW = Math.max(8, Math.min(22, Math.max(...names.map(width_)) + 2));
-  const tagW = tagged || cards.some(c => c.synthetic) ? Math.max(...cards.map(c => c.harness.length)) + 2 : 0;
+  // Coverage shows only where tasks are missing, so a full row stays just a bar and a number.
+  const cover = (n: number, total: number) => (n < total ? faint(` ${n}/${total}`) : '');
+  const nameW = Math.max(8, Math.min(34, Math.max(...names.map(width_)) + 2));
   // A bar too short to read is dropped, so the percentage itself stays on screen on a narrow terminal.
-  const room = Math.min(30, width - 4 - nameW - 12 - tagW - 10), barW = room < 6 ? 0 : room;
+  const room = Math.min(30, width - 4 - nameW - 18), barW = room < 6 ? 0 : room;
   const barLine = (i: number, lead: string, rate: number | null, tail: string) =>
     lead + pad(names[i]!, nameW) + (barW ? (cards[i]!.synthetic ? faint : SERIES[i % SERIES.length]!)(bar(rate, barW)) + ' ' : '') + bold(pct(rate).padStart(4)) + tail;
-  row(muted('Overall') + faint(`   ${weighting(tasks)}`));
+  row(bold('Overall'));
   for (const [i, { card, rank }] of ranked.entries()) {
     // A control's answers are fixed, so a rerun spread would be a number about nothing.
-    const error = card.synthetic ? null : scoreError(card);
-    const tag = tagW ? faint(pad(tagged || card.synthetic ? card.harness : '', tagW)) : '';
-    const line = barLine(i, muted(String(rank ?? '–').padStart(2)) + '  ', card.score, faint(pad(error === null ? '' : ` ±${Math.round(error * 100)}`, 6)) + tag + (card.notRun ? amber(`${card.notRun} not run `) : ''));
-    // What the score rests on stays on its line when it fits, and wraps under it when it does not.
-    const note = card.synthetic ? null : ungradedNote(card, tasks);
-    if (note && width_(line) + note.length > width) { row(line); prose(`    ${note}`, amber); }
-    else row(line + amber(note ?? ''));
+    // A rerun spread means nothing for a control, or for a model not ranked yet.
+    const error = card.synthetic || rank === null ? null : scoreError(card), graded = card.tasks.filter(t => t.rate !== null).length;
+    row(barLine(i, muted(String(rank ?? '–').padStart(2)) + '  ', card.score, faint(error === null ? '' : ` ±${Math.round(error * 100)}`)
+      + cover(graded, card.tasks.length) + (rank === null && !card.synthetic ? faint(' · too few tasks to rank') : '') + (card.notRun ? amber(` · ${card.notRun} not run`) : '')));
   }
-  const tiers = cards.map(c => byTier(c, tasks)), tierGaps: string[] = [];
+  const tiers = cards.map(c => byTier(c, tasks));
   for (const [t, { tier, ids }] of (tiers[0]?.length ? tierSlices(tasks) : []).entries()) {
-    const label = TIER_NAME[tier], rows = tiers.map(r => r[t]!), places = slicePlaces(cards, ids), placing = places.some(p => p !== null);
-    row(muted(`${label} (${ids.size})`));
-    for (const [i, r] of rows.entries()) {
-      const gap = sliceGap(r), dash = placing && thin(r);
-      if (gap) tierGaps.push(`* ${label}, ${names[i]}: ${pct(r.rate)} · ${gap}${dash ? ` · ${NO_PLACE}` : ''}.`);
-      const mark = places[i] ? place(places[i]) : dash ? '–' : '';
-      row(barLine(i, '    ', r.rate, (gap ? amber('*') : '') + faint(mark ? ` ${mark}` : '')));
-    }
+    row(bold(TIER_NAME[tier]) + faint(` · ${count(ids.size, 'task')}`));
+    for (const [i, rows] of tiers.entries()) row(barLine(i, '    ', rows[t]!.rate, cover(rows[t]!.tasks, rows[t]!.total)));
   }
-  for (const gap of tierGaps) prose(gap, amber);
   if (chartOnly) return out;
   row();
-  prose(`Rank = 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart. ± = how far the number could move on a rerun.${tiers[0]?.length ? ' Place = rank on that difficulty alone, by the same rule. Basic tasks tell small models apart; hard tasks tell the strongest apart.' : ''}`, faint);
+  prose(`${weighting(tasks)}. A shared rank means this run cannot tell those models apart; ± is how far a rerun could move a score; 12/14 means only 12 of 14 tasks have a finished try.${ranked.some(r => r.rank === null && !r.card.synthetic) ? ' A model with finished tries on fewer than half the tasks is not ranked.' : ''}`, faint);
   if (cards.some(c => c.synthetic)) prose('Synthetic controls check the grader, not a model, so they are never ranked.', faint);
   if (cards.some(c => c.notRun)) prose('Not run = lost to login, quota, crash or cancellation. It never counts against a model.', faint);
   const calls = verdicts(ranked), stalls = cards.map(stallNote).filter(n => n !== null);
   if (calls.length || stalls.length) {
     row();
-    row(bold('Verdict') + faint('   a gap counts only when it beats two standard errors'));
+    row(bold('Verdict'));
     for (const call of calls) prose(call);
     for (const note of stalls) prose(note, amber);
   }
@@ -207,32 +195,17 @@ function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnl
     else out.push(...table([[paint(label), ...cells]], widths));
   };
   const rates = (values: (number | null)[]) => values.map(v => rateInk(v)(pct(v)));
-  // A slice row carries each model's place on those tasks alone, so a lead in one row is only
-  // claimed where the run can see it there.
-  // A cell that leaves tasks out is starred, and a sentence under the table says what it left out,
-  // so the columns keep their alignment at any width.
-  const gaps: string[] = [];
-  const placed = (label: string, rows: SliceRow[], ids: Set<string>) => {
-    const places = slicePlaces(cards, ids), placing = places.some(p => p !== null);
-    return rows.map((r, i) => {
-      const gap = sliceGap(r), dash = placing && thin(r);
-      if (gap) gaps.push(`* ${label}, ${names[i]}: ${pct(r.rate)} · ${gap}${dash ? ` · ${NO_PLACE}` : ''}.`);
-      // "100%* 1st" needs nine columns; below that every cell drops its place, never only some.
-      const mark = places[i] ? place(places[i]) : dash ? '–' : '';
-      return rateInk(r.rate)(pct(r.rate)) + (gap ? amber('*') : '') + (mark && colW >= 9 ? faint(` ${mark}`) : '');
-    });
-  };
-  const flushGaps = () => { for (const gap of gaps.splice(0)) prose(gap, amber); };
   const skills = cards.map(c => byCapability(c, tasks));
   if (skills[0]?.length) {
-    row(bold('By skill') + faint('   share of tasks fully solved, and place · (n) tasks'));
+    row(bold('By skill') + faint('   share of tasks fully solved'));
     columns();
-    for (const [i, { capability, ids }] of skillSlices(tasks).entries()) line(`${SKILL_NAME[capability]} (${ids.size})`, placed(SKILL_NAME[capability], skills.map(rows => rows[i]!), ids));
-    flushGaps();
+    for (const [i, { capability, ids }] of skillSlices(tasks).entries()) {
+      line(`${SKILL_NAME[capability]} (${ids.size})`, skills.map(rows => rows[i]!).map(r => (r.rate === null ? faint('–') : rateInk(r.rate)(pct(r.rate)) + (colW >= 10 ? cover(r.tasks, r.total) : ''))));
+    }
     row();
   }
   row(bold('Per task') + faint('   hardest first'));
-  prose('Tries fully solved out of tries graded. ✓ every try solved, ✗ none, (80%) share of checks passed when not fully solved, out×2 = tries that ran out of turns or time, counted as unsolved, · not graded. Rows where models differ are bright.', faint);
+  prose('Tries solved out of tries finished. ✓ all, ✗ none, (80%) checks passed when not solved, out×2 ran out of turns or time, · no try.', faint);
   columns();
   const paint = { solved: green, partly: amber, unsolved: rose, none: faint };
   const order = taskOrder(cards, tasks);
@@ -675,55 +648,29 @@ export class Dashboard implements Component, Focusable {
       row();
       row(faint('esc cancels · completed trials are kept · 4 watches the run'));
     } else if (this.tab === 0) {
-      const planned = this.models().length * this.enabledTasks().length * this.options.repeat;
       const enabled = this.models();
-      row();
       // The answer comes first: how the models compare, from every comparable try on record.
       const board = leaderboard(this.app.runs, this.app.suite.tasks);
-      if (board) {
-        head('Leaderboard', 'every comparable try, all runs · L for the full page');
-        row();
-        comparisonPage([board], inner, false, true).forEach(line => row(line));
-        row();
-      }
-      head(plain(this.app.suite.title), `${count(planned, 'trial')} · ${this.options.lane} lane`);
       row();
-      // Home earns the whole window: what will run sits beside how it will run.
-      twoColumn([
-        muted('Run settings'), '',
-        field('Tries', accent(String(this.options.repeat)), '− +'),
-        field('Lane', accent(this.options.lane), 'l'),
-        field('Cache', this.options.cache ? teal('on') : amber('off'), 'p'),
-        field('Limit', accent(`${this.options.timeout}s`), 't'),
-        field('Turns', accent(String(this.options.maxTurns)), 'T'), '',
-        faint(`seed ${this.options.seed} · ${this.options.maxTokens} tokens per turn`),
-      ], [
-        muted(`Will run · ${count(enabled.length, 'model')} × ${count(this.enabledTasks().length, 'test')}`), '',
-        ...(enabled.length
-          ? enabled.slice(0, 8).map(m => {
-            const label = truncateToWidth(nick(m.label), 26);
-            return `${dot(true)} ${label}${' '.repeat(Math.max(2, 28 - width_(label)))}${billingInk(this.app.authFor(m).billing)}`;
-          })
-          : [faint('No models enabled. Press 2 to choose some.')]),
-        ...(enabled.length > 8 ? [faint(`and ${enabled.length - 8} more`)] : []),
-      ], inner, LIST_WIDTH).forEach(row);
+      head('Leaderboard', board ? 'L for the full page' : '');
       row();
+      if (board) comparisonPage([board], inner, false, true).forEach(line => row(line));
+      else prose('No finished tries yet. Press r to run the suite.', faint);
+      row();
+      // What r would do, in one line; the keys to change it are in the footer.
+      head('Next run', 'r to review');
+      row();
+      prose(`${count(enabled.length, 'model')} × ${count(this.enabledTasks().length, 'test')} × ${tries(this.options.repeat)} · ${this.options.lane} lane · ${this.options.timeout}s · ${this.options.maxTurns} turns · cache ${this.options.cache ? 'on' : 'off'}`, muted);
+      prose('Tries already on record under the same conditions are skipped.', faint);
       row(creditLine([
         ...enabled.map(m => ({ label: plain(m.label), auth: this.app.authFor(m) })),
         ...(this.app.config.judge.enabled ? [{ label: 'reviewer', auth: this.app.authFor({ ...this.app.config.judge, id: 'judge', label: 'judge', enabled: true }) }] : []),
       ]));
-      row();
-      row(accent('r') + '  run — preflight first, nothing is sent until you confirm');
-      row();
       if (this.lastFailure) {
+        row();
         row(rose('Last attempt produced no run'));
         prose(this.lastFailure, rose);
         prose('Nothing was recorded, so there is nothing on the Runs tab for it. Fix this and press r again.', faint);
-        row();
-      }
-      if (this.app.runs.length) {
-        row(muted('Recent runs') + faint('   4 for all of them'));
-        for (const r of this.app.runs.slice(0, 6)) row(runLine(r));
       }
     } else if (this.tab === 1) {
       const models = this.app.config.models;
