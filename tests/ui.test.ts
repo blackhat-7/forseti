@@ -191,7 +191,13 @@ for (const billing of ['metered', 'unknown'] as const) {
     f.key('r', 'q');
     assert.equal(f.calls.length, 1);
     assert.equal(f.exits, 0);
+    // Cancelling is asked, never done on one key: a run cancelled by mistake loses every try not yet made.
     f.key(esc);
+    assert.match(f.text(), /Cancel this run\?/);
+    assert.equal(f.aborted, false);
+    f.key('n');
+    assert.equal(f.aborted, false, 'n keeps it running');
+    f.key(esc, 'y');
     assert.equal(f.aborted, true);
     f.finish(); await Promise.resolve();
     assert.match(f.text(), /cancelled/);
@@ -208,7 +214,9 @@ test('subscription run needs preflight confirmation, Ctrl+C cancels; no automati
   assert.equal(f.calls.length, 0);
   f.key('r', enter);
   assert.equal(f.calls[0]!.allowMetered, false);
-  f.key('\x03'); assert.equal(f.aborted, true);
+  // Ctrl+C asks too; y is what cancels.
+  f.key('\x03'); assert.equal(f.aborted, false); assert.match(f.text(), /Cancel this run\?/);
+  f.key('y'); assert.equal(f.aborted, true);
   f.finish(); await Promise.resolve();
   f.key('\x03'); assert.equal(f.exits, 1);
 });
@@ -325,7 +333,7 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
   f.key('q');
   assert.equal(f.exits, 0, 'q cannot quit out from under a live run');
   assert.equal(f.aborted, false, 'and it cannot cancel one either — leaving is now one key, cancelling still is not');
-  assert.match(f.text(), /esc again to cancel it/);
+  assert.match(f.text(), /Press esc to cancel it/);
   f.key('4');
   assert.match(f.text(), /Runs/);
   f.key('1');

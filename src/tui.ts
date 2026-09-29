@@ -270,7 +270,7 @@ function runLine(run: Run): string {
   return `${faint(runWhen(run.id))}  ${scores}  ${faint(`${run.tasks.length}×${run.options.repeat}`)}${state}`;
 }
 type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'localModels' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'leaderboard' | 'addModel' | 'addTest' | 'authFor' | 'setLocalUrl' | 'probeLocal'>;
-type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help' | 'local';
+type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'cancel' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help' | 'local';
 
 export class Dashboard implements Component, Focusable {
   private app: UIApp;
@@ -383,18 +383,13 @@ export class Dashboard implements Component, Focusable {
     // having to remember which of two keys this level wants is the whole complaint.
     if (key('ctrl+c') || key('escape') || (data === 'q' && !this.typing())) {
       if (this.dialog) this.close();
-      else if (this.controller) {
-        if (data === 'q') this.message = 'A run is in progress. Press esc again to cancel it.';
-        else { this.controller.abort(); this.message = 'Cancelling… keeping completed evidence.'; }
-      } else if (this.live && key('escape')) {
-        // A run started elsewhere stops the way it would on its own Ctrl+C: finished tries are kept.
-        try { process.kill(JSON.parse(readFileSync(join(this.app.root, '.state/run.lock'), 'utf8')).pid, 'SIGINT'); this.message = 'Cancelling… keeping completed evidence.'; }
-        catch { this.message = 'That run already ended.'; }
-      } else if (this.refreshing && data === 'q') this.message = 'Refreshing metadata. Press esc to stop waiting.';
+      else if (this.controller && data === 'q') this.message = 'A run is in progress. Press esc to cancel it.';
+      // Cancelling throws away the tries not yet made, so it is asked, never done on one key.
+      else if (this.controller || (this.live && key('escape'))) this.dialog = 'cancel'; else if (this.refreshing && data === 'q') this.message = 'Refreshing metadata. Press esc to stop waiting.';
       else this.exit();
       return;
     }
-    if (this.dialog) { if (!this.controller) this.dialogKey(data); return; }
+    if (this.dialog) { if (!this.controller || this.dialog === 'cancel') this.dialogKey(data); return; }
     // Looking around is always allowed. A run is long, and being pinned to one screen while it
     // works is why a cancelled run felt like it had vanished.
     if (key('tab') || key('shift+tab') || key('left') || key('right') || /^[1-5]$/.test(data)) {
@@ -554,6 +549,16 @@ export class Dashboard implements Component, Focusable {
     } else if (this.dialog === 'delete') {
       if (data === 'y') { this.pendingDelete?.(); this.close(); this.message = 'Removed from configuration. Existing run evidence is unchanged.'; }
       else if (data === 'n') this.close();
+    } else if (this.dialog === 'cancel') {
+      if (data === 'n') this.close();
+      else if (data === 'y') {
+        this.close();
+        if (this.controller) this.controller.abort();
+        // A run started elsewhere stops the way it would on its own Ctrl+C: finished tries are kept.
+        else try { process.kill(JSON.parse(readFileSync(join(this.app.root, '.state/run.lock'), 'utf8')).pid, 'SIGINT'); }
+        catch { this.message = 'That run already ended.'; return; }
+        this.message = 'Cancelling… keeping completed evidence.';
+      }
     } else if (this.dialog === 'preflight') {
       if (key('enter')) {
         if (this.preflightAuth.some(m => m.auth.billing === 'metered' || m.auth.billing === 'unknown')) { this.dialog = 'billing'; this.input.setValue(''); }
@@ -920,6 +925,14 @@ export class Dashboard implements Component, Focusable {
       this.input.render(width).forEach(row);
       row();
       row(faint('⏎ save and list its models   esc keep current'));
+    } else if (this.dialog === 'cancel') {
+      const run = this.live, done = run?.trials.length ?? 0, total = run?.planned ?? 0;
+      head('Cancel this run?');
+      row();
+      prose(total ? `${tries(done)} finished and ${done === 1 ? 'is' : 'are'} kept. The other ${total - done} will not run.` : 'Tries that finished are kept. The rest will not run.');
+      prose('Starting the same run again later makes only the missing tries.', faint);
+      row();
+      row(amber('y') + faint(' cancel the run   ') + amber('n') + faint(' keep it running'));
     } else if (this.dialog === 'delete') {
       head('Remove from configuration?');
       row();
@@ -958,7 +971,7 @@ export class Dashboard implements Component, Focusable {
         ['r', 'review preflight'], ['− +', 'tries per test, or reviewer rounds on Settings'], ['l', 'tools / prompt lane'],
         ['p', 'prompt caching on / off'], ['t · T', 'time limit · turn limit per trial'], ['5', 'settings: design reviewer, local server'], ['R', 'refresh metadata, sends nothing'],
         ['c · ⏎ · e', 'runs: compare, evidence, export'], ['L', 'leaderboard of every comparable try, from any tab'], ['m', 'comparison: summary / full report'], ['a', 'comparison: show / fold tasks every model solved'], ['←→', 'evidence: previous / next trial'],
-        ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc · q', 'leave what you are looking at: close a panel, else quit'], ['esc during a run', 'cancel it safely, keeping completed evidence'], ['during a run', 'tabs and ↑↓ work; edits wait'], ['ctrl+c', 'quit'],
+        ['space · b', 'report: page down / up'], ['gg · G', 'report: jump to top / bottom'], ['esc · q', 'leave what you are looking at: close a panel, else quit'], ['esc during a run', 'asks, then cancels it, keeping completed evidence'], ['during a run', 'tabs and ↑↓ work; edits wait'], ['ctrl+c', 'quit'],
       ] as const) row(`${accent(keys)}${' '.repeat(Math.max(2, 14 - keys.length))}${muted(what)}`);
     } else {
       const summary = this.dialog === 'report' && this.reportMode === 'summary';
