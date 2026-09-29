@@ -8,7 +8,7 @@ import { DIMENSIONS } from './config.ts';
 import { files, inside, localDir, put } from './files.ts';
 import { review as reviewSubmission, type JudgeCall, type Review } from './judge.ts';
 import { runPython } from './sandbox.ts';
-import type { Check, Dimension, GradeContext, JudgeConfig, ModelConfig, RunOptions, Task, Trial } from './types.ts';
+import type { Check, Dimension, GradeContext, JudgeConfig, LiveEvent, ModelConfig, RunOptions, Task, Trial } from './types.ts';
 
 /**
  * Everything that decides how one try runs and how it is graded. This file is part of the harness
@@ -51,6 +51,23 @@ export function blankTrial(id: string, model: ModelConfig, task: Task, repetitio
 export function taskBudget(options: RunOptions, task: Task): RunOptions {
   return { ...options, maxTurns: Math.max(options.maxTurns, task.turns ?? 0), timeout: Math.max(options.timeout, task.timeout ?? 0) };
 }
+/**
+ * The try's stream as `live.jsonl` beside its workspace. Deltas are merged and written ten times a
+ * second, so a fast model costs a few small appends rather than one per token.
+ */
+function liveLog(path: string) {
+  const queue: LiveEvent[] = [];
+  const flush = () => { if (queue.length) appendFileSync(path, queue.splice(0).map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 }); };
+  const timer = setInterval(flush, 100);
+  return {
+    emit(event: LiveEvent) {
+      const last = queue.at(-1);
+      if (last && 's' in last && last.k === event.k && 's' in event && event.k !== 'result') last.s += event.s;
+      else queue.push({ ...event });
+    },
+    close() { clearInterval(timer); flush(); },
+  };
+}
 export type Job = { model: ModelConfig; task: Task; repetition: number };
 /** What a try needs from its run. Nothing here describes any other try. */
 export type TrialContext = {
@@ -70,6 +87,7 @@ export async function runTrial(ctx: TrialContext, job: Job, id: string): Promise
   const trialDir = localDir(ctx.runDir, `trials/${trial.id}`);
   const work = localDir(trialDir, 'public');
   const record = (event: unknown) => appendFileSync(inside(trialDir, 'events.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), event })}\n`, { mode: 0o600 });
+  const live = liveLog(inside(trialDir, 'live.jsonl'));
   const start = performance.now();
   let deadline: NodeJS.Timeout | undefined;
   const controller = new AbortController();
@@ -97,8 +115,8 @@ export async function runTrial(ctx: TrialContext, job: Job, id: string): Promise
         if (!answer) throw new Error(`Missing ${job.model.model} control for ${job.task.id}`);
         for (const [path, content] of Object.entries(answer.files ?? {})) put(work, path, content);
         trial.answer = answer.answer ?? '';
-      } else if (agent === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, budget, trial, controller.signal, ctx.notify, record);
-      else await runAgent(work, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, modelsFor(job.model, ctx.local, ctx.contexts));
+      } else if (agent === 'claude-code') await runClaudeCode(work, trialDir, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, live.emit);
+      else await runAgent(work, job.model, job.task, budget, trial, controller.signal, ctx.notify, record, modelsFor(job.model, ctx.local, ctx.contexts), live.emit);
       if (controller.signal.aborted) {
         trial.status = signal.aborted ? 'cancelled' : 'timeout';
         trial.error = signal.aborted ? 'Cancelled by user' : `Trial deadline of ${budget.timeout}s exceeded; counted as unsolved`;
@@ -139,6 +157,7 @@ export async function runTrial(ctx: TrialContext, job: Job, id: string): Promise
     trial.error = safeError(error);
   } finally {
     if (deadline) clearTimeout(deadline);
+    live.close();
     signal.removeEventListener('abort', cancel);
     controller.abort();
     trial.wallMs = performance.now() - start;

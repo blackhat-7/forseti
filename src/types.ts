@@ -12,7 +12,12 @@
 export type Dimension = 'correctness' | 'instructions' | 'hygiene' | 'tools' | 'design';
 export type Check = { id: string; dimension: Dimension; passed: boolean; evidence: string };
 export type ToolEvent = { tool: string; args: Record<string, unknown>; ok: boolean; ms: number; output: string };
-export type PythonResult = { stdout: string; stderr: string; code: number | null; timedOut: boolean };
+/**
+ * A try as it streams, for the live screen only. Written beside the try, never inside its
+ * workspace, and never read back by the harness, so it cannot change an outcome.
+ */
+export type LiveEvent = { k: 'turn' } | { k: 'think' | 'say' | 'args'; s: string } | { k: 'tool'; name: string } | { k: 'result'; ok: boolean; s: string };
+export type PythonResult ={ stdout: string; stderr: string; code: number | null; timedOut: boolean };
 export type GradeContext = {
   lane: 'tools' | 'prompt';
   control: boolean;

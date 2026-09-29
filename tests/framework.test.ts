@@ -15,9 +15,9 @@ import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
 import { byTier, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
 import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
-import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, resultMessage } from '../src/claudecode.ts';
+import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
-import type { Config, Dimension, ModelConfig, Run, ToolEvent, Trial } from '../src/types.ts';
+import type { Config, Dimension, LiveEvent, ModelConfig, Run, ToolEvent, Trial } from '../src/types.ts';
 import type { JudgeCall } from '../src/judge.ts';
 
 const root = process.cwd();
@@ -443,9 +443,14 @@ test('real Pi agent loop records tools, usage, schema errors and budgets using a
     fauxAssistantMessage([fauxToolCall('read_file', { path: 'input.txt' }), fauxToolCall('write_file', { path: 'answer.txt', content: 'done' }), fauxToolCall('unknown_tool', {})], { stopReason: 'toolUse' }),
     fauxAssistantMessage([fauxText('Done')]),
   ]);
-  const records: unknown[] = [];
-  await runAgent(dir, model, task, DEFAULT_OPTIONS, t, new AbortController().signal, () => {}, e => records.push(e), models);
+  const records: unknown[] = [], live: LiveEvent[] = [];
+  await runAgent(dir, model, task, DEFAULT_OPTIONS, t, new AbortController().signal, () => {}, e => records.push(e), models, e => live.push(e));
   assert.equal(t.status, 'passed'); assert.equal(t.answer, 'Done'); assert.equal(t.turns, 2);
+  // The live stream shows each turn, each tool as it is called and how it went, and the reply as it is typed.
+  assert.equal(live.filter(e => e.k === 'turn').length, 2);
+  assert.deepEqual(live.flatMap(e => (e.k === 'tool' ? [e.name] : [])), ['read_file', 'write_file', 'unknown_tool']);
+  assert.deepEqual(live.flatMap(e => (e.k === 'result' ? [e.ok] : [])), [true, true, false]);
+  assert.equal(live.flatMap(e => (e.k === 'say' ? [e.s] : [])).join(''), 'Done');
   assert.deepEqual(t.trace.map(e => [e.tool, e.ok]), [['read_file', true], ['write_file', true], ['unknown_tool', false]]);
   assert.ok(t.tokens!.output > 0); assert.ok(t.modelMs > 0); assert.ok(t.firstTokenMs !== null); assert.ok(records.length);
   provider.setResponses([fauxAssistantMessage([fauxToolCall('list_files', {})], { stopReason: 'toolUse' })]);
@@ -501,6 +506,17 @@ test('Claude Code runs under the first-party login, never an API key, and never 
   assert.ok(!CLAUDE_CODE_ALLOWED.split(',').includes('Bash'), 'Bash is unsandboxed and networked; the sandboxed interpreter is the fair equivalent');
   assert.ok(CLAUDE_CODE_DENIED.split(',').includes('Bash'));
 
+  // Streamed line by line, so a live screen can follow the try; the result line is unchanged.
+  assert.ok(args.includes('--output-format stream-json --verbose --include-partial-messages'));
+  const lines = [{ type: 'system' }, { type: 'stream_event', event: { type: 'message_start' } },
+    { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'hm' } } },
+    { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hi' } } },
+    { type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'mcp__forseti__python' } } },
+    { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'input_json_delta', partial_json: '{"s' } } },
+    { type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: 'boom' }] } },
+    { type: 'result', result: 'done', num_turns: 1 }].map(l => JSON.stringify(l));
+  assert.deepEqual(lines.flatMap(liveEvents), [{ k: 'turn' }, { k: 'think', s: 'hm' }, { k: 'say', s: 'Hi' }, { k: 'tool', name: 'python' }, { k: 'args', s: '{"s' }, { k: 'result', ok: false, s: 'boom' }]);
+  assert.equal(resultMessage(lines.join('\n'))?.result, 'done');
   // The CLI streams the session as an array; the answer is the last result entry, not the first.
   const stream = JSON.stringify([{ type: 'system' }, { type: 'assistant' }, { type: 'result', result: 'done', num_turns: 3 }]);
   assert.equal(resultMessage(stream)?.result, 'done');

@@ -1,6 +1,6 @@
 {
   "scheme": 1,
-  "harness": "16406541837e6191d0ab46a821ff787a420e5487079bfabbb75b75d8b16ac643",
+  "harness": "df01d8bfa7fab558f6b3ebf2a20fb28a5e9bc2246ad46693855930ae5317dbf1",
   "files": [
     "adapter.ts",
     "auth.ts",
@@ -15,5 +15,5 @@
     "trial.ts",
     "types.ts"
   ],
-  "note": "Fingerprint what a try executes: comments, layout and types no longer count; the try path is followed from src/trial.ts"
+  "note": "Both lanes stream each try live to live.jsonl: Pi emits deltas from the agent loop, Claude Code switches to --output-format stream-json --verbose --include-partial-messages. Output format is a flag change, and the lane code changed."
 }

@@ -5,7 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { safeError } from './adapter.ts';
 import { files, inside } from './files.ts';
 import { MCP_ALLOWED, MCP_SERVER } from './mcpserver.ts';
-import type { ModelConfig, RunOptions, Task, ToolEvent, Trial } from './types.ts';
+import type { LiveEvent, ModelConfig, RunOptions, Task, ToolEvent, Trial } from './types.ts';
 
 /** Model aliases the CLI accepts. Full IDs also work; these are what we offer in the catalog. */
 export const CLAUDE_CODE_MODELS = ['opus', 'sonnet', 'haiku', 'fable'] as const;
@@ -45,7 +45,9 @@ export function claudeCodeArgs(model: string, maxTurns: number, mcpConfig = 'MCP
   return [
     '-p',
     '--model', model,
-    '--output-format', 'json',
+    // One JSON event per line as it happens, including partial messages, so a live screen can
+    // follow the try token by token. The final `result` line is the same as `json` output's.
+    '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     // `--restricted`, not `--safe-mode`: safe mode disables every customization including MCP
     // servers, so Forseti could not hand this lane its own tools. Restricted mode ignores the
     // host's settings files, removes the built-in code runners and confines file tools to the
@@ -89,25 +91,30 @@ export function readTrace(path: string): ToolEvent[] {
     try { return [JSON.parse(line) as ToolEvent]; } catch { return []; }
   });
 }
-/** Shared child-process plumbing: bounded output, killed on abort or deadline. */
-function runCli(args: string[], prompt: string, cwd: string, timeoutMs: number, signal: AbortSignal) {
+/** Shared child-process plumbing: bounded output, killed on abort or deadline. `onLine` sees each stdout line as it arrives. */
+function runCli(args: string[], prompt: string, cwd: string, timeoutMs: number, signal: AbortSignal, onLine: (line: string) => void = () => {}) {
   const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' };
   for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_PROFILE']) delete env[key];
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
     const child = spawn(claudeCodeBinary(), [...args, prompt], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', err = '', size = 0;
+    let out = '', err = '', size = 0, pending = '';
     const stop = () => child.kill('SIGTERM');
     const timer = setTimeout(stop, timeoutMs);
     signal.addEventListener('abort', stop, { once: true });
     const consume = (data: Buffer, isError: boolean) => {
       size += data.length;
-      if (size > 4 * 1024 * 1024) { stop(); return; }
-      if (isError) err += data.toString(); else out += data.toString();
+      // Streamed partial messages repeat per token, so a long session is megabytes of output.
+      if (size > 64 * 1024 * 1024) { stop(); return; }
+      if (isError) { err += data.toString(); return; }
+      out += data.toString();
+      const lines = (pending + data.toString()).split('\n');
+      pending = lines.pop()!;
+      lines.forEach(onLine);
     };
     child.stdout.on('data', (d: Buffer) => consume(d, false));
     child.stderr.on('data', (d: Buffer) => consume(d, true));
     child.on('error', reject);
-    child.on('close', c => { clearTimeout(timer); signal.removeEventListener('abort', stop); resolve({ stdout: out, stderr: err, code: c }); });
+    child.on('close', c => { if (pending) onLine(pending); clearTimeout(timer); signal.removeEventListener('abort', stop); resolve({ stdout: out, stderr: err, code: c }); });
   });
 }
 
@@ -130,11 +137,15 @@ export async function reviewWithClaudeCode(model: string, prompt: string, cwd: s
 
 /**
  * `--output-format json` emits the whole session as a JSON array whose last `result` entry
- * carries the answer; older/simple runs emit that object on its own. Accept both.
+ * carries the answer; older/simple runs emit that object on its own; `stream-json` emits one
+ * event per line. Accept all three.
  */
 export function resultMessage(stdout: string): CliResult | undefined {
   let data: unknown;
-  try { data = JSON.parse(stdout); } catch { return undefined; }
+  try { data = JSON.parse(stdout); } catch {
+    data = stdout.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    if (!(data as unknown[]).length) return undefined;
+  }
   if (Array.isArray(data)) return data.findLast(m => (m as { type?: string })?.type === 'result') as CliResult | undefined;
   return data && typeof data === 'object' ? (data as CliResult) : undefined;
 }
@@ -144,6 +155,23 @@ type CliResult = {
   total_cost_usd?: number; duration_ms?: number; duration_api_ms?: number;
   usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
 };
+/** What one `stream-json` line shows of the try, in the shape the Pi lane streams. */
+export function liveEvents(line: string): LiveEvent[] {
+  let m: { type?: string; event?: { type?: string; content_block?: { type?: string; name?: string }; delta?: { type?: string; text?: string; thinking?: string; partial_json?: string } }; message?: { content?: unknown } };
+  try { m = JSON.parse(line); } catch { return []; }
+  const e = m.event, d = e?.delta;
+  if (m.type === 'stream_event') {
+    if (e?.type === 'message_start') return [{ k: 'turn' }];
+    if (e?.type === 'content_block_start' && e.content_block?.type === 'tool_use') return [{ k: 'tool', name: String(e.content_block.name ?? '').replace(/^mcp__\w+__/, '') }];
+    if (d?.type === 'text_delta') return [{ k: 'say', s: String(d.text ?? '') }];
+    if (d?.type === 'thinking_delta') return [{ k: 'think', s: String(d.thinking ?? '') }];
+    if (d?.type === 'input_json_delta') return [{ k: 'args', s: String(d.partial_json ?? '') }];
+    return [];
+  }
+  if (m.type !== 'user' || !Array.isArray(m.message?.content)) return [];
+  return (m.message.content as { type?: string; is_error?: boolean; content?: unknown }[]).filter(b => b?.type === 'tool_result')
+    .map(b => ({ k: 'result', ok: !b.is_error, s: (typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '')).slice(0, 2000) }));
+}
 const LIMIT = /usage limit|session limit|weekly limit|rate.?limit|hit your (opus|sonnet|haiku|fable) limit|spend limit/i;
 const AUTH = /not logged in|\/login|authentication|unauthori[sz]ed|oauth|invalid api key|credential/i;
 
@@ -160,7 +188,7 @@ export function classify(text: string, exitCode: number | null): Trial['status']
  */
 export async function runClaudeCode(
   work: string, scratch: string, model: ModelConfig, task: Task, options: RunOptions, trial: Trial,
-  signal: AbortSignal, notify: (phase: string) => void, record: (event: unknown) => void,
+  signal: AbortSignal, notify: (phase: string) => void, record: (event: unknown) => void, live: (event: LiveEvent) => void = () => {},
 ): Promise<void> {
   const root = realpathSync(work);
   // Both files live beside the workspace, never inside it: anything under `work` is part of the
@@ -177,7 +205,7 @@ export async function runClaudeCode(
   notify(`claude code · ${model.model}`);
 
   const start = performance.now();
-  const { stdout, stderr, code } = await runCli(args, prompt, root, options.timeout * 1000, signal);
+  const { stdout, stderr, code } = await runCli(args, prompt, root, options.timeout * 1000, signal, line => liveEvents(line).forEach(live));
   trial.modelMs = performance.now() - start;
   // Recovered whatever the outcome: the trace is the only record of what the model did, and a
   // censored or failed trial is exactly when it is worth having.
