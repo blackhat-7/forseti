@@ -7,6 +7,7 @@ import {
 import type { App, CatalogEntry } from './app.ts';
 import { FINISHED, comparisonReport, levelsNote, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
+import { readRun } from './runner.ts';
 import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
 
@@ -291,8 +292,11 @@ export class Dashboard implements Component, Focusable {
   private reportOffset = 0;
   private reportMode: 'summary' | 'full' = 'summary';
   private reportRuns: Run[] = [];
-  /** Tries finished in the current run, oldest first, for the running screen. */
-  private feed: { model: string; task: string; trial: Trial }[] = [];
+  /**
+   * The current run as last saved. Read from its run.json rather than passed in the progress event,
+   * so the running screen never touches the fingerprinted runner code.
+   */
+  private live?: Run;
   private runStart = 0;
   private reportLength = 0;
   private reportPage = 12;
@@ -581,13 +585,17 @@ export class Dashboard implements Component, Focusable {
     this.close();
     this.controller = new AbortController();
     this.progress = undefined;
-    this.feed = [];
+    this.live = undefined;
     this.runStart = Date.now();
     this.lastFailure = '';
     this.message = 'Starting run… Esc cancels safely.';
     this.repaint();
     try {
-      const run = await this.app.run(options, p => { this.progress = p; if (p.trial) this.feed.push({ model: p.model, task: p.task, trial: p.trial }); this.repaint(); }, this.controller.signal);
+      const run = await this.app.run(options, p => {
+        // The runner saves run.json after each try, just before reporting it, so a new count means a new result on disk.
+        if (p.completed !== this.live?.trials.length) this.live = readRun(this.app.root, p.runId) ?? this.live;
+        this.progress = p; this.repaint();
+      }, this.controller.signal);
       // A reviewer that was switched on and scored nothing is worth saying out loud. Its
       // failures are per-trial notes by design, which is easy to miss when every trial otherwise
       // looks fine.
@@ -667,15 +675,17 @@ export class Dashboard implements Component, Focusable {
         row(`${faint('Now')}   ${bold(nick(p.model))}${faint('  ·  ')}${plain(p.task)}`);
         row(`      ${muted(plain(p.phase))}`);
       } else row(muted('Preparing isolated trial workspaces…'));
-      if (this.feed.length) {
+      const live = this.live;
+      const feed = (live?.trials ?? []).map(trial => ({ model: live!.models.find(m => m.id === trial.model)?.label ?? trial.model, task: live!.tasks.find(t => t.id === trial.task)?.title ?? trial.task, trial }));
+      if (feed.length) {
         // Solved means every correctness check passed, the same rule the leaderboard scores by.
         const solved = (t: Trial) => t.checks.some(c => c.dimension === 'correctness') && t.checks.filter(c => c.dimension === 'correctness').every(c => c.passed);
-        const models = [...new Set(this.feed.map(f => nick(f.model)))];
+        const models = [...new Set(feed.map(f => nick(f.model)))];
         const nameW = Math.min(30, Math.max(...models.map(m => width_(m))) + 2);
         row();
         row(bold('Results so far'));
         for (const [i, model] of models.entries()) {
-          const mine = this.feed.filter(f => nick(f.model) === model).map(f => f.trial), finished = mine.filter(t => FINISHED.includes(t.status));
+          const mine = feed.filter(f => nick(f.model) === model).map(f => f.trial), finished = mine.filter(t => FINISHED.includes(t.status));
           const won = finished.filter(solved).length, out = finished.filter(t => STALL.includes(t.status)).length;
           const barW = Math.max(0, Math.min(16, inner - nameW - 36));
           row(`  ${padTo(model, nameW)}${barW ? SERIES[i % SERIES.length]!(bar(finished.length ? won / finished.length : 0, barW)) + '  ' : ''}${bold(`${won}/${finished.length}`.padStart(5))} ${faint('solved')}`
@@ -683,7 +693,7 @@ export class Dashboard implements Component, Focusable {
         }
         row();
         row(bold('Latest'));
-        const latest = this.feed.slice(-6).reverse();
+        const latest = feed.slice(-6).reverse();
         const note = (trial: Trial) => {
           const correct = trial.checks.filter(c => c.dimension === 'correctness');
           return !FINISHED.includes(trial.status) ? 'not run' : STALL.includes(trial.status) ? 'ran out' : solved(trial) ? '' : `${correct.filter(c => c.passed).length}/${correct.length} checks`;

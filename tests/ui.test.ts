@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stripVTControlCharacters } from 'node:util';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { visibleWidth } from '@earendil-works/pi-tui';
 import { Dashboard, terminalText } from '../src/tui.ts';
 import { DEFAULT_JUDGE } from '../src/config.ts';
@@ -807,12 +808,20 @@ test('the leaderboard is the first thing on Home and opens in full from any tab'
 
 test('the running screen shows results per model, the latest tries and the time left', () => {
   const f = fixture('subscription', 60);
+  // The screen reads the run as the runner saves it after every try, so the test saves it the same way.
+  const root = mkdtempSync(join(process.cwd(), '.tmp/ui-live-'));
+  f.app.root = root;
   f.key('r', enter);
-  const tried = (status: Trial['status'], passed: boolean) => ({ ...f.run.trials[0]!, status, wallMs: 90_000, tokens: { input: 0, output: 3000, cacheRead: 0, cacheWrite: 0 },
-    checks: [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }, { id: 'd', dimension: 'correctness' as const, passed: true, evidence: '' }] });
-  f.progress({ completed: 1, total: 4, model: 'Claude opus · via Claude Code', task: 'Task one', phase: 'passed', runId: 'r', trial: tried('passed', true) });
-  f.progress({ completed: 2, total: 4, model: 'Claude haiku · via Claude Code', task: 'Task two', phase: 'failed', runId: 'r', trial: tried('failed', false) });
-  f.progress({ completed: 3, total: 4, model: 'Claude haiku · via Claude Code', task: 'Task three', phase: 'timeout', runId: 'r', trial: { ...tried('timeout', false), checks: [] } });
+  const models = [{ ...model, id: 'opus', label: 'Claude opus · via Claude Code' }, { ...model, id: 'haiku', label: 'Claude haiku · via Claude Code' }];
+  const tasks = ['one', 'two', 'three'].map(id => ({ id, title: `Task ${id}`, hash: id }));
+  const tried = (m: string, task: string, status: Trial['status'], passed: boolean) => ({ ...f.run.trials[0]!, id: `${m}-${task}`, model: m, task, status, wallMs: 90_000, tokens: { input: 0, output: 3000, cacheRead: 0, cacheWrite: 0 },
+    checks: status === 'timeout' ? [] : [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }, { id: 'd', dimension: 'correctness' as const, passed: true, evidence: '' }] });
+  const trials = [tried('opus', 'one', 'passed', true), tried('haiku', 'two', 'failed', false), tried('haiku', 'three', 'timeout', false)];
+  for (const [i] of trials.entries()) {
+    mkdirSync(join(root, 'runs', 'live'), { recursive: true });
+    writeFileSync(join(root, 'runs', 'live', 'run.json'), JSON.stringify({ ...f.run, id: 'live', status: 'running', models, tasks, planned: 4, trials: trials.slice(0, i + 1) }));
+    f.progress({ completed: i + 1, total: 4, model: 'x', task: 'y', phase: 'done', runId: 'live' });
+  }
   const text = f.text(100);
   assert.match(text, /3 of 4 · about .+ left/, 'time left comes from the pace so far');
   assert.match(text, /Claude opus\s+[█░]+\s+1\/1 solved/);
@@ -820,6 +829,7 @@ test('the running screen shows results per model, the latest tries and the time 
   assert.match(text, /◷\s+Claude haiku\s+Task three\s+ran out/, 'newest first');
   assert.match(text, /✗\s+Claude haiku\s+Task two\s+1\/2 checks\s+1\.5m\s+3k tok/);
   assert.match(text, /✓\s+Claude opus\s+Task one/);
+  rmSync(root, { recursive: true, force: true });
   assert.doesNotMatch(text, /via Claude Code/, 'names, not provenance');
   for (const width of [40, 80, 120]) f.ui.render(width).forEach(row => assert.ok(visibleWidth(row) <= width, `width ${width}: ${visibleWidth(row)}`));
 });
