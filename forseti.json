@@ -10,7 +10,7 @@
       "provider": "control",
       "model": "reference",
       "auth": "none",
-      "enabled": true,
+      "enabled": false,
       "thinking": "off"
     },
     {
@@ -82,8 +82,17 @@
       "provider": "claude-code",
       "model": "opus",
       "auth": "cli",
-      "enabled": true,
+      "enabled": false,
       "thinking": "off"
+    },
+    {
+      "id": "local-swift-qwen3-8-27b-q4-k-s",
+      "label": "Swift-Qwen3.8-27B-Q4_K_S · local",
+      "provider": "local",
+      "model": "/home/illusion/Documents/projects/llamacpp-tuner/tmp/models/ukisai%2FSwift-Qwen3.8-27B-GGUF/Swift-Qwen3.8-27B-Q4_K_S.gguf",
+      "auth": "none",
+      "enabled": false,
+      "thinking": "xhigh"
     }
   ],
   "judge": {
@@ -95,6 +104,7 @@
     "repeat": 1
   },
   "local": {
-    "url": ""
-  }
+    "url": "http://100.64.0.1:6868"
+  },
+  "parallel": 4
 }
