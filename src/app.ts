@@ -3,11 +3,11 @@ import { relative } from 'node:path';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { authInfo, catalogModels, defaultAuth } from './auth.ts';
 import { CLAUDE_CODE_MODELS } from './claudecode.ts';
-import { loadConfig, loadSuite, saveConfig } from './config.ts';
+import { DEFAULT_OPTIONS, loadConfig, loadSuite, saveConfig } from './config.ts';
 import { atomicJson, inside, localDir, put, slug } from './files.ts';
 import { listLocalModels, LOCAL, localUrl, shortName } from './local.ts';
-import { comparisonReport } from './report.ts';
-import { listRuns, readRun, runBenchmark } from './runner.ts';
+import { comparisonReport, leaderboard } from './report.ts';
+import { conditionsNow, listRuns, readRun, runBenchmark } from './runner.ts';
 import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite } from './types.ts';
 
 export type CatalogEntry = { provider: string; id: string; name: string; auth: AuthInfo };
@@ -19,8 +19,15 @@ export class App {
   catalog: CatalogEntry[] = [];
   /** Models the local server listed. Undefined until it has been asked, which never happens on startup. */
   localModels?: CatalogEntry[];
+  /** Today's conditions, computed once: hashing the code and suite on every render would be wasted work. */
+  private now?: ReturnType<typeof conditionsNow>;
   constructor(root: string) { this.root = root; }
+  leaderboard(): Run | null {
+    this.now ??= conditionsNow(this.root, this.config, { ...DEFAULT_OPTIONS });
+    return leaderboard(this.runs, this.suite.tasks, this.now);
+  }
   async refresh(): Promise<void> {
+    this.now = undefined;
     this.config = loadConfig(this.root);
     this.suite = loadSuite(this.root, this.config.suite).suite;
     this.runs = listRuns(this.root);
@@ -54,7 +61,7 @@ export class App {
     this.catalog = [...this.localModels, ...this.catalog.filter(c => c.provider !== LOCAL)];
     return this.localModels;
   }
-  persist(): void { saveConfig(this.root, this.config); }
+  persist(): void { saveConfig(this.root, this.config); this.now = undefined; }
   async run(options: RunOptions, progress: (p: Progress) => void, signal: AbortSignal): Promise<Run> {
     // The run appears in the list as soon as it has a manifest, and is kept current as trials
     // land, so cancelling or crashing leaves visible evidence instead of nothing.
@@ -111,5 +118,6 @@ export class App {
     updated.tasks.push({ id, title: id.replaceAll('-', ' '), tags: ['custom', 'json'], dimensions: ['correctness', 'instructions'], capabilities: ['exactness'], tier: 'basic', prompt: `${prompt}\nReturn only JSON.`, fixture, grader });
     atomicJson(this.root, this.config.suite, updated);
     this.suite = updated;
+    this.now = undefined;
   }
 }

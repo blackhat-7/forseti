@@ -11,7 +11,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **28 tasks.** `hard` 3 (`due-dates`, `sheet-eval`, `lock-refresh`) · `standard` 14 · `basic` 11. A task may set its own `turns`/`timeout`; the effective budget is the larger of the run's and the task's.
 - **Scoring changed this session.** Running out of a task's turn or time budget counts as unsolved (auth, quota, crash, cancel stay `not-run`). The headline weights each difficulty level equally.
 - **The rebuilt hard tier separates, on one try each.** `lock-refresh` and `sheet-eval`: Haiku ✗, Sonnet ✗, Opus ✓. `crew-schedule` and `log-query`: Haiku ✗, Sonnet ✓. Detail in `docs/transcript-research.md`. Not yet a measurement.
-- **Global leaderboard** (`npm start -- leaderboard`, or `L` on the Runs tab) pools every comparable try from every run. On today's record: Opus 96% · Sonnet 46% · Haiku 33%; Opus clearly beats Sonnet. Hard: 100 / 0 / 0. Thin: 1–2 tries per task.
+- **The leaderboard is strict and currently empty.** It shows only tries recorded under today's code, task fingerprints and default settings; the lane (Claude Code vs Pi) may differ. The 2026-09-29 fingerprint change reset it: every earlier try is on older code.
 - **A run only makes missing tries.** Same model + same task hash + same harness and settings = already done. `--fresh` forces a rerun.
 - Battery on Linux: `npm run check` clean · `npm test` **65/65** · `npm run test:suite` passes, 28 tasks. `test:terminal`, `test:judge` not run.
 

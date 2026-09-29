@@ -1,6 +1,7 @@
 import { appendFileSync, closeSync, existsSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { arch, platform, release } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
@@ -70,6 +71,31 @@ export function blankTrial(id: string, model: ModelConfig, task: Task, repetitio
  * make two runs incomparable. Hashing them once stranded paid-for runs behind a wording fix.
  */
 const RENDER_ONLY = new Set(['report.ts', 'tui.ts']);
+const harnessOf = (root: string) => ({ src: harnessFiles(root), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8'), system: SYSTEM_PROMPT });
+/**
+ * A task's fingerprint: what the model is shown and what grades it. The title, tier and skills are
+ * labels the model never sees, so relabelling a task keeps its tries. Only its own grader and the
+ * helpers every grader imports count, so editing one grader strands nothing else.
+ */
+function taskEntry(t: Task, dir: string, contents: Record<string, string>): Run['tasks'][number] {
+  const { title, tier, capabilities, ...shown } = t;
+  const graders = Object.entries(contents).filter(([p]) => p === t.grader || p === 'private/helpers.mjs');
+  return { id: t.id, title, capabilities, tier, turns: t.turns, timeout: t.timeout, hash: hash({ task: shown, fixture: files(inside(dir, t.fixture)), private: graders }) };
+}
+/**
+ * The conditions a try would run under now, with these options: the code, every task in the suite
+ * and this machine. A run looks up what is already on record by it, and the leaderboard keeps only
+ * tries recorded under it.
+ */
+export function conditionsNow(root: string, config: Config, options: RunOptions, pythonVersion?: string): Pick<Run, 'options' | 'tasks' | 'harnessHash' | 'environment' | 'judge'> {
+  const { suite, dir, contents } = loadSuite(root, config.suite);
+  const version = pythonVersion ?? spawnSync(pythonExecutable(), ['-I', '-c', 'import platform; print(platform.python_version())'], { encoding: 'utf8' }).stdout.trim();
+  return {
+    options, harnessHash: hash(harnessOf(root)), judge: config.judge.enabled ? config.judge : null,
+    environment: { os: `${platform()} ${release()} ${arch()}`, python: pythonExecutable(), pythonVersion: version, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)) },
+    tasks: suite.tasks.map(t => taskEntry(t, dir, contents)),
+  };
+}
 /** A task's own budget only ever raises the run's, so a big task is not censored by a default sized for small ones. */
 export function taskBudget(options: RunOptions, task: Task): RunOptions {
   return { ...options, maxTurns: Math.max(options.maxTurns, task.turns ?? 0), timeout: Math.max(options.timeout, task.timeout ?? 0) };
@@ -110,14 +136,11 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     // Read once per run: the local server's real context size, recorded below with the model.
     const contexts: Record<string, number> = models.some(m => m.provider === LOCAL)
       ? Object.fromEntries((await listLocalModels(config.local.url)).flatMap(m => (m.contextWindow ? [[m.id, m.contextWindow]] : []))) : {};
-    const harness = { src: harnessFiles(root), lock: readFileSync(inside(root, 'package-lock.json'), 'utf8'), system: SYSTEM_PROMPT };
-    // A task's hash covers its own grader and the helpers every grader imports, not every grader:
-    // editing one task's grader must not make every other task's recorded tries unusable.
-    const graders = (t: Task) => Object.entries(contents).filter(([p]) => p === t.grader || p === 'private/helpers.mjs');
-    const taskEntries = tasks.map(t => ({ id: t.id, title: t.title, capabilities: t.capabilities, tier: t.tier, turns: t.turns, timeout: t.timeout, hash: hash({ task: t, fixture: files(inside(dir, t.fixture)), private: graders(t) }) }));
-    const environment = { node: process.version, python: pythonExecutable(), pythonVersion, proxyConfigured: String(Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY)), os: `${platform()} ${release()} ${arch()}`, sandbox: SANDBOX, pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null } : catalogModels.getModel(m.provider, m.model))) };
+    const harness = harnessOf(root), now = conditionsNow(root, config, options, pythonVersion);
+    const taskEntries = tasks.map(t => now.tasks.find(e => e.id === t.id)!);
+    const environment = { node: process.version, ...now.environment, sandbox: SANDBOX, pi: '0.85.1', agent, agentFlags: agent === 'claude-code' ? claudeCodeArgs('MODEL', options.maxTurns).join(' ') : 'pi-agent-core 0.85.1', catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null } : catalogModels.getModel(m.provider, m.model))) };
     // Only the tries not already on record under these exact conditions are run; see trialKey.
-    const draft = { options, models, tasks: taskEntries, harnessHash: hash(harness), environment, judge };
+    const draft = { ...now, tasks: taskEntries, environment };
     const done = new Map<string, number>();
     if (!options.fresh) for (const past of listRuns(root)) for (const t of past.trials) {
       if (!FINISHED.includes(t.status) || !past.tasks.some(x => x.id === t.task) || !past.models.some(m => m.id === t.model)) continue;

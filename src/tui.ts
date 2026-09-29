@@ -5,7 +5,7 @@ import {
   type Component, type Focusable,
 } from '@earendil-works/pi-tui';
 import type { App, CatalogEntry } from './app.ts';
-import { comparisonReport, leaderboard, levelsNote, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
+import { comparisonReport, levelsNote, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, outcome, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { LOCAL } from './local.ts';
 import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
@@ -251,7 +251,7 @@ function runLine(run: Run): string {
   const state = run.status === 'completed' ? '' : `  ${statusInk(run.status)(plain(run.status))}${live ? faint(` ${run.trials.length}/${run.planned}`) : ''}`;
   return `${faint(runWhen(run.id))}  ${scores}  ${faint(`${run.tasks.length}×${run.options.repeat}`)}${state}`;
 }
-type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'localModels' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'addModel' | 'addTest' | 'authFor' | 'setLocalUrl' | 'probeLocal'>;
+type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'localModels' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'leaderboard' | 'addModel' | 'addTest' | 'authFor' | 'setLocalUrl' | 'probeLocal'>;
 type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help' | 'local';
 
 export class Dashboard implements Component, Focusable {
@@ -367,7 +367,7 @@ export class Dashboard implements Component, Focusable {
     }
     // The leaderboard is what this tool is for, so it opens from anywhere.
     if (data === 'L') {
-      const board = leaderboard(this.app.runs, this.app.suite.tasks);
+      const board = this.app.leaderboard();
       if (!board) throw new Error('No finished tries yet. Start with r.');
       this.report = terminalReport(comparisonReport([board])); this.reportRuns = [board]; this.reportOffset = 0; this.reportMode = 'summary'; this.dialog = 'report'; return;
     }
@@ -651,7 +651,7 @@ export class Dashboard implements Component, Focusable {
     } else if (this.tab === 0) {
       const enabled = this.models();
       // The answer comes first: how the models compare, from every comparable try on record.
-      const board = leaderboard(this.app.runs, this.app.suite.tasks);
+      const board = this.app.leaderboard();
       row();
       head('Leaderboard', board ? 'L for the full page' : '');
       row();

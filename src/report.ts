@@ -251,56 +251,50 @@ export const FINISHED: Trial['status'][] = ['passed', 'failed', ...STALL];
  */
 export function conditionsKey(run: Pick<Run, 'tasks' | 'options' | 'environment' | 'harnessHash' | 'judge'>, taskId: string): string {
   const task = run.tasks.find(t => t.id === taskId)!, o = run.options, e = run.environment;
-  return hash({ task: task.hash, harness: run.harnessHash, lane: o.lane, maxTokens: o.maxTokens, cache: o.cache,
+  return hash({ task: task.hash, harness: run.harnessHash, lane: o.lane, cache: o.cache,
     turns: Math.max(o.maxTurns, task.turns ?? 0), timeout: Math.max(o.timeout, task.timeout ?? 0), judge: judgeIdentity(run.judge ?? null),
     platform: (e.os ?? '').split(' ').filter((_, i) => i !== 1).join(' '), python: e.python, pythonVersion: e.pythonVersion, proxy: e.proxyConfigured });
 }
-/** The model as it ran: which model, how hard it thought, and the exact client flags that drove it. */
-export function modelKey(run: Pick<Run, 'environment'>, model: ModelConfig): string {
-  return `${model.provider}/${model.model}/${model.thinking}/${hash(run.environment.agentFlags ?? '').slice(0, 12)}`;
+/**
+ * The model as it ran: which model, how hard it thought, and the exact client flags that drove it.
+ * Output tokens per turn belong here, not to the conditions: only the Pi lane uses the setting, so
+ * it tells two local setups apart without making Claude Code tries look unlike.
+ */
+export function modelKey(run: Pick<Run, 'environment' | 'options'>, model: ModelConfig): string {
+  const tokens = model.provider === 'claude-code' ? '' : `/${run.options.maxTokens}`;
+  return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(run.environment.agentFlags ?? '').slice(0, 12)}`;
 }
 export function trialKey(run: Run, trial: Trial): string {
   return `${modelKey(run, run.models.find(m => m.id === trial.model)!)} ${conditionsKey(run, trial.task)}`;
 }
 /**
- * Every model's newest finished tries, from every run, as one virtual run the comparison page
- * renders unchanged. Per model and task, only tries made under that pair's newest conditions
- * count, so an old try never mixes with a new one. Models can differ in conditions — a newer
- * harness, another lane — and when they do the run is marked `conditions: mixed`, which the page
- * states, exactly as it does for any comparison across unlike runs. Controls are left out: they
- * check the grader, not a model. The current suite decides which tasks count and at which
- * difficulty, because tiers are relabelled as evidence arrives.
+ * Every finished try recorded under today's conditions, from every run, as one virtual run the
+ * comparison page renders unchanged. `now` is what a try would run under today: the code, each
+ * task's fingerprint, the default settings and this machine. A try made under anything else is
+ * left out, so every bar compares like with like; the one difference allowed is the lane, because
+ * Claude models always run in Claude Code and local models always in the Pi agent. Controls are
+ * left out: they check the grader, not a model. The suite decides which tasks count and at which
+ * difficulty.
  */
-export function leaderboard(runs: Run[], suite: Pick<Task, 'id' | 'title' | 'tier' | 'capabilities'>[]): Run | null {
+export function leaderboard(runs: Run[], suite: Pick<Task, 'id' | 'title' | 'tier' | 'capabilities'>[], now: Pick<Run, 'options' | 'tasks' | 'harnessHash' | 'environment' | 'judge'>): Run | null {
   const live = new Map(suite.map(t => [t.id, t]));
+  const wanted = new Map(now.tasks.filter(t => live.has(t.id)).map(t => [t.id, conditionsKey(now, t.id)]));
   const newestFirst = runs.toSorted((a, b) => b.created.localeCompare(a.created));
-  const model = (run: Run, t: Trial) => run.models.find(m => m.id === t.model)!;
-  const counted = (run: Run, t: Trial) => live.has(t.task) && FINISHED.includes(t.status) && model(run, t).provider !== 'control';
-  const current = new Map<string, string>(), entries = new Map<string, Run['tasks'][number]>();
-  for (const run of newestFirst) for (const t of run.trials) {
-    const pair = `${modelKey(run, model(run, t))} ${t.task}`;
-    if (!counted(run, t) || current.has(pair)) continue;
-    current.set(pair, conditionsKey(run, t.task));
-    if (!entries.has(t.task)) entries.set(t.task, { ...run.tasks.find(x => x.id === t.task)!, ...live.get(t.task)! });
-  }
   const models = new Map<string, ModelConfig>(), tries = new Map<string, number>(), trials: Trial[] = [];
   for (const run of newestFirst) for (const t of run.trials) {
-    if (!counted(run, t)) continue;
-    const m = model(run, t), id = modelKey(run, m), pair = `${id} ${t.task}`;
-    if (current.get(pair) !== conditionsKey(run, t.task)) continue;
-    const n = (tries.get(pair) ?? 0) + 1;
+    const m = run.models.find(x => x.id === t.model)!;
+    if (m.provider === 'control' || !FINISHED.includes(t.status) || !run.tasks.some(x => x.id === t.task) || wanted.get(t.task) !== conditionsKey(run, t.task)) continue;
+    const id = modelKey(run, m), pair = `${id} ${t.task}`, n = (tries.get(pair) ?? 0) + 1;
     if (!models.has(id)) models.set(id, { ...m, id });
     tries.set(pair, n);
     trials.push({ ...t, model: id, repetition: n });
   }
   const latest = newestFirst[0];
   if (!latest || !trials.length) return null;
-  const perTask = Map.groupBy([...current], ([pair]) => pair.slice(pair.lastIndexOf(' ') + 1));
-  const mixed = [...perTask.values()].some(pairs => new Set(pairs.map(([, key]) => key)).size > 1);
   const { agent: _, ...environment } = latest.environment;
-  return { ...latest, id: 'leaderboard', status: 'completed', environment: { ...environment, ...(mixed ? { conditions: 'mixed' } : {}) },
-    options: { ...latest.options, repeat: Math.max(...tries.values()) }, models: [...models.values()],
-    tasks: suite.flatMap(t => entries.get(t.id) ?? []), planned: trials.length, trials };
+  return { ...latest, id: 'leaderboard', status: 'completed', environment, options: { ...latest.options, repeat: Math.max(...tries.values()) },
+    models: [...models.values()], planned: trials.length, trials,
+    tasks: suite.flatMap(t => { const e = now.tasks.find(x => x.id === t.id); return e ? [{ ...e, title: t.title, tier: t.tier, capabilities: t.capabilities }] : []; }) };
 }
 export function comparisonKey(run: Run): string {
   return hash({ suite: run.suiteHash, tasks: run.tasks.map(t => t.hash).sort(), harness: run.harnessHash, lane: run.options.lane, maxTurns: run.options.maxTurns, maxTokens: run.options.maxTokens, timeout: run.options.timeout, seed: run.options.seed, cache: run.options.cache, judge: judgeIdentity(run.judge ?? null), agent: run.environment.agent ?? 'pi', agentFlags: run.environment.agentFlags ?? '', os: run.environment.os, python: run.environment.python, pythonVersion: run.environment.pythonVersion, proxyConfigured: run.environment.proxyConfigured, node: run.environment.node });
@@ -343,7 +337,7 @@ export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks
   if (common.length && real.some(c => has(c).size > common.length)) {
     for (const { card } of cards) Object.assign(card, { levels: common }, headline(card.tasks.filter(t => common.includes(t.tier!)), 'tier'));
   }
-  return { cards: cards.map(c => c.card), tasks, mixed: new Set(runs.map(comparisonKey)).size > 1 || runs.some(r => r.environment.conditions === 'mixed') };
+  return { cards: cards.map(c => c.card), tasks, mixed: new Set(runs.map(comparisonKey)).size > 1 };
 }
 /**
  * Rank with ties, best first: a model's rank is one more than the number of models that clearly

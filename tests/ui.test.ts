@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { visibleWidth } from '@earendil-works/pi-tui';
 import { Dashboard, terminalText } from '../src/tui.ts';
 import { DEFAULT_JUDGE } from '../src/config.ts';
+import { leaderboard } from '../src/report.ts';
 import type { CatalogEntry } from '../src/app.ts';
 import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite } from '../src/types.ts';
 
@@ -61,6 +62,8 @@ function fixture(billing: AuthInfo['billing'] = 'subscription', rows = 24) {
     },
     compare(ids: string[]) { return `# Comparison\n${ids.join(', ')}\n${'Evidence row\n'.repeat(20)}`; },
     exportReport(ids: string[]) { exported = ids; return 'reports/comparison.md'; },
+    // The newest run stands in for today's conditions, so the board shows exactly what the mock recorded.
+    leaderboard() { return this.runs[0] ? leaderboard(this.runs, this.suite.tasks, this.runs[0]) : null; },
     addModel(provider: string, id: string, mode: ModelConfig['auth']) { this.config.models.push({ ...model, id: 'added', provider, model: id, auth: mode }); },
     addTest(id: string, prompt: string, expected: string) { JSON.parse(expected); this.suite.tasks.push({ id, title: id, prompt, fixture: `fixtures/${id}`, grader: `private/${id}.mjs`, tags: [], dimensions: ['correctness', 'instructions'], capabilities: ['exactness'], tier: 'basic' }); },
   };

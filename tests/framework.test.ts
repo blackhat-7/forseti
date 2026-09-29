@@ -768,7 +768,7 @@ test('a try already on record under the same conditions is never run again', asy
   } finally { if (saved === undefined) delete process.env.CEREBRAS_API_KEY; else process.env.CEREBRAS_API_KEY = saved; }
 });
 
-test('the leaderboard keeps each model\'s newest tries and says when conditions differ', () => {
+test('the leaderboard keeps only tries recorded under today\'s conditions', () => {
   const base = (id: string, created: string, harnessHash: string, models: ModelConfig[], trials: [string, string, Trial['status']][]): Run => ({
     schema: 1, id, created, status: 'completed', suite: 's', suiteHash: id, harnessHash, environment: { os: 'linux 7.2.6 x64' }, judge: null,
     options: { ...DEFAULT_OPTIONS }, models, tasks: [{ id: 'a', title: 'A', hash: 'ha', tier: 'hard' }, { id: 'b', title: 'B', hash: 'hb', tier: 'basic' }], planned: trials.length,
@@ -780,22 +780,24 @@ test('the leaderboard keeps each model\'s newest tries and says when conditions 
   const older = base('r1', '2026-01-01', 'H', [opus, ref], [['opus', 'a', 'passed'], ['opus', 'b', 'passed'], ['reference', 'a', 'passed']]);
   const newer = base('r2', '2026-02-01', 'H', [haiku], [['haiku', 'a', 'failed'], ['haiku', 'b', 'auth_error']]);
   const suite = [{ id: 'a', title: 'A', tier: 'hard' as const, capabilities: [] }, { id: 'b', title: 'B', tier: 'basic' as const, capabilities: [] }];
-  const board = leaderboard([older, newer], suite)!;
+  // Rule changed on purpose: the board keeps only tries recorded under today's conditions, so a
+  // try on older code is left out instead of being compared with a warning.
+  const today = { ...older, harnessHash: 'H' };
+  const board = leaderboard([older, newer], suite, today)!;
   assert.deepEqual(board.models.map(x => x.model).sort(), ['haiku', 'opus'], 'models from different runs, controls left out');
   assert.equal(board.trials.length, 3, 'the not-run try is not a try');
-  assert.equal(board.environment.conditions, undefined, 'one set of conditions, nothing to warn about');
-  // Rule changed on purpose: newest conditions are kept per model and task, not per task, so one
-  // model rerun under a newer harness no longer evicts every other model; the board says it is mixed.
   const rebuilt = base('r3', '2026-03-01', 'H2', [haiku], [['haiku', 'a', 'passed']]);
-  const moved = leaderboard([older, newer, rebuilt], suite)!;
-  assert.deepEqual(moved.trials.filter(t => t.task === 'a').map(t => [t.model.split('/')[1], t.status]).sort(), [['haiku', 'passed'], ['opus', 'passed']], "haiku's older try on a is replaced; opus's stays");
-  assert.equal(moved.trials.filter(t => t.task === 'b').length, 1);
-  assert.equal(moved.environment.conditions, 'mixed');
-  assert.equal(scorecards([moved]).mixed, true, 'the page states it');
+  const moved = leaderboard([older, newer, rebuilt], suite, { ...rebuilt })!;
+  assert.deepEqual(moved.trials.map(t => [t.model.split('/')[1], t.task, t.status]), [['haiku', 'a', 'passed']], 'only the try on today\'s code is kept');
+  assert.equal(leaderboard([older, newer], suite, rebuilt), null, 'nothing on record under today\'s code');
+  // Claude Code and the Pi agent may differ; output tokens only matter between Pi models.
+  const local = m('qwen', 'local'), piRun = { ...base('r4', '2026-02-02', 'H', [local], [['qwen', 'a', 'passed']]), options: { ...DEFAULT_OPTIONS, maxTokens: 32768 }, environment: { os: 'linux 7.2.6 x64', agent: 'pi' } };
+  assert.equal(leaderboard([older, piRun], suite, today)!.models.length, 2, 'the lane and a Pi-only setting are not conditions');
+  assert.notEqual(modelKey(piRun, local), modelKey(older, local), 'but two Pi setups with different output limits are different entries');
   assert.equal(conditionsKey(older, 'a'), conditionsKey({ ...older, environment: { os: 'linux 7.3.0 x64' } }, 'a'), 'a kernel update is not a new condition');
   assert.notEqual(modelKey(older, opus), modelKey(older, { ...opus, thinking: 'high' }), 'thinking is part of the model');
   // The suite decides tiers and membership: a relabelled task moves, a removed one leaves.
-  const now = leaderboard([older, newer], [{ ...suite[0]!, tier: 'standard' }])!;
+  const now = leaderboard([older, newer], [{ ...suite[0]!, tier: 'standard' }], today)!;
   assert.deepEqual(now.tasks.map(t => [t.id, t.tier]), [['a', 'standard']]);
 });
 

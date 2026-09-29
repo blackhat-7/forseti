@@ -49,3 +49,7 @@ The ids stay in suite JSON and saved runs; reports show only the plain names. Ea
 Two tasks (`room-bookings`, `order-pricing`) are multi-file bug hunts: a 15-module service, one reported symptom, and three defects in different layers that mask each other. That is small multi-file context, not large. Two more (`sheet-eval`, `log-query`) implement a component from a 30-rule written spec, graded on hundreds of hidden cases. Two (`lock-refresh`, `crew-schedule`) are search problems where the greedy starting code is wrong and plain search is too slow.
 
 Known gaps: nothing here tests architecture or system design, long-horizon planning, performance work, or large multi-file context. Those shapes appear in real work but are not in this suite; do not read a high score as covering them.
+
+## Grader imports
+
+A grader may import only `helpers.mjs` from `private/`. A task's fingerprint covers its prompt, fixture files, its own grader and `helpers.mjs`; any other private file it imported would change results without changing the fingerprint. Editing `helpers.mjs` invalidates every task's recorded tries.

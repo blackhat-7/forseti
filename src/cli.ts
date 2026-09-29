@@ -7,7 +7,7 @@ import { authInfo, defaultAuth, ENV_KEYS } from './auth.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { clean } from './files.ts';
 import { LOCAL } from './local.ts';
-import { comparisonReport, leaderboard } from './report.ts';
+import { comparisonReport } from './report.ts';
 import { checkSandbox, pythonExecutable } from './sandbox.ts';
 import type { ModelConfig, RunOptions } from './types.ts';
 
@@ -119,7 +119,7 @@ async function main() {
   }
   if (command === 'runs') { for (const r of app.runs) console.log(`${r.id}  ${r.status}  ${r.trials.length}/${r.planned}  ${r.options.lane}`); return; }
   if (command === 'leaderboard') {
-    const board = leaderboard(app.runs, app.suite.tasks);
+    const board = app.leaderboard();
     if (!board) throw new Error('No finished tries yet. Start with `npm start -- run`.');
     console.log(comparisonReport([board])); return;
   }
