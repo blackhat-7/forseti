@@ -100,10 +100,17 @@ export function gate(score: { passed: number; total: number }): string {
   if (!score.total) return 'n/a';
   return score.passed === score.total ? `ok (${score.total})` : `${score.total - score.passed} failed`;
 }
+// One eighth-block glyph at the boundary reads as a smooth fill instead of a bar that jumps a
+// whole cell at a time; text, so it stays plain here and is coloured only where it is drawn.
+const EIGHTHS = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
 export function bar(rate: number | null, width = 10): string {
   if (rate === null) return '·'.repeat(width);
-  const filled = Math.max(0, Math.min(width, Math.round(rate * width)));
-  return '█'.repeat(filled) + '░'.repeat(width - filled);
+  const exact = Math.max(0, Math.min(1, rate)) * width;
+  let filled = Math.floor(exact);
+  let eighth = Math.round((exact - filled) * 8);
+  if (eighth === 8) { filled++; eighth = 0; }
+  const partial = eighth > 0 && filled < width ? EIGHTHS[eighth] : '';
+  return '█'.repeat(filled) + partial + '░'.repeat(Math.max(0, width - filled - (partial ? 1 : 0)));
 }
 export type TaskScore = { id: string; title: string; tier?: Tier; rate: number | null; checkRate: number | null; passed: number; evaluated: number; planned: number; stalled: number };
 export type Scorecard = {

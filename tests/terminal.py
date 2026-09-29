@@ -49,10 +49,10 @@ try:
     os.close(slave)
     collect(1)
     assert b'forseti' in output, 'TUI did not mount'
-    send('2')
+    send('3')
     assert b'control/reference' in output, 'Model view did not open'
     send('\x1b[B')
-    send('3')
+    send('4')
     assert b'shared-count' in output, 'Test view did not open'
     send('1r')
     # Terminal packets can contain multiple keys; send separate normal key events.

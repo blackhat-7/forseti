@@ -11,7 +11,6 @@ import { CARD, MAX_TEXT, SERIES, amber, bold, count, faint, green, muted, nick, 
 export function comparisonPage(runs: Run[], width: number, everyTask: boolean, chartOnly = false): string[] {
   const { cards: all, tasks, mixed } = scorecards(runs);
   const ranked = ranking(all), cards = ranked.map(r => r.card);
-  const rivals = ranked.filter(r => r.rank !== null).map(r => r.card);
   const tagged = harnesses(cards).length > 1;
   const names = cards.map(c => plain(c.label));
   const out: string[] = [];

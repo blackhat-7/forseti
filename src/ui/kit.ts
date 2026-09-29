@@ -23,7 +23,12 @@ export function terminalReport(markdown: string): string {
 // Kanagawa Dragon: one dark base, one accent for anything interactive, and colour only where it
 // carries meaning. The variable names are the roles; the comments are the palette's own names.
 export const ink = (r: number, g: number, b: number) => (s: string) => `\x1b[38;2;${r};${g};${b}m${s}\x1b[39m`;
-export const BACKDROP = '\x1b[48;2;24;22;22m\x1b[38;2;197;201;197m'; // dragonBlack3 on dragonWhite
+const BASE_BG = '\x1b[48;2;24;22;22m'; // dragonBlack3
+export const BACKDROP = `${BASE_BG}\x1b[38;2;197;201;197m`; // dragonBlack3 on dragonWhite
+// A selected row's band, one step lighter than the backdrop; UNBAND returns to it so the band
+// never bleeds past the row it marks.
+export const BAND = '\x1b[48;2;40;39;39m';
+export const UNBAND = BASE_BG;
 export const accent = ink(139, 164, 176); // dragonBlue2
 export const teal = ink(142, 164, 162); // dragonAqua
 export const green = ink(135, 169, 135); // dragonGreen2
@@ -61,6 +66,18 @@ export function remaining(ms: number): string {
 /** Marks a line as the start of a card: its title and right-hand note follow. Never printed. */
 export const CARD = '\u0000card\u0000';
 export const pill = (s: string) => `\x1b[48;2;139;164;176m\x1b[38;2;24;22;22m\x1b[1m${s}\x1b[22m\x1b[39m\x1b[49m`;
+/** A filled background chip: a state (PASS, SCORED, NOT RUN) or a dialog's y/n choice, never a tab. */
+const bg = (r: number, g: number, b: number) => `\x1b[48;2;${r};${g};${b}m`;
+export const CHIP_GREEN = bg(135, 169, 135), CHIP_AMBER = bg(196, 178, 138), CHIP_ROSE = bg(196, 116, 110), CHIP_MUTED = bg(56, 54, 54);
+export const chip = (color: string, s: string) => `${color}\x1b[38;2;24;22;22m\x1b[1m ${s} \x1b[22m\x1b[39m${UNBAND}`;
+/** A full-width faint rule: the header's third row and the footer's first, so both frame the same way. */
+export const hairline = (width: number) => faint('─'.repeat(Math.max(0, width)));
+/** A status line reads as a toast: green settled, amber in progress or asking, rose gone wrong. */
+export function toast(text: string): string {
+  if (/^error:|failed|no answer from|run stopped:|^local server: /i.test(text)) return rose(text);
+  if (/cancel|interrupted|already ended|refreshing|listing|starting run|press esc|not started|no prompt is sent/i.test(text)) return amber(text);
+  return green(text);
+}
 /**
  * Draws a rounded card around each section a heading opened, trimming blank lines at its edges
  * and leaving one blank line between cards. Lines outside any card pass through unchanged.
@@ -88,7 +105,7 @@ export function cards(lines: string[], outer: number, boxed = true, where: numbe
     }
     let title = truncateToWidth(open.title, Math.max(1, outer - 8)), right = open.right;
     if (width_(title) + width_(right) + 9 > outer) right = '';
-    const fill = Math.max(1, outer - 5 - width_(title) - (right ? width_(right) + 2 : 0) - 1);
+    const fill = Math.max(1, outer - 5 - width_(title) - (right ? width_(right) + 2 : 0));
     out.push(edge('╭─ ') + bold(accent(title)) + edge(` ${'─'.repeat(fill)}`) + (right ? ` ${muted(right)} ` : '') + edge('╮'));
     for (const [line, i] of body) { const t = truncateToWidth(line, outer - 4); where[i] = out.length; out.push(`${edge('│')} ${t}${' '.repeat(Math.max(0, outer - 4 - width_(t)))} ${edge('│')}`); }
     out.push(edge(`╰${'─'.repeat(Math.max(0, outer - 2))}╯`));

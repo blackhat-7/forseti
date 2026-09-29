@@ -9,15 +9,17 @@ import type { App, CatalogEntry } from './app.ts';
 import { comparisonReport, LABEL, STALL, SKILL_NAME, TIER_NAME, bar, outcome, scorecards } from './report.ts';
 import { DEFAULT_OPTIONS } from './config.ts';
 import { LOCAL } from './local.ts';
-import type { AuthInfo, ModelConfig, Progress, Run, RunOptions, Task } from './types.ts';
+import type { AuthInfo, ModelConfig, Run, RunOptions, Task } from './types.ts';
 export { terminalText, terminalReport } from './ui/kit.ts';
-import { terminalText, plain, terminalReport, BACKDROP, accent, teal, green, amber, rose, muted, faint, bold, theme, tabs, GRADED_ON, THINKING, JUDGE_FIELDS, LOCAL_ROW, TIMEOUTS, TURNS, PARALLEL, dot, CARD, pill, cards, keyHints, authLine, field, creditLine, count, tries, width_, pct, rateInk, MAX_TEXT, LIST_WIDTH, twoColumn, table } from './ui/kit.ts';
+import { terminalText, plain, terminalReport, BACKDROP, BAND, UNBAND, accent, teal, green, amber, rose, muted, faint, bold, theme, tabs, GRADED_ON, THINKING, JUDGE_FIELDS, LOCAL_ROW, TIMEOUTS, TURNS, PARALLEL, dot, CARD, pill, chip, CHIP_GREEN, CHIP_AMBER, CHIP_ROSE, CHIP_MUTED, hairline, toast, cards, keyHints, padTo, authLine, field, creditLine, count, tries, width_, pct, rateInk, MAX_TEXT, LIST_WIDTH, twoColumn, table } from './ui/kit.ts';
 import { comparisonPage, runLine } from './ui/board.ts';
 import { LiveWatch } from './ui/live.ts';
 import { LiveView, homeCard } from './ui/running.ts';
 
 /** Tab positions, in the order `tabs` names them and keys 1–6 select them. */
 const HOME = 0, LIVE = 1, MODELS = 2, TESTS = 3, RUNS = 4, SETTINGS = 5;
+/** The header's brand mark; `headerHits` needs its exact width to know where the pills start. */
+const BRAND = '◆ forseti';
 type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'localModels' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'leaderboard' | 'addModel' | 'addTest' | 'authFor' | 'setLocalUrl' | 'probeLocal'>;
 type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'cancel' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help' | 'local';
 
@@ -54,12 +56,14 @@ export class Dashboard implements Component, Focusable {
   private pendingG = false;
   private detailRun?: Run;
   private trialIndex = 0;
-  private progress?: Progress;
   private controller?: AbortController;
   private refreshing = false;
   private pendingOptions?: RunOptions;
   private preflightAuth: { label: string; auth: AuthInfo }[] = [];
   private options: RunOptions = { ...DEFAULT_OPTIONS };
+  /** `comparisonPage` re-ranks and re-formats every model on every call; a live run repaints up to
+   * 10x/s, so Home's mini chart is worth remembering until the board it was built from moves on. */
+  private boardCache?: { key: string; lines: string[] };
 
   /** Supplied by launchTui so panels fill the real window instead of a fixed 12 rows. */
   private rows: () => number;
@@ -224,6 +228,13 @@ export class Dashboard implements Component, Focusable {
       else this.persist(() => { judge.repeat = (judge.repeat % 5) + 1; });
     }
   }
+  /** The leaderboard's mini chart, memoised on the board's own identity: its id is always
+   * 'leaderboard' and only its `created` and trial count move when a new try lands on it. */
+  private miniChart(board: Run, width: number): string[] {
+    const key = `${board.created}:${board.trials.length}:${width}`;
+    if (this.boardCache?.key !== key) this.boardCache = { key, lines: comparisonPage([board], width, false, true) };
+    return this.boardCache.lines;
+  }
   private runIds(): string[] {
     const ids = this.app.runs.filter(r => this.selectedRuns.has(r.id)).map(r => r.id);
     const current = this.app.runs[this.selection[RUNS]!];
@@ -385,16 +396,15 @@ export class Dashboard implements Component, Focusable {
     const options = { ...this.pendingOptions, allowMetered, parallel: this.app.config.parallel ?? 1 };
     this.close();
     this.controller = new AbortController();
-    this.progress = undefined;
     this.lastFailure = '';
     this.message = 'Starting run… Esc cancels safely.';
     this.tab = LIVE;
     this.repaint();
     try {
-      const run = await this.app.run(options, p => {
+      const run = await this.app.run(options, () => {
         // A report can mean a new result on disk, so look now rather than within the second.
         this.watcher.poll(true);
-        this.progress = p; this.repaint();
+        this.repaint();
       }, this.controller.signal);
       // A reviewer that was switched on and scored nothing is worth saying out loud. Its
       // failures are per-trial notes by design, which is easy to miss when every trial otherwise
@@ -414,7 +424,7 @@ export class Dashboard implements Component, Focusable {
       this.message = `Run stopped: ${this.lastFailure}`;
       this.tab = HOME;
     }
-    finally { this.controller = undefined; this.progress = undefined; this.repaint(); }
+    finally { this.controller = undefined; this.repaint(); }
   }
   /** The keys that do something where the user is right now. Dialogs with a prompt carry their own. */
   private keys(): string {
@@ -449,24 +459,28 @@ export class Dashboard implements Component, Focusable {
     // Content sits inside a card: two columns of margin, then a border and a space on each side.
     // Under 60 columns borders would eat the content, so cards keep only their titles.
     const boxed = width >= 60, outer = Math.max(1, width - 4), inner = Math.max(1, boxed ? outer - 4 : outer);
+    // A dialog is a question or a form, not a page: it reads better as a centered card capped to a
+    // comfortable line length than stretched across an ultrawide terminal. Report and evidence are
+    // pages, not modals, and keep the full width.
+    const modal = this.dialog && this.dialog !== 'report' && this.dialog !== 'evidence';
+    const dialogOuter = modal && boxed ? Math.min(76, outer) : outer;
+    const dialogInner = Math.max(1, boxed ? dialogOuter - 4 : dialogOuter);
     const lines: string[] = [];
     const row = (text = '') => lines.push(text);
     const wrap = (text: string, w: number, paint: (s: string) => string = s => s) =>
       new Text(terminalText(text), 0, 0).render(Math.max(12, w)).map(paint);
     const prose = (text: string, paint: (s: string) => string = s => s) =>
-      lines.push(...wrap(text, Math.min(inner, MAX_TEXT), paint));
+      lines.push(...wrap(text, Math.min(this.dialog ? dialogInner : inner, MAX_TEXT), paint));
     // Detail panes wrap to their own column when side by side, to the full width when stacked.
     const detailWidth = Math.min(inner >= LIST_WIDTH + 32 ? inner - LIST_WIDTH - 2 : inner, MAX_TEXT);
     const spreadAt = (left: string, right: string, w: number) => {
       const gap = w - width_(left) - width_(right);
       return gap < 2 ? left : `${left}${' '.repeat(gap)}${right}`;
     };
-    const spread = (left: string, right: string) => spreadAt(left, right, inner);
     // A heading opens a card; the frame is drawn around the section once the body is complete.
     const head = (title: string, right = '') => row(`${CARD}${title}\u0000${right}`);
 
     // While a run is live the header carries it, so it is never out of sight on another tab.
-    const p = this.progress;
     const summary = this.controller || this.live
       ? `${this.controller?.signal.aborted ? 'stopping' : 'running'} · ${this.live?.trials.length ?? 0}/${this.live?.planned ?? '?'}`
       : `${count(this.models().length, 'model')} · ${count(this.enabledTasks().length, 'test')} · ${tries(this.options.repeat)}`;
@@ -475,10 +489,10 @@ export class Dashboard implements Component, Focusable {
     const pills = tabs.map((t, i) => (i === this.tab ? pill(` ${t} `) : muted(` ${t} `))).join(' ');
     const status = width >= 72 ? (busy ? green('● ') + accent(summary) : faint(summary)) : '';
     row();
-    row(spreadAt(`${bold(accent('forseti'))}  ${pills}`, status, outer));
-    row();
+    row(spreadAt(`${bold(accent(BRAND))}  ${pills}`, status, outer));
+    row(hairline(outer));
 
-    if (this.dialog) this.renderDialog(inner, row, prose, head);
+    if (this.dialog) this.renderDialog(dialogInner, row, prose, head, () => lines.length);
     else if (this.tab === LIVE) {
       const view = this.liveView.render({ watch: this.watcher, width: outer, boxed, rows: this.bodyRows(), busy, stopping: Boolean(this.controller?.signal.aborted), last: this.app.runs[0], now: Date.now() });
       // The view counts x from the margin; a click target is counted from a card's content.
@@ -495,18 +509,18 @@ export class Dashboard implements Component, Focusable {
       row();
       head('Leaderboard', board ? 'L for the full page' : '');
       row();
-      if (board) comparisonPage([board], inner, false, true).forEach(line => row(line));
+      if (board) this.miniChart(board, inner).forEach(line => row(line));
       else prose('No finished tries yet. Press r to run the suite.', faint);
       row();
-      // What r would do, in one line; the keys to change it are in the footer.
+      // What r would do, then what the last run showed, each its own card.
       head('Next run', 'r to review');
-      row();
       prose(`${count(enabled.length, 'model')} × ${count(this.enabledTasks().length, 'test')} × ${tries(this.options.repeat)} · ${this.options.lane} lane · ${this.options.timeout}s · ${this.options.maxTurns} turns · cache ${this.options.cache ? 'on' : 'off'} · ${this.app.config.parallel ?? 1} at once`, muted);
       prose('Tries already on record under the same conditions are skipped.', faint);
       row(creditLine([
         ...enabled.map(m => ({ label: plain(m.label), auth: this.app.authFor(m) })),
         ...(this.app.config.judge.enabled ? [{ label: 'reviewer', auth: this.app.authFor({ ...this.app.config.judge, id: 'judge', label: 'judge', enabled: true }) }] : []),
       ]));
+      if (this.app.runs[0]) { head('Last run', '5 for every run'); row(runLine(this.app.runs[0])); }
       if (this.lastFailure) {
         row();
         row(rose('Last attempt produced no run'));
@@ -549,15 +563,22 @@ export class Dashboard implements Component, Focusable {
       row();
       head('Settings', judge.enabled ? 'design reviewed' : 'design not scored');
       row();
+      // A row is banded and clickable exactly like a list row; padded to the same no-op width so
+      // the band's closing colour code is never at risk of being cut by twoColumn's truncation.
+      // Offsets of each selectable row within the `left` column built below: the four judge fields
+      // land at indices 2–5, the address row at 11.
+      const settingsWidth = LIST_WIDTH - 3, settingsAt = [2, 3, 4, 5, 11];
+      const settingsRow = (index: number, text: string) => {
+        const selected = index === this.selection[SETTINGS];
+        this.pending.push({ at: lines.length + settingsAt[index]!, x0: 0, x1: settingsWidth, act: clicks => { this.selection[SETTINGS] = index; if (clicks > 1) this.key('\r'); } });
+        return selected ? `${BAND}${padTo(text, settingsWidth)}${UNBAND}` : text;
+      };
       twoColumn([
         muted('Design reviewer'), '',
-        ...JUDGE_FIELDS.map((label, i) => {
-          const marker = i === this.selection[SETTINGS] ? accent('›') : ' ';
-          return `${marker} ${muted(label)}${' '.repeat(Math.max(2, 12 - label.length))}${values[i]}`;
-        }), '',
+        ...JUDGE_FIELDS.map((label, i) => settingsRow(i, `${i === this.selection[SETTINGS] ? accent('›') : ' '} ${muted(label)}${' '.repeat(Math.max(2, 12 - label.length))}${values[i]}`)), '',
         judge.enabled ? authLine(auth) : faint('Nothing is sent while the reviewer is off.'), '',
         muted('Local server'), '',
-        `${this.selection[SETTINGS] === LOCAL_ROW ? accent('›') : ' '} ${muted('Address')}${' '.repeat(Math.max(2, 12 - 'Address'.length))}${local ? accent(plain(local)) : faint('not set')}`,
+        settingsRow(LOCAL_ROW, `${this.selection[SETTINGS] === LOCAL_ROW ? accent('›') : ' '} ${muted('Address')}${' '.repeat(Math.max(2, 12 - 'Address'.length))}${local ? accent(plain(local)) : faint('not set')}`),
         faint(!local ? 'space to point at llama-server, Ollama, LM Studio…' : this.app.localModels ? `${count(this.app.localModels.length, 'model')} listed · a on Models adds one` : 'space to change · a on Models lists its models'),
       ], [
         muted('What this changes'), '',
@@ -594,23 +615,26 @@ export class Dashboard implements Component, Focusable {
       row();
       head('Runs', `${this.selectedRuns.size} selected`);
       row();
-      this.listRows(this.app.runs.map(r => `${dot(this.selectedRuns.has(r.id))} ${runLine(r)}`), lines.length, Math.max(4, this.bodyRows() - detail.length - 10)).forEach(row);
+      this.listRows(this.app.runs.map(r => `${dot(this.selectedRuns.has(r.id))} ${runLine(r)}`), lines.length, Math.max(4, this.bodyRows() - detail.length - 10), inner).forEach(row);
       if (this.app.runs.length) head('Selected run');
       detail.forEach(row);
     }
     const where: number[] = [];
-    const body = cards(lines.splice(3), outer, boxed, where);
+    // A dialog's card is narrower than the page; centering it means indenting every line it drew,
+    // which the trailing pad in the final line-assembly step below balances on the right for free.
+    const centered = Math.max(0, Math.floor((outer - dialogOuter) / 2));
+    const body = cards(lines.splice(3), dialogOuter, boxed, where).map(l => (centered ? ' '.repeat(centered) + l : l));
     lines.push(...body);
     // Clicks land on screen columns: two columns of margin, then a card's border and its space.
-    const indent = boxed ? 4 : 2;
+    const indent = (boxed ? 4 : 2) + centered;
     this.hits = [
       ...this.headerHits(),
       ...this.pending.flatMap(h => (where[h.at - 3] === undefined ? [] : [{ region: 'body' as const, line: where[h.at - 3]!, x0: h.x0 + indent, x1: h.x1 + indent, act: h.act }])),
     ];
     const footerStart = lines.length;
-    row();
+    row(hairline(outer));
     // Long provider errors remain terminal-safe; the line appears only when there is something to say.
-    if (this.message) row(muted(truncateToWidth(plain(this.message), outer)));
+    if (this.message) row(toast(truncateToWidth(plain(this.message), outer)));
     // The same two keys do the same thing at every level, so the hint names both every time.
     const leave = this.dialog ? (this.typing() ? `${accent('esc')} ${faint('back')}` : `${accent('esc · q')} ${faint('back')}`)
       : this.tab === LIVE && this.liveView.zoomed ? `${accent('esc · q')} ${faint('back')}`
@@ -624,7 +648,7 @@ export class Dashboard implements Component, Focusable {
   }
   /** Each tab's pill in the header row, where `draw` puts it: margin, name, two spaces, then pills one space apart. */
   private headerHits(): typeof this.hits {
-    let x = 2 + 'forseti'.length + 2;
+    let x = 2 + width_(BRAND) + 2;
     return tabs.map((t, i) => {
       const hit = { region: 'header' as const, line: 1, x0: x, x1: x + t.length + 2, act: () => { this.tab = i; } };
       x = hit.x1 + 1;
@@ -641,25 +665,37 @@ export class Dashboard implements Component, Focusable {
       ...brief.slice(0, 8), ...(brief.length > 8 ? [faint('…')] : []),
     ];
   }
-  /** The rows of a list that fit, pushed from body line `at`; a click selects a row and a double click opens it. */
-  private listRows(items: string[], at: number, visible = Math.max(6, this.bodyRows() - 8)): string[] {
+  /**
+   * The rows of a list that fit, pushed from body line `at`; a click selects a row and a double
+   * click opens it. `width` is the exact content width the row is truncated to downstream (the
+   * card body, or the list column inside `twoColumn`), so the band can be padded to it and land
+   * on a no-op truncation instead of risking its closing colour code being cut away.
+   */
+  private listRows(items: string[], at: number, visible = Math.max(6, this.bodyRows() - 8), width = LIST_WIDTH - 3): string[] {
     const selected = Math.min(this.selection[this.tab]!, Math.max(0, items.length - 1));
     this.selection[this.tab] = selected;
     const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), items.length - visible));
     const tab = this.tab;
     for (let k = 0; k < Math.min(visible, items.length - Math.max(0, start)); k++) {
-      this.pending.push({ at: at + k, x0: 0, x1: LIST_WIDTH, act: clicks => { this.selection[tab] = Math.max(0, start) + k; if (clicks > 1) this.key('\r'); } });
+      this.pending.push({ at: at + k, x0: 0, x1: width, act: clicks => { this.selection[tab] = Math.max(0, start) + k; if (clicks > 1) this.key('\r'); } });
     }
-    // A single accent bar marks the cursor; the dot inside each row carries enabled/selected state.
+    // A subtle band plus an accent bar marks the cursor; the dot inside each row carries enabled/selected state.
     const rows = items.slice(Math.max(0, start), Math.max(0, start) + visible)
-      .map((item, i) => (i + Math.max(0, start) === selected ? `${accent('▌')} ${item}` : `  ${item}`));
+      .map((item, i) => (i + Math.max(0, start) === selected ? `${BAND}${padTo(`${accent('▌')} ${item}`, width)}${UNBAND}` : `  ${item}`));
     return items.length > visible ? [...rows, faint(`  ${selected + 1} / ${items.length}   ↑↓`)] : rows;
   }
   private renderAuth(auth: AuthInfo, row: (text?: string) => void, prose: (text: string, paint?: (s: string) => string) => void): void {
     row(authLine(auth));
     prose(auth.note, faint);
   }
-  private renderDialog(width: number, row: (text?: string) => void, prose: (text: string, paint?: (s: string) => string) => void, head: (title: string, right?: string) => void): void {
+  private renderDialog(width: number, row: (text?: string) => void, prose: (text: string, paint?: (s: string) => string) => void, head: (title: string, right?: string) => void, at: () => number): void {
+    // A y/n prompt as two clickable chips: y stands out since it is the one that acts, n is quiet.
+    const choice = (yes: string, no: string) => {
+      const yText = `y ${yes}`, noText = `n ${no}`, yWidth = width_(yText) + 2, noWidth = width_(noText) + 2;
+      this.pending.push({ at: at(), x0: 0, x1: yWidth, act: () => this.dialogKey('y') });
+      this.pending.push({ at: at(), x0: yWidth + 2, x1: yWidth + 2 + noWidth, act: () => this.dialogKey('n') });
+      row(`${chip(CHIP_AMBER, yText)}  ${chip(CHIP_MUTED, noText)}`);
+    };
     row();
     if (this.dialog === 'picker') {
       head('Add model', 'filter the pinned catalog');
@@ -698,7 +734,7 @@ export class Dashboard implements Component, Focusable {
       prose(total ? `${tries(done)} finished and ${done === 1 ? 'is' : 'are'} kept. The other ${total - done} will not run.` : 'Tries that finished are kept. The rest will not run.');
       prose('Starting the same run again later makes only the missing tries.', faint);
       row();
-      row(amber('y') + faint(' cancel the run   ') + amber('n') + faint(' keep it running'));
+      choice('cancel run', 'keep running');
     } else if (this.dialog === 'delete') {
       head('Remove from configuration?');
       row();
@@ -706,7 +742,7 @@ export class Dashboard implements Component, Focusable {
       row();
       prose('Saved run evidence is kept. Test files are not deleted.', faint);
       row();
-      row(amber('y') + faint(' remove   ') + amber('n') + faint(' keep'));
+      choice('remove', 'keep');
     } else if (this.dialog === 'preflight') {
       const opts = this.pendingOptions!;
       const metered = this.preflightAuth.some(m => ['metered', 'unknown'].includes(m.auth.billing));
@@ -757,9 +793,9 @@ export class Dashboard implements Component, Focusable {
           chrome = 7;
           if (trial) {
             const state = outcome(trial.status);
-            const chip = state.kind === 'pass' ? green('PASS') : state.kind === 'scored' ? amber('SCORED') : rose('NOT RUN');
+            const stateChip = chip(state.kind === 'pass' ? CHIP_GREEN : state.kind === 'scored' ? CHIP_AMBER : CHIP_ROSE, state.kind === 'pass' ? 'PASS' : state.kind === 'scored' ? 'SCORED' : 'NOT RUN');
             row();
-            row(`${chip}  ${bold(plain(trial.model))}${muted(' / ')}${plain(trial.task)}${faint(`  try ${trial.repetition}`)}`);
+            row(`${stateChip}  ${bold(plain(trial.model))}${muted(' / ')}${plain(trial.task)}${faint(`  try ${trial.repetition}`)}`);
             // "not run" never means a wrong answer: those trials are excluded from correctness. A
             // stall is the model running out of a budget sized for the task, so it is scored.
             row(faint(state.kind === 'not-run' ? `${state.text} — excluded from scores, not counted against the model` : STALL.includes(trial.status) ? state.text : `${trial.checks.filter(c => c.passed).length} of ${trial.checks.length} checks passed`));
