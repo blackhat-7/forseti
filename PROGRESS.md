@@ -31,8 +31,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **`parallel` in forseti.json sets tries at once (default 1).** Local-server models still run one at a time.
 - **Run local thinking models with `--tokens 32768`.** At the default 4096, Qwen at xhigh fills a turn with thinking and stops at turn 2.
 - **If `npm test` fails on `fingerprint.lock`, you changed how tries run.** Only `src/trial.ts` and its imports count, without comments or layout. Record it with `npm run fingerprint -- "why"` only if intended. A Claude Code update also resets Claude tries.
-- **Parallel Opus subagents drain the plan's 5-hour window fast.** Four here plus four in another project's session took it from 70% to 100% in about 30 minutes; the benchmark trials were ~2% of that. Run agents one at a time, or on Sonnet.
-- **Pilot with Haiku and Sonnet first; run Opus only where both fail.** Opus is the costliest candidate.
+- **Parallel Opus subagents drain the plan's 5-hour window fast.** Four here plus four in another project's session took it from 70% to 100% in about 30 minutes; the benchmark trials were ~2% of that. Run agents one at a time, or on Sonnet. Pilot with Haiku and Sonnet first; run Opus only where both fail.
 - **A prompt that lists expected behaviours makes a bug hunt easy.** It points at every defect.
 - **The Linux sandbox denies `exec` of anything, even Python.** A grader that needs a subprocess fails with `PermissionError`.
 - **`--safe-mode` disables every MCP server.** The Claude Code lane uses `--restricted`. Do not switch back.
