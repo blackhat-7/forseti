@@ -1022,6 +1022,11 @@ test('the leaderboard keeps only tries recorded under today\'s conditions', () =
   assert.notEqual(modelKey(piRun, local), modelKey(older, local), 'but two Pi setups with different output limits are different entries');
   assert.equal(conditionsKey(older, 'a'), conditionsKey({ ...older, environment: { os: 'linux 7.3.0 x64' } }, 'a'), 'a kernel update is not a new condition');
   assert.notEqual(modelKey(older, opus), modelKey(older, { ...opus, thinking: 'high' }), 'thinking is part of the model');
+  // A server alias such as `-a local` names every model the same; the file it loaded tells them apart.
+  const alias = m('local', 'local');
+  const served = (id: string, created: string, file: string) => ({ ...base(id, created, 'H', [alias], [['local', 'a', 'passed']]), environment: { os: 'linux 7.2.6 x64', catalog: JSON.stringify([{ local: 'local', file }]) } });
+  const swapped = leaderboard([served('r5', '2026-02-03', 'Qwen-A'), served('r6', '2026-02-04', 'Qwen-B')], suite, today)!;
+  assert.deepEqual(swapped.models.map(x => x.model).sort(), ['local/Qwen-A', 'local/Qwen-B'], 'two files behind one alias are two models');
   // The suite decides tiers and membership: a relabelled task moves, a removed one leaves.
   const now = leaderboard([older, newer], [{ ...suite[0]!, tier: 'standard' }], today)!;
   assert.deepEqual(now.tasks.map(t => [t.id, t.tier]), [['a', 'standard']]);

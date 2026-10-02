@@ -273,9 +273,14 @@ export function modelKey(run: Pick<Run, 'environment' | 'options'>, model: Model
   // A run records each lane's client flags; runs from before mixed lanes recorded only their one lane's.
   const flags = (claude ? e.claudeFlags : e.piFlags) ?? e.agentFlags ?? '';
   // Claude Code's release changes its prompt and tools; a local server's context changes what fits.
-  const context = (() => { try { return (JSON.parse(e.catalog ?? '[]') as { local?: string; contextWindow?: number }[]).find(c => c.local === model.model)?.contextWindow; } catch { return undefined; } })();
-  const release = claude ? `/cc${e.claudeVersion ?? '?'}` : context ? `/ctx${context}` : '';
-  return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(flags).slice(0, 12)}${release}`;
+  const local = localEntry(run, model);
+  const release = claude ? `/cc${e.claudeVersion ?? '?'}` : local?.contextWindow ? `/ctx${local.contextWindow}` : '';
+  // Behind a server alias, the file it loaded; recorded only then, so older local tries keep their key.
+  const file = local?.file ? `/${local.file}` : '';
+  return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(flags).slice(0, 12)}${release}${file}`;
+}
+function localEntry(run: Pick<Run, 'environment'>, model: ModelConfig): { contextWindow?: number; file?: string } | undefined {
+  try { return (JSON.parse(run.environment.catalog ?? '[]') as { local?: string; contextWindow?: number; file?: string }[]).find(c => c.local === model.model); } catch { return undefined; }
 }
 /** How a try's checks were made: the grading code and the task's own grader. A regraded try carries the key it was regraded under. */
 export function gradingKey(run: Pick<Run, 'tasks' | 'gradingHash' | 'harnessHash'>, taskId: string): string {
@@ -306,7 +311,9 @@ export function leaderboard(runs: Run[], suite: Pick<Task, 'id' | 'title' | 'tie
     const m = run.models.find(x => x.id === t.model)!;
     if (m.provider === 'control' || !FINISHED.includes(t.status) || !run.tasks.some(x => x.id === t.task) || wanted.get(t.task) !== conditionsKey(run, t.task) || graded.get(t.task) !== gradedKey(run, t)) continue;
     const id = modelKey(run, m), pair = `${id} ${t.task}`, n = (tries.get(pair) ?? 0) + 1;
-    if (!models.has(id)) models.set(id, { ...m, id });
+    // Two files served under one alias share a model name; the board must not pool them.
+    const file = localEntry(run, m)?.file;
+    if (!models.has(id)) models.set(id, { ...m, id, ...(file ? { model: `${m.model}/${file}` } : {}) });
     tries.set(pair, n);
     trials.push({ ...t, model: id, repetition: n });
   }

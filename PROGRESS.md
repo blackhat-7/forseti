@@ -3,7 +3,7 @@
 Handoff note. Rewritten at the end of every session, never appended to. Cap 40 lines.
 Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
-**Last session:** 2026-09-30
+**Last session:** 2026-10-03
 
 ## State
 
@@ -35,6 +35,6 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **A prompt that lists expected behaviours makes a bug hunt easy.** It points at every defect.
 - **The Linux sandbox denies `exec` of anything, even Python.** A grader that needs a subprocess fails with `PermissionError`.
 - **`--safe-mode` disables every MCP server.** The Claude Code lane uses `--restricted`. Do not switch back.
-- **`forseti.json` holds the local server address; never commit it.**
+- **`forseti.json` holds the local server address; never commit it.** Model `local-local` follows whatever the aliased server loaded (`src/runner.ts` `loadedFile`); no renaming needed.
 - **Running `python3` against a fixture writes `__pycache__` into it.** Always `python3 -B`.
 - `TMPDIR="$PWD/.tmp"` is required for `npm ci` and `npm run test:terminal`. `CLAUDE.md` is a symlink to `AGENTS.md`; edit `AGENTS.md`.

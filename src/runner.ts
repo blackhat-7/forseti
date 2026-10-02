@@ -10,7 +10,7 @@ export { gradeClosure } from './fingerprint.ts';
 import { DEFAULT_OPTIONS, loadSuite, selectedModels, validateOptions } from './config.ts';
 import { MAX_ENTRIES, MAX_SUITE_BYTES, atomicJson, files, hash, inside, localDir, put } from './files.ts';
 import { makeJudgeCall, type JudgeCall } from './judge.ts';
-import { listLocalModels, LOCAL } from './local.ts';
+import { listLocalModels, LOCAL, shortName } from './local.ts';
 import { SANDBOX, checkSandbox, pythonExecutable } from './sandbox.ts';
 import { FINISHED, STALL, conditionsKey, gradedKey, gradingKey, modelKey, trialKey } from './report.ts';
 import { applicableDimensions, gradeSubmission, loadGrader, rejectArtifacts, validateChecks } from './grade.ts';
@@ -83,6 +83,17 @@ export async function inParallel<J>(jobs: J[], limit: number, serial: (job: J) =
   };
   await Promise.all(Array.from({ length: Math.max(1, limit) }, worker));
 }
+/**
+ * The file llama-server actually loaded, from `/props`. Behind an alias such as `-a local` the
+ * model name says nothing, so this is what tells two models apart. Other servers have no `/props`.
+ */
+async function loadedFile(url: string): Promise<string | undefined> {
+  try {
+    const response = await fetch(`${url}/props`, { signal: AbortSignal.timeout(5000) });
+    const path = response.ok ? ((await response.json()) as { model_path?: unknown }).model_path : undefined;
+    return typeof path === 'string' && path ? shortName(path) : undefined;
+  } catch { return undefined; }
+}
 export async function runBenchmark(root: string, config: Config, options: RunOptions, onProgress: (p: Progress) => void = () => {}, signal = new AbortController().signal, makeJudge: typeof makeJudgeCall = makeJudgeCall): Promise<Run> {
   validateOptions(options);
   const models = selectedModels(config, options.models);
@@ -118,11 +129,16 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     // Read once per run: the local server's real context size, recorded below with the model.
     const contexts: Record<string, number> = models.some(m => m.provider === LOCAL)
       ? Object.fromEntries((await listLocalModels(config.local.url)).flatMap(m => (m.contextWindow ? [[m.id, m.contextWindow]] : []))) : {};
+    // Behind an alias the loaded file is the model's identity and name, so swapping models on the
+    // server never reuses the old model's tries, and nobody has to rename anything.
+    const loaded = models.some(m => m.provider === LOCAL) ? await loadedFile(config.local.url) : undefined;
+    const fileOf = (m: ModelConfig) => (m.provider === LOCAL && loaded && loaded !== shortName(m.model) ? loaded : undefined);
+    const named = models.map(m => (fileOf(m) ? { ...m, label: `${fileOf(m)} · local` } : m));
     const harness = harnessOf(root), now = conditionsNow(root, config, options, pythonVersion);
     const taskEntries = tasks.map(t => now.tasks.find(e => e.id === t.id)!);
     // Each model runs in its own family's lane, so one run can hold both; a model's client flags are those of its lane.
     const environment = { node: process.version, ...now.environment, sandbox: SANDBOX, pi: '0.85.1', agent: lanes.size > 1 ? 'mixed' : lanes.has('claude-code') ? 'claude-code' : 'pi',
-      claudeFlags: claudeCodeArgs('MODEL', options.maxTurns).join(' '), piFlags: 'pi-agent-core 0.85.1', ...(lanes.has('claude-code') ? { claudeVersion: claudeVersion() } : {}), catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null } : catalogModels.getModel(m.provider, m.model))) };
+      claudeFlags: claudeCodeArgs('MODEL', options.maxTurns).join(' '), piFlags: 'pi-agent-core 0.85.1', ...(lanes.has('claude-code') ? { claudeVersion: claudeVersion() } : {}), catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null, ...(fileOf(m) ? { file: fileOf(m) } : {}) } : catalogModels.getModel(m.provider, m.model))) };
     // Only the tries not already on record under these exact conditions are run; see trialKey.
     const draft = { ...now, tasks: taskEntries, environment };
     const done = new Map<string, number>();
@@ -131,7 +147,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
       const key = trialKey(past, t);
       done.set(key, (done.get(key) ?? 0) + 1);
     }
-    const jobs = schedule(models, tasks, options.repeat, options.seed)
+    const jobs = schedule(named, tasks, options.repeat, options.seed)
       .filter(j => j.model.provider === 'control' || j.repetition > (done.get(`${modelKey(draft, j.model)} ${conditionsKey(draft, j.task.id)}`) ?? 0));
     if (!jobs.length) throw new Error(`Nothing to run: every selected model already has ${options.repeat} finished tries of every selected task under these exact conditions. See the leaderboard, or pass --fresh to run them again.`);
     const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`;
@@ -147,7 +163,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     const run: Run = {
       schema: 1, id, created: new Date().toISOString(), status: 'running', suite: suite.id,
       suiteHash: hash(contents), harnessHash: draft.harnessHash, gradingHash: draft.gradingHash, environment, judge,
-      options, models, tasks: taskEntries, planned: jobs.length, trials: [],
+      options, models: named, tasks: taskEntries, planned: jobs.length, trials: [],
     };
     atomicJson(runDir, 'run.json', run);
     atomicJson(runDir, 'experiment.json', { system: SYSTEM_PROMPT, config, options, schedule: jobs.map(j => ({ model: j.model.id, task: j.task.id, repetition: j.repetition })), harnessHash: run.harnessHash, suiteHash: run.suiteHash });
