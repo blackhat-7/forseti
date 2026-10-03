@@ -178,8 +178,9 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export function sliceCard<T extends Scorecard>(card: T, ids: Set<string>): T {
   const tasks = card.tasks.filter(t => ids.has(t.id));
   // Every task counts equally inside a slice: a tier slice is one tier, and a skill row reads as
-  // the share of its tasks solved.
-  return { ...card, tasks, weighting: 'task', ...headline(tasks, 'task') };
+  // the share of its tasks solved. The card's shared levels do not apply: a slice is scored on its
+  // own tasks, and keeping them left a basic slice with no task to estimate its error from.
+  return { ...card, tasks, weighting: 'task', levels: undefined, ...headline(tasks, 'task') };
 }
 type RunTask = Run['tasks'][number];
 // Rows come from the task list, never from one card, so every card gets the same rows in the same order.

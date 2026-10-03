@@ -13,7 +13,7 @@ import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
-import { byTier, duration, timing, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
+import { byTier, duration, timing, sliceCard, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
 import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, regrade, gradeClosure, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -1061,6 +1061,20 @@ test('the overall score uses only the difficulty levels every model has tries on
   assert.deepEqual(cards.map(c => [c.label, c.score, c.levels]), [['wide', 0, ['hard']], ['narrow', 0, ['hard']]], 'a level only one model ran cannot lift its overall score');
   assert.equal(levelsNote(cards), 'Hard only: not every model has tries on every level');
   assert.equal(byTier(cards[0]!, tasks)[0]!.rate, 1, 'the level itself is still shown');
+});
+
+test('a difficulty slice is ranked on its own tasks, even when the overall score uses shared levels only', () => {
+  const m = (id: string): ModelConfig => ({ id, label: id, provider: 'claude-code', model: id, auth: 'cli', enabled: true, thinking: 'off' });
+  const tasks = [{ id: 'b', title: 'B', hash: 'b', tier: 'basic' as const }, { id: 'h', title: 'H', hash: 'h', tier: 'hard' as const }];
+  const tri = (model: string, task: string, passed: boolean) => ({ ...blankTrial(`${model}-${task}`, m(model), { id: task } as never, 1), status: passed ? 'passed' as const : 'failed' as const, checks: [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }] });
+  // Two models ran the basic task; `narrow` did not, so the overall score keeps to hard tasks.
+  const run: Run = { schema: 1, id: 'r', created: '2026-01-01', status: 'completed', suite: 's', suiteHash: 's', harnessHash: 'h', environment: {}, judge: null,
+    options: { ...DEFAULT_OPTIONS }, models: [m('a'), m('b'), m('narrow')], tasks, planned: 5,
+    trials: [tri('a', 'b', true), tri('a', 'h', false), tri('b', 'b', false), tri('b', 'h', false), tri('narrow', 'h', false)] };
+  const { cards } = scorecards([run]);
+  assert.deepEqual(cards[0]!.levels, ['hard']);
+  assert.notEqual(scoreError(sliceCard(cards[0]!, new Set(['b']))), null, 'the basic slice has its own error');
+  assert.doesNotThrow(() => slicePlaces(cards, new Set(['b'])), 'ranking the basic slice used to crash the leaderboard');
 });
 
 test('a run makes up to N tries at once, and local-server tries one at a time', async () => {
