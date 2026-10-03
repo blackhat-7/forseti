@@ -32,7 +32,7 @@ const help = `FORSETI  ·  evidence-first LLM benchmarks
   npm start -- tests add ID --prompt 'Task' --expect '{"answer":42}'
   npm start -- tests enable|disable|remove|restore ID
   npm start -- run [--models ID,ID] [--tests ID,ID] [--repeat 2] [--seed 42]
-                  [--lane tools|prompt] [--timeout 180] [--turns 12] [--tokens 4096]
+                  [--lane tools|prompt] [--timeout 900] [--turns 12] [--tokens 4096]
                   [--allow-metered] [--no-cache] [--fresh] [--parallel N]
   npm start -- parallel N                     How many tries a run makes at once (default 1)
   npm start -- leaderboard                    Every comparable finished try, all runs

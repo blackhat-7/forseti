@@ -8,16 +8,16 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 ## State
 
 - **31 tasks.** `hard` 6 (`due-dates`, `sheet-eval`, `lock-refresh`, and three ops tasks) · `standard` 14 · `basic` 11. A task may set its own `turns`/`timeout`; the effective budget is the larger of the run's and the task's.
-- **Scoring:** running out of a task's turn or time budget counts as unsolved (auth, quota, crash, cancel stay `not-run`). Each difficulty level weighs equally.
+- **Scoring:** correctness is the headline; speed is shown apart (`Typical solve`, `Time per correct result`), never ranked. Default cap 900 s stops stuck tries; running out of turns or time still counts as unsolved. Each difficulty level weighs equally.
 - **The rebuilt hard tier separates, on one try each.** `lock-refresh` and `sheet-eval`: Haiku ✗, Sonnet ✗, Opus ✓. `crew-schedule` and `log-query`: Haiku ✗, Sonnet ✓. Detail in `docs/transcript-research.md`. Not yet a measurement.
-- **The leaderboard is strict.** Only tries under today's fingerprints and default settings count. It holds Claude Sonnet 5.5 and Haiku 4.5 (56 tries each), Swift-Qwen3.8-27B (28, 63%) and Qwen3.6-35B-A3B (64, 48%). A Pi model's card names its output-token limit; limits never pool.
+- **The leaderboard is strict, and nearly empty since the 900 s cap (2026-10-03).** Only tasks with their own 900–1800 s budget kept their tries. Rerun each model to refill it; Claude reruns spend plan quota, so ask first. A Pi model's card names its output-token limit.
 - **A run only makes missing tries.** Same model + same task and harness submission fingerprints + same settings = already done; `--fresh` forces a rerun. A grading-only change is regraded from saved files (`npm start -- regrade`, also run before every run).
 - **Four production-ops tasks on a simulated estate** (`checkout-hotfix`, `subscription-repair`, `bucket-residency`, `service-web`). Each try gets a variant (seed = try − 1) and reports its harm. A task's `world` module answers gcloud/kubectl/psql/gsutil in-process; nothing real is reachable, and the model is not told. Engine: `suites/personal/private/ops/`. Contract: `docs/suite-contract.md#world-tasks`. Pilots are stale after the scenario rework; the last Qwen run (before it) showed 0 simulation tells, down from 96.
 - Battery on Linux: `npm run check` clean · `npm test` **92/92** · `npm run test:suite` passes · `test:terminal`, `test:judge` not run this session.
 
 ## Done this session
 
-- Local models behind a server alias are named by the file the server loaded. Leaderboard cards keep output-token limits apart. Ran Qwen3.6-35B-A3B on every task.
+- Local models behind a server alias are named by the file the server loaded. Board reloads after each finished try. First tries of every task run before any second try. 180 s → 900 s cap, speed columns. Strata (Flash-Next IQ3_S) can crash mid-run: its engine hit an out-of-range assertion once.
 
 ## Next
 

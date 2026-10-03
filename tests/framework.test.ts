@@ -13,7 +13,7 @@ import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
-import { byTier, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
+import { byTier, duration, timing, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
 import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, regrade, gradeClosure, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -1035,6 +1035,19 @@ test('the leaderboard keeps only tries recorded under today\'s conditions', () =
   // The suite decides tiers and membership: a relabelled task moves, a removed one leaves.
   const now = leaderboard([older, newer], [{ ...suite[0]!, tier: 'standard' }], today)!;
   assert.deepEqual(now.tasks.map(t => [t.id, t.tier]), [['a', 'standard']]);
+});
+
+test('speed is reported apart from correctness: time to solve and time per correct result', () => {
+  const m: ModelConfig = { id: 'q', label: 'q', provider: 'local', model: 'q', auth: 'none', enabled: true, thinking: 'off' };
+  const tri = (status: Trial['status'], passed: boolean | null, wallMs: number) => ({ ...blankTrial(`q-${wallMs}`, m, { id: 'a' } as never, 1), status, wallMs,
+    checks: passed === null ? [] : [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }] });
+  // Two solved (60 s, 120 s), one wrong (30 s), one out of time (900 s), one lost to the provider.
+  const trials = [tri('passed', true, 60_000), tri('passed', true, 120_000), tri('failed', false, 30_000), tri('timeout', null, 900_000), tri('provider_error', null, 5_000)];
+  assert.deepEqual(timing(trials), { solveMs: 90_000, perCorrectMs: (60_000 + 120_000 + 30_000 + 900_000) / 2 }, 'a stall costs time, a provider failure does not');
+  assert.deepEqual(timing([tri('failed', false, 30_000)]), { solveMs: null, perCorrectMs: null }, 'nothing solved, no time per correct result');
+  assert.deepEqual([duration(45_000), duration(150_000), duration(7_200_000), duration(null)], ['45 s', '2.5 min', '2.0 h', 'n/a']);
+  const card = scorecard('q', trials, [{ id: 'a', title: 'A' }], 5);
+  assert.equal(card.perCorrectMs, 555_000);
 });
 
 test('the overall score uses only the difficulty levels every model has tries on', () => {

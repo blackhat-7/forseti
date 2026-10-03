@@ -1,5 +1,5 @@
 import { Text, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
-import { LABEL, SKILL_NAME, TIER_NAME, bar, byCapability, byTier, gate, harnesses, levelsNote, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from '../report.ts';
+import { LABEL, SKILL_NAME, TIER_NAME, bar, duration, byCapability, byTier, gate, harnesses, levelsNote, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from '../report.ts';
 import type { Run } from '../types.ts';
 import { CARD, MAX_TEXT, SERIES, amber, bold, count, faint, green, muted, nick, pct, plain, rateInk, rose, runWhen, statusInk, table, terminalText, width_ } from './kit.ts';
 
@@ -39,7 +39,8 @@ export function comparisonPage(runs: Run[], width: number, everyTask: boolean, c
     // A rerun spread means nothing for a control, or for a model not ranked yet.
     const error = card.synthetic || rank === null ? null : scoreError(card), graded = card.tasks.filter(t => t.rate !== null).length;
     row(barLine(i, muted(String(rank ?? '–').padStart(2)) + '  ', card.score, faint(error === null ? '' : ` ±${Math.round(error * 100)}`)
-      + cover(graded, card.tasks.length) + (rank === null && !card.synthetic ? faint(' · too few tasks to rank') : '') + (card.notRun ? amber(` · ${card.notRun} not run`) : '')));
+      + cover(graded, card.tasks.length) + (card.synthetic || card.perCorrectMs === null ? '' : faint(` · ${duration(card.perCorrectMs)} per correct`))
+      + (rank === null && !card.synthetic ? faint(' · too few tasks to rank') : '') + (card.notRun ? amber(` · ${card.notRun} not run`) : '')));
   }
   const tiers = cards.map(c => byTier(c, tasks));
   for (const [t, { tier, ids }] of (tiers[0]?.length ? tierSlices(tasks) : []).entries()) {

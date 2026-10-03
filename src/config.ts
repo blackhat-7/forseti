@@ -9,10 +9,10 @@ export const CAPABILITIES: Capability[] = ['evidence', 'restraint', 'exactness',
 export const TIERS: Tier[] = ['basic', 'standard', 'hard'];
 export const DIMENSIONS: Dimension[] = ['correctness', 'instructions', 'hygiene', 'tools', 'design'];
 
-// 180s, not 90s: on the Claude Code harness a real 24-trial run had two trials finish at 84-86s
-// and one censored at the 90s deadline. A budget that censors outcomes buys nothing, and a fast
-// trial never spends the headroom.
-export const DEFAULT_OPTIONS: RunOptions = { repeat: 2, seed: 42, lane: 'tools', timeout: 180, maxTurns: 12, maxTokens: 4096, allowMetered: false, cache: true };
+// 900s: the cap stops a stuck try, it does not judge speed. At 180s a local thinking model on a
+// consumer GPU timed out on tasks it was solving (Swift-Qwen3.8-27B: 9 of 57, its slowest tenth of
+// passes at 151s), so the limit scored the GPU. Speed is reported apart, as time to solve.
+export const DEFAULT_OPTIONS: RunOptions = { repeat: 2, seed: 42, lane: 'tools', timeout: 900, maxTurns: 12, maxTokens: 4096, allowMetered: false, cache: true };
 /**
  * Off by default: the reviewer spends real quota, and a judged score is not reproducible the way
  * the rest of the suite is. The default reviewer is deliberately not an Anthropic model, because

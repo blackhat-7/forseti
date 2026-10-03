@@ -316,11 +316,11 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
   assert.match(f.text(), /20 tries/);
   // The per-trial limit is reachable without the CLI: a censored trial is otherwise unfixable.
   // Home now states the next run in one line instead of a settings table, so the values are read there.
-  assert.match(f.text(), /· 180s ·/);
+  assert.match(f.text(), /· 900s ·/);
   f.key('t');
-  assert.match(f.text(), /· 300s ·/);
-  f.key('t', 't');
-  assert.match(f.text(), /· 30s ·/, 'the ladder wraps');
+  assert.match(f.text(), /· 1800s ·/);
+  f.key('t');
+  assert.match(f.text(), /· 60s ·/, 'the ladder wraps');
   f.key('t', 't', 't', 't');
   f.key('T');
   assert.match(f.text(), /· 20 turns ·/, 'the turn limit is reachable too');
@@ -328,7 +328,7 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
   f.key('l', 'r', enter);
   assert.equal(f.calls[0]!.repeat, 20);
   assert.equal(f.calls[0]!.lane, 'prompt');
-  assert.equal(f.calls[0]!.timeout, 180, 'and it reaches the run');
+  assert.equal(f.calls[0]!.timeout, 900, 'and it reaches the run');
   // A run is long, so looking around stays possible; changing anything does not.
   assert.match(f.text(), /Running/, 'Home shows the progress panel');
   // Counts come from the run on disk, which this mock never writes; the header still says a run is going.

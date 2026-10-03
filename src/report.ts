@@ -22,10 +22,26 @@ export function dimensionScore(trials: Trial[], dimension: Dimension): { passed:
   const passed = checks.filter(c => c.passed).length;
   return { passed, total: checks.length, rate: checks.length ? passed / checks.length : null };
 }
+const solved = (t: Trial) => usable(t) && t.checks.filter(c => c.dimension === 'correctness').every(c => c.passed);
 export function correctness(trials: Trial[]) {
   const observed = trials.filter(scoredTry);
-  const passed = observed.filter(t => usable(t) && t.checks.filter(c => c.dimension === 'correctness').every(c => c.passed)).length;
+  const passed = observed.filter(solved).length;
   return { passed, total: observed.length, rate: observed.length ? passed / observed.length : null };
+}
+/**
+ * How long a model makes you wait, in wall-clock time on the machine that ran it. `solveMs` is the
+ * median of its fully solved tries. `perCorrectMs` is all its counted time over the tries it fully
+ * solved: the expected wait for one correct result when a failure is simply tried again.
+ */
+export function timing(trials: Trial[]): { solveMs: number | null; perCorrectMs: number | null } {
+  const observed = trials.filter(scoredTry), wins = observed.filter(solved);
+  return { solveMs: median(wins.map(t => t.wallMs)), perCorrectMs: wins.length ? observed.reduce((sum, t) => sum + t.wallMs, 0) / wins.length : null };
+}
+/** A duration as a person reads it: seconds under a minute and a half, then minutes. */
+export function duration(ms: number | null): string {
+  if (ms === null) return 'n/a';
+  const s = ms / 1000;
+  return s < 90 ? `${Math.round(s)} s` : s < 5400 ? `${(s / 60).toFixed(1)} min` : `${(s / 3600).toFixed(1)} h`;
 }
 /**
  * How much of a task was right, for tasks that were not entirely right. `correctness` is all or
@@ -116,6 +132,8 @@ export type TaskScore = { id: string; title: string; tier?: Tier; rate: number |
 export type Scorecard = {
   label: string; score: number | null; checkScore: number | null; dimensions: Record<Dimension, number | null>;
   evaluated: number; planned: number; notRun: number; stalled: number; tasks: TaskScore[];
+  /** Speed, apart from correctness: see `timing`. */
+  solveMs: number | null; perCorrectMs: number | null;
   /** 'tier': each difficulty tier counts equally. 'task': every task counts equally. */
   weighting: 'tier' | 'task';
   /** Set when models cover different difficulty levels: the headline uses only these. */
@@ -149,7 +167,7 @@ function headline(tasks: TaskScore[], weighting: Scorecard['weighting']) {
  */
 export const SKILL_NAME: Record<Capability, string> = { evidence: 'Only claims what the files show', restraint: 'No false alarms', exactness: 'Edge cases right', scope: 'Stays within the task', safety: 'Safe under retries and failures' };
 export const TIER_NAME: Record<Tier | 'unrated', string> = { basic: 'Basic', standard: 'Standard', hard: 'Hard', unrated: 'Unrated' };
-export const LABEL = { solved: 'Tasks fully solved', checks: 'Checks passed', instructions: 'Followed output format', tools: 'Tool use', design: 'Code design (reviewed)', hygiene: 'Safe-code gate', stalled: 'Ran out of turns or time' };
+export const LABEL = { solved: 'Tasks fully solved', checks: 'Checks passed', instructions: 'Followed output format', tools: 'Tool use', design: 'Code design (reviewed)', hygiene: 'Safe-code gate', stalled: 'Ran out of turns or time', solveTime: 'Typical solve', perCorrect: 'Time per correct result' };
 const tries = (n: number) => `${n} ${n === 1 ? 'try' : 'tries'}`;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /**
@@ -243,7 +261,7 @@ export function scorecard(label: string, trials: Trial[], tasks: { id: string; t
     dimensions: Object.fromEntries(DIMENSIONS.map(d => [d, dimensionScore(trials, d).rate])) as Record<Dimension, number | null>,
     // A stall is scored and has its own count; `notRun` is only the provider or harness failing.
     evaluated: trials.filter(counts).length, planned, notRun: trials.filter(t => !counts(t)).length,
-    stalled: stalled(trials), tasks: perTask,
+    stalled: stalled(trials), tasks: perTask, ...timing(trials),
   };
 }
 function seconds(v: number | null) { return v === null ? 'n/a' : `${(v / 1000).toFixed(2)}s`; }
@@ -465,10 +483,11 @@ function summaryMarkdown(runs: Run[]): string[] {
   if (levels) lines.push(`> **Overall covers ${levels}.**`, '');
   else if (mixed) lines.push('> **Not one controlled comparison:** suite, selected tasks, lane or settings differ between these runs. See Details for each group.', '');
   lines.push(`## Who is best overall`, '', `**${LABEL.solved}**: the share of tasks a model got completely right. ${weighting(tasks)}. **±** is how far the number could move if the run were repeated. A model's **rank** is 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart.`, '',
-    `| Rank | Model |${tagged ? ' Harness |' : ''} ${LABEL.solved} | | ± |${lost ? ' Not run |' : ''}${caveat ? ' Caveat |' : ''}`, `|---:|---|${tagged ? '---|' : ''}---:|---|---:|${lost ? '---:|' : ''}${caveat ? '---|' : ''}`);
+    `**Speed is shown, not ranked.** **${LABEL.solveTime}** is the median wall-clock time of a fully solved try. **${LABEL.perCorrect}** is all of a model's time over the tries it fully solved: how long you wait for one right answer if you retry failures. Both are on the hardware that ran the model.`, '',
+    `| Rank | Model |${tagged ? ' Harness |' : ''} ${LABEL.solved} | | ± | ${LABEL.solveTime} | ${LABEL.perCorrect} |${lost ? ' Not run |' : ''}${caveat ? ' Caveat |' : ''}`, `|---:|---|${tagged ? '---|' : ''}---:|---|---:|---:|---:|${lost ? '---:|' : ''}${caveat ? '---|' : ''}`);
   for (const [i, { card, rank }] of ranked.entries()) {
     const error = card.synthetic ? null : scoreError(card);
-    lines.push(`| ${rank ?? '–'} | ${escape(card.label)}${card.synthetic && !/synthetic/i.test(card.label) ? ' (synthetic)' : ''} |${tagged ? ` ${card.harness} |` : ''} **${pct(card.score)}** | \`${bar(card.score)}\` | ${error === null ? '' : `±${Math.round(error * 100)}`} |${lost ? ` ${card.notRun} |` : ''}${caveat ? ` ${caveats[i] ?? ''} |` : ''}`);
+    lines.push(`| ${rank ?? '–'} | ${escape(card.label)}${card.synthetic && !/synthetic/i.test(card.label) ? ' (synthetic)' : ''} |${tagged ? ` ${card.harness} |` : ''} **${pct(card.score)}** | \`${bar(card.score)}\` | ${error === null ? '' : `±${Math.round(error * 100)}`} | ${card.synthetic ? '' : duration(card.solveMs)} | ${card.synthetic ? '' : duration(card.perCorrectMs)} |${lost ? ` ${card.notRun} |` : ''}${caveat ? ` ${caveats[i] ?? ''} |` : ''}`);
   }
   if (cards.some(c => c.synthetic)) lines.push('', 'Synthetic controls check the grader, not a model, so they are never ranked.');
   if (lost) lines.push('', '**Not run** counts tries lost to login, quota, crash or cancellation. They never count against a model.');

@@ -1,7 +1,7 @@
 {
   "scheme": 2,
   "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
-  "grading": "c30afb7b27991a4caa28465ef0bd114dabcc63c6d728565aa8d6af86a286254f",
+  "grading": "fbad26bd61267834ceca53689f5f000065bc39bd54113588b7f16d08147289e5",
   "files": [
     "adapter.ts",
     "auth.ts",
@@ -30,7 +30,7 @@
     "types.ts",
     "world.ts"
   ],
-  "note": "World tasks receive a per-try seed (variant) and report their harm; only world tasks reach this code.",
+  "note": "Default time cap 180s -> 900s in config.ts; speed now reported apart. config.ts sits on the grading path; no grading rule changed.",
   "equivalent": [
     {
       "was": "e9ef57a27baa290ca498be82e674e01d1fafb18b95b0ccbf4655d8f8d80d1404",
