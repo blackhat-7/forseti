@@ -398,7 +398,9 @@ export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks
   // A level only some models have tries on would lift or sink only their overall score, so when
   // coverage differs the headline is taken over the levels every model shares.
   const has = (c: ModelCard) => new Set(c.tasks.filter(t => t.rate !== null && t.tier).map(t => t.tier!));
-  const real = cards.map(c => c.card).filter(c => !c.synthetic && c.weighting === 'tier');
+  // A model with tries on under half the tasks is never ranked, so it must not decide which levels
+  // everyone else is scored on: one finished task would otherwise shrink every headline to its level.
+  const real = cards.map(c => c.card).filter(c => !c.synthetic && c.weighting === 'tier' && 2 * c.tasks.filter(t => t.rate !== null).length >= c.tasks.length);
   const common = TIERS.filter(tier => real.length && real.every(c => has(c).has(tier)));
   if (common.length && real.some(c => has(c).size > common.length)) {
     for (const { card } of cards) Object.assign(card, { levels: common }, headline(card.tasks.filter(t => common.includes(t.tier!)), 'tier'));

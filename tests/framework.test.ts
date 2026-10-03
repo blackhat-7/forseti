@@ -1063,6 +1063,19 @@ test('the overall score uses only the difficulty levels every model has tries on
   assert.equal(byTier(cards[0]!, tasks)[0]!.rate, 1, 'the level itself is still shown');
 });
 
+test('a model too thin to rank does not decide which levels everyone else is scored on', () => {
+  const m = (id: string): ModelConfig => ({ id, label: id, provider: 'claude-code', model: id, auth: 'cli', enabled: true, thinking: 'off' });
+  const tasks = [{ id: 'b', title: 'B', hash: 'b', tier: 'basic' as const }, { id: 'h', title: 'H', hash: 'h', tier: 'hard' as const }, { id: 'h2', title: 'H2', hash: 'h2', tier: 'hard' as const }];
+  const tri = (model: string, task: string, passed: boolean) => ({ ...blankTrial(`${model}-${task}`, m(model), { id: task } as never, 1), status: passed ? 'passed' as const : 'failed' as const, checks: [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }] });
+  // `new` has just started: one hard task of three, so it is not ranked and must not narrow the others.
+  const run: Run = { schema: 1, id: 'r', created: '2026-01-01', status: 'completed', suite: 's', suiteHash: 's', harnessHash: 'h', environment: {}, judge: null,
+    options: { ...DEFAULT_OPTIONS }, models: [m('a'), m('new')], tasks, planned: 4,
+    trials: [tri('a', 'b', true), tri('a', 'h', false), tri('a', 'h2', false), tri('new', 'h', true)] };
+  const { cards } = scorecards([run]);
+  assert.equal(cards[0]!.levels, undefined, 'the full model keeps every level');
+  assert.equal(cards[0]!.score, 0.5, 'basic 100% and hard 0% count equally');
+});
+
 test('a difficulty slice is ranked on its own tasks, even when the overall score uses shared levels only', () => {
   const m = (id: string): ModelConfig => ({ id, label: id, provider: 'claude-code', model: id, auth: 'cli', enabled: true, thinking: 'off' });
   const tasks = [{ id: 'b', title: 'B', hash: 'b', tier: 'basic' as const }, { id: 'h', title: 'H', hash: 'h', tier: 'hard' as const }];

@@ -24,6 +24,8 @@ export function comparisonPage(runs: Run[], width: number, everyTask: boolean, c
   row(muted(`${cards.some(c => !c.synthetic) ? count(cards.filter(c => !c.synthetic).length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}`) + amber(caveat));
   row();
 
+  if (chartOnly) { out.push(...homeTable(ranked, tasks, width)); return out; }
+
   // One chart answers the page's question: who is ahead, by how much, and at which difficulty.
   // Coverage shows only where tasks are missing, so a full row stays just a bar and a number.
   const cover = (n: number, total: number) => (n < total ? faint(` ${n}/${total}`) : '');
@@ -137,4 +139,52 @@ export function runLine(run: Run): string {
   const scores = scorecards([run]).cards.map(c => `${nick(c.label)} ${rateInk(c.score)(pct(c.score))}`).join(faint(' · '));
   const state = run.status === 'completed' ? '' : `  ${statusInk(run.status)(plain(run.status))}${live ? faint(` ${run.trials.length}/${run.planned}`) : ''}`;
   return `${faint(runWhen(run.id))}  ${scores}  ${faint(`${run.tasks.length}×${run.options.repeat}`)}${state}`;
+}
+
+/**
+ * Home's leaderboard: one row per model, so six models are six rows, not four stacked charts of
+ * six. The bar is the overall score; difficulty levels are columns beside it, coloured by how much
+ * of the level was solved, and speed is the last column. Columns give way right to left on a
+ * narrow terminal (speed, then levels) so the bar and the score always show. L opens everything.
+ */
+function homeTable(ranked: ReturnType<typeof ranking<ReturnType<typeof scorecards>['cards'][number]>>, tasks: Run['tasks'], width: number): string[] {
+  const cards = ranked.map(r => r.card), tiers = tierSlices(tasks), rows = cards.map(c => byTier(c, tasks));
+  const names = cards.map(c => plain(c.label)), head = (n: string) => n.split(' · ')[0]!, tag = (n: string) => n.split(' · ').slice(1).join(' · ').replace(/ tokens$/, '');
+  const levelW = 10, speedW = 12, scoreW = 11, levelsW = tiers.length * levelW;
+  // Names give way before the level columns do: a long name shortens to 24 so the levels still fit.
+  const want = Math.max(10, Math.min(38, Math.max(...names.map(width_)) + 2));
+  const nameW = tiers.length && width - 4 - scoreW - levelsW - 12 < want ? Math.max(24, width - 4 - scoreW - levelsW - 12) : want;
+  const fixed = 4 + nameW + scoreW;
+  const showLevels = tiers.length > 0 && width - fixed - levelsW >= 12;
+  const showSpeed = showLevels && width - fixed - tiers.length * levelW - speedW >= 12;
+  const barW = Math.max(0, Math.min(24, width - fixed - (showLevels ? tiers.length * levelW : 0) - (showSpeed ? speedW : 0) - 2));
+  const out: string[] = [];
+  const header = '    ' + padTo('', nameW) + padTo(faint('overall'), barW + 1 + scoreW)
+    + (showLevels ? tiers.map(t => faint(TIER_NAME[t.tier].padStart(levelW - 2) + '  ')).join('') : '') + (showSpeed ? faint('per correct'.padStart(speedW)) : '');
+  out.push(header);
+  const partial = { any: false };
+  for (const [i, { card, rank }] of ranked.entries()) {
+    const ranked_ = rank !== null, paint = SERIES[i % SERIES.length]!;
+    const error = card.synthetic || !ranked_ ? null : scoreError(card), graded = card.tasks.filter(t => t.rate !== null).length;
+    const short = graded < card.tasks.length;
+    if (short) partial.any = true;
+    // A long name loses its middle, not its end: the end is the quant, which tells two runs of one model apart.
+    const t = tag(names[i]!), room = nameW - 2 - (t ? width_(t) + 1 : 0), full = head(names[i]!);
+    const shown = width_(full) <= room ? full : `${full.slice(0, Math.max(4, Math.floor(room * 0.4)))}…${full.slice(-Math.max(4, room - Math.max(4, Math.floor(room * 0.4)) - 1))}`;
+    const name = `${ranked_ || card.synthetic ? bold(shown) : muted(shown)}${t ? faint(` ${t}`) : ''}`;
+    const score = `${(ranked_ ? bold : muted)(pct(card.score).padStart(4))}${faint(short ? '*' : ' ')} ${faint((error === null ? '' : `±${Math.round(error * 100)}`).padEnd(4))}`;
+    const levels = showLevels ? rows[i]!.map(r => {
+      const cell = r.rate === null ? '—' : pct(r.rate) + (r.tasks < r.total ? '*' : ' ');
+      return (r.rate === null ? faint : rateInk(r.rate))(cell.padStart(levelW - 1)) + ' ';
+    }).join('') : '';
+    const speed = showSpeed ? muted((card.synthetic || card.perCorrectMs === null ? '—' : duration(card.perCorrectMs)).padStart(speedW)) : '';
+    const lead = muted((ranked_ ? String(rank) : '–').padStart(2)) + '  ';
+    // An unranked row rests on too few tasks to compare, so its bar is drawn faint, not in a series colour.
+    out.push(lead + padTo(name, nameW) + (barW ? (card.synthetic || !ranked_ ? faint : paint)(bar(card.score, barW)) + ' ' : '') + score + ' ' + levels + speed + (card.notRun ? amber(` ${card.notRun} not run`) : ''));
+  }
+  const notes = [levelsNote(cards) ? `Overall covers ${levelsNote(cards)!.replace(/^./, c => c.toLowerCase())}.` : '',
+    partial.any || rows.some(r => r.some(x => x.rate !== null && x.tasks < x.total)) ? '* not every task has a try yet.' : '',
+    ranked.some(r => r.rank === null && !r.card.synthetic) ? '– not ranked: tries on under half the tasks.' : ''].filter(Boolean);
+  if (notes.length) out.push('', ...notes.map(n => faint(n)));
+  return out;
 }
