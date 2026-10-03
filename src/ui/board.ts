@@ -180,11 +180,22 @@ function homeTable(ranked: ReturnType<typeof ranking<ReturnType<typeof scorecard
     const speed = showSpeed ? muted((card.synthetic || card.perCorrectMs === null ? '—' : duration(card.perCorrectMs)).padStart(speedW)) : '';
     const lead = muted((ranked_ ? String(rank) : '–').padStart(2)) + '  ';
     // An unranked row rests on too few tasks to compare, so its bar is drawn faint, not in a series colour.
-    out.push(lead + padTo(name, nameW) + (barW ? (card.synthetic || !ranked_ ? faint : paint)(bar(card.score, barW)) + ' ' : '') + score + ' ' + levels + speed + (card.notRun ? amber(` ${card.notRun} not run`) : ''));
+    out.push(lead + padTo(name, nameW) + (barW ? creditBar(card.score, card.checkScore, barW, card.synthetic || !ranked_ ? faint : paint) + ' ' : '') + score + ' ' + levels + speed + (card.notRun ? amber(` ${card.notRun} not run`) : ''));
   }
   const notes = [levelsNote(cards) ? `Overall covers ${levelsNote(cards)!.replace(/^./, c => c.toLowerCase())}.` : '',
+    cards.some(c => (c.checkScore ?? 0) > (c.score ?? 0) + 0.005) ? '█ tasks fully solved, the score   ▓ checks passed on the rest, partial credit' : '',
     partial.any || rows.some(r => r.some(x => x.rate !== null && x.tasks < x.total)) ? '* not every task has a try yet.' : '',
     ranked.some(r => r.rank === null && !r.card.synthetic) ? '– not ranked: tries on under half the tasks.' : ''].filter(Boolean);
   if (notes.length) out.push('', ...notes.map(n => faint(n)));
   return out;
+}
+
+/**
+ * Solid up to the share of tasks fully solved, which is the score, then a lighter shade up to the
+ * share of checks passed: a hard task 7 of 8 right shows as progress without being counted as done.
+ */
+function creditBar(solved: number | null, checks: number | null, w: number, paint: (s: string) => string): string {
+  if (solved === null) return faint('·'.repeat(w));
+  const full = Math.round(Math.max(0, Math.min(1, solved)) * w), credit = Math.max(full, Math.round(Math.max(0, Math.min(1, checks ?? solved)) * w));
+  return paint('█'.repeat(full)) + paint('▓'.repeat(credit - full)) + faint('░'.repeat(w - credit));
 }
