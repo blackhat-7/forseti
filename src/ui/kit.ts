@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from 'node:util';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
-import type { AuthInfo, ModelConfig, Task } from '../types.ts';
+import type { AuthInfo, ModelConfig, Task, Tier } from '../types.ts';
+import { modelLabel } from '../report.ts';
 
 /** Shared look and small layout helpers for every screen. */
 // Strip whole terminal strings first, then remaining controls (including bidi).
@@ -57,7 +58,9 @@ export const dot = (on: boolean) => (on ? green('●') : faint('○'));
 /** "2026-09-20T14-31-08-443Z-6d55ccee" reads as "09-20 14:31"; anything else is shown as it is. */
 export const runWhen = (id: string) => (/^\d{4}-\d{2}-\d{2}T/.test(id) ? `${id.slice(5, 10)} ${id.slice(11, 13)}:${id.slice(14, 16)}` : id);
 /** "Claude sonnet · via Claude Code / 14-31-08" is provenance; a column needs "Claude sonnet". */
-export const nick = (label: string) => plain(label).split(' / ')[0]!.split(' · ')[0]!.trim();
+export const nick = (label: string) => modelLabel(plain(label).split(' / ')[0]!.split(' · ')[0]!.trim());
+/** A task's difficulty as one coloured word, so a hard try is told apart from an easy one at a glance. */
+export const tierTag = (tier?: Tier) => (tier ? ({ basic: teal, standard: amber, hard: rose } as const)[tier](tier) : '');
 /** "under a minute", "46 min", "1 h 20 min": an estimate, so no false precision. */
 export function remaining(ms: number): string {
   const m = Math.round(ms / 60_000);

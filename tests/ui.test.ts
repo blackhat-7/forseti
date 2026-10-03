@@ -868,9 +868,9 @@ test('the running screen shows progress, a tally per model and the finished trie
   const text = f.text(100);
   // Redesigned Live tab: the card title carries count, share and time left; one tally line replaces the Results bars.
   assert.match(text, /Running[─\s]+3 of 4 tries · 75% · about .+ left/, 'time left comes from the pace so far');
-  assert.match(text, /Claude opus\s+✓ 1\s+✗ 0\s+◷ 0\s+Claude haiku\s+✓ 0\s+✗ 1\s+◷ 1/, 'wrong and ran out are told apart');
+  assert.match(text, /Claude opus\s+1 done\s+✓ 1\s+✗ 0\s+◷ 0\s+100% solved\s*\n[^\n]*Claude haiku\s+2 done\s+✓ 0\s+✗ 1\s+◷ 1/, 'wrong and ran out are told apart, one line per model');
   assert.match(text, /Finished[─\s]+newest first/);
-  assert.match(text, /◷\s+Claude haiku\s+Task three\s+ran out/);
+  assert.match(text, /◷\s+Claude haiku\s+Task three\s+out of time/);
   assert.match(text, /✗\s+Claude haiku\s+Task two\s+1\/2 checks\s+1\.5m\s+3k tokens/);
   assert.match(text, /✓\s+Claude opus\s+Task one/);
   assert.ok(text.indexOf('Task three') < text.indexOf('Task two') && text.indexOf('Task two') < text.indexOf('Task one'), 'newest first');
@@ -931,7 +931,7 @@ test('a try in progress streams into its own pane; a run from before streaming f
   writeFileSync(join(pi, 'events.jsonl'), [{ type: 'started' }, { type: 'assistant', text: 'Reading the parser first.' }, { type: 'tool', event: { tool: 'read_file', args: { path: 'src/counts.py' }, ok: true } }, { type: 'tool', event: { tool: 'python', args: { source: 'run check' }, ok: false, output: 'NameError: x' } }]
     .map(event => `${JSON.stringify({ at: '', event })}\n`).join(''));
   const tall = view(60);
-  assert.match(tall, /Qwen · Task one[─\s]+turn 1 · \d+s/, 'the pane is titled by model and task, with its turn and age');
+  assert.match(tall, /Qwen · Task one[─\s]+turn 1\/\d+ · \d+s of \d+[sm]/, 'the pane is titled by model and task, with its turn and age against their limits');
   assert.match(tall, /Reading the parser first\./);
   assert.match(tall, /▸ read_file\s+counts\.py ✓/, 'a path shows as its file name');
   assert.match(tall, /▸ python\s+run check ✗ NameError: x/, 'a failed call shows why');

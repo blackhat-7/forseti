@@ -170,7 +170,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     const run: Run = {
       schema: 1, id, created: new Date().toISOString(), status: 'running', suite: suite.id,
       suiteHash: hash(contents), harnessHash: draft.harnessHash, gradingHash: draft.gradingHash, environment, judge,
-      options, models: named, tasks: taskEntries, planned: jobs.length, trials: [],
+      options, models: named, tasks: taskEntries, planned: jobs.length, plan: Object.fromEntries(named.map(m => [m.id, jobs.filter(j => j.model.id === m.id).length])), trials: [],
     };
     atomicJson(runDir, 'run.json', run);
     atomicJson(runDir, 'experiment.json', { system: SYSTEM_PROMPT, config, options, schedule: jobs.map(j => ({ model: j.model.id, task: j.task.id, repetition: j.repetition })), harnessHash: run.harnessHash, suiteHash: run.suiteHash });

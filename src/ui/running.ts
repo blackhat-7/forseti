@@ -1,7 +1,7 @@
 import { matchesKey, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { FINISHED, STALL } from '../report.ts';
 import type { Run, Trial } from '../types.ts';
-import { BACKDROP, CARD, accent, amber, bold, cards, duration, faint, green, muted, nick, padTo, plain, remaining, rose, terminalText, width_ } from './kit.ts';
+import { BACKDROP, CARD, accent, amber, bold, cards, duration, faint, green, muted, nick, padTo, plain, remaining, rose, terminalText, tierTag, width_ } from './kit.ts';
 import { runLine } from './board.ts';
 import type { Block, LiveWatch, Open, Transcript } from './live.ts';
 
@@ -25,23 +25,54 @@ export function progressBar(share: number, w: number): string {
   const part = eighth ? '▏▎▍▌▋▊▉█'[eighth - 1]! : '';
   return accent('█'.repeat(full)) + TRACK + accent(part) + ' '.repeat(Math.max(0, w - full - (part ? 1 : 0))) + BACKDROP;
 }
-/** "12 of 28 tries · 43% · about 1 h 20 min left": the pace so far is the only honest predictor. */
+/**
+ * Time left, from each model's own pace. Local tries run one at a time, so their queue is the sum of
+ * what is left; the rest share the other slots. One pace for all would let a fast cloud model's
+ * finished tries promise minutes while a local model still has hours to go.
+ */
+function timeLeft(run: Run, now: number): number | null {
+  const done = run.trials.length;
+  if (!done || run.planned <= done) return null;
+  if (!run.plan) return (now - Date.parse(run.created)) / done * (run.planned - done);
+  const pace = run.trials.reduce((sum, t) => sum + t.wallMs, 0) / done;
+  let local = 0, shared = 0;
+  for (const m of run.models) {
+    const mine = run.trials.filter(t => t.model === m.id), left = Math.max(0, (run.plan[m.id] ?? 0) - mine.length);
+    const each = mine.length ? mine.reduce((sum, t) => sum + t.wallMs, 0) / mine.length : pace;
+    if (m.provider === 'local') local += left * each; else shared += left * each;
+  }
+  const slots = Math.max(1, (run.options.parallel ?? 1) - (run.models.some(m => m.provider === 'local') ? 1 : 0));
+  return Math.max(local, shared / slots);
+}
+/** "12 of 28 tries · 43% · about 1 h 20 min left". */
 function progress(run: Run | undefined, now: number): { share: number; note: string } {
   const done = run?.trials.length ?? 0, total = run?.planned ?? 0, share = total ? done / total : 0;
-  const left = run && done && total > done ? ` · about ${remaining((now - Date.parse(run.created)) / done * (total - done))} left` : '';
-  return { share, note: `${done} of ${total || '?'} tries · ${Math.round(share * 100)}%${left}` };
+  const ms = run ? timeLeft(run, now) : null;
+  return { share, note: `${done} of ${total || '?'} tries · ${Math.round(share * 100)}%${ms === null ? '' : ` · about ${remaining(ms)} left`}` };
+}
+/** A limit as people say it: "15m", "30m", "90s". */
+const limit = (secs: number) => (secs % 60 ? `${secs}s` : `${secs / 60}m`);
+/** Where a try in progress stands against its own budget: turns used and time spent, each of its limit. */
+function budget(o: Open, run: Run | undefined, now: number): string {
+  const turns = Math.max(run?.options.maxTurns ?? 0, o.task.turns ?? 0), secs = Math.max(run?.options.timeout ?? 0, o.task.timeout ?? 0);
+  return `turn ${o.tail.transcript.turns}${turns ? `/${turns}` : ''} · ${clock(now - o.since)}${secs ? ` of ${limit(secs)}` : ''}`;
 }
 function mark(trial: Trial): string {
   return !FINISHED.includes(trial.status) ? faint('·') : STALL.includes(trial.status) ? amber('◷') : solved(trial) ? green('✓') : rose('✗');
 }
-/** One line per model: solved, wrong and ran out, with zeros faint so the eye lands on what happened. */
-function tallies(run: Run): string {
-  const n = (paint: (s: string) => string, sign: string, k: number) => (k ? paint(`${sign} ${k}`) : faint(`${sign} 0`));
+/**
+ * One aligned line per model: tries finished, then solved, wrong and ran out, with zeros faint so
+ * the eye lands on what happened. One line each, so a long model name never pushes a count off.
+ */
+function tallies(run: Run): string[] {
+  const n = (paint: (s: string) => string, sign: string, k: number) => padTo(k ? paint(`${sign} ${k}`) : faint(`${sign} 0`), 7);
+  const nameW = Math.min(30, Math.max(...run.models.map(m => width_(nick(m.label)))) + 3);
   return run.models.map(m => {
     const mine = run.trials.filter(t => t.model === m.id && FINISHED.includes(t.status));
     const won = mine.filter(solved).length, out = mine.filter(t => STALL.includes(t.status)).length;
-    return `${bold(nick(m.label))}  ${n(green, '✓', won)}  ${n(rose, '✗', mine.length - won - out)}  ${n(amber, '◷', out)}`;
-  }).join('     ');
+    const rate = mine.length ? faint(`${Math.round((won / mine.length) * 100)}% solved`) : '';
+    return `${bold(padTo(nick(m.label), nameW))}${padTo(faint(run.plan ? `${mine.length} of ${run.plan[m.id] ?? 0}` : `${mine.length} done`), 10)}${n(green, '✓', won)}${n(rose, '✗', mine.length - won - out)}${n(amber, '◷', out)} ${rate}`;
+  });
 }
 
 // Wrapped lines of a text block, per block, extended as the text grows: text up to its last line
@@ -123,13 +154,14 @@ export function conversation(t: Transcript, w: number, live: boolean, need = Inf
 }
 
 /** A rounded box `w` wide and `h` tall with the title in its top border; the focused one is in the accent. */
-function box(title: string, right: string, body: string[], w: number, h: number, focused: boolean, bottom = ''): string[] {
+function box(title: string, right: string, body: string[], w: number, h: number, focused: boolean, bottom = '', tag = ''): string[] {
   const edge = focused ? accent : faint;
   // The try's age is what shows it is alive, so the title gives way to it.
   if (width_(right) + 16 > w) right = '';
-  const t = cut(title, Math.max(1, w - 8 - (right ? width_(right) + 2 : 0)));
-  const fill = Math.max(0, w - 6 - width_(t) - (right ? width_(right) + 2 : 0));
-  const out = [edge('╭─ ') + (focused ? bold(accent(t)) : bold(t)) + ' ' + edge('─'.repeat(fill)) + (right ? ` ${muted(right)} ` : '') + edge('─╮')];
+  const lead = tag ? `${tag} ` : '';
+  const t = cut(title, Math.max(1, w - 8 - width_(lead) - (right ? width_(right) + 2 : 0)));
+  const fill = Math.max(0, w - 6 - width_(lead) - width_(t) - (right ? width_(right) + 2 : 0));
+  const out = [edge('╭─ ') + lead + (focused ? bold(accent(t)) : bold(t)) + ' ' + edge('─'.repeat(fill)) + (right ? ` ${muted(right)} ` : '') + edge('─╮')];
   for (let i = 0; i < h - 2; i++) {
     const line = cut(body[i] ?? '', w - 4);
     out.push(`${edge('│')} ${line}${' '.repeat(Math.max(0, w - 4 - width_(line)))} ${edge('│')}`);
@@ -194,11 +226,10 @@ export class LiveView {
       return { lines: out, hits };
     }
     const inner = boxed ? width - 4 : width, { share, note } = progress(run, now);
-    const status = run?.trials.length ? tallies(run) : open.length ? faint('No try has finished yet.') : muted('Preparing isolated trial workspaces…');
+    const status = run?.trials.length ? tallies(run) : [open.length ? faint('No try has finished yet.') : muted('Preparing isolated trial workspaces…')];
     const parallel = run?.options.parallel ?? 1;
-    out.push(...cards([`${CARD}${f.stopping ? 'Stopping safely' : 'Running'}\u0000${note}`,
-      progressBar(share, Math.max(8, inner)),
-      `${cut(status, Math.max(1, inner - 12))}${' '.repeat(Math.max(2, inner - width_(status) - 11))}${faint(`${String(parallel).padStart(2)} at once`)}`], width, boxed));
+    out.push(...cards([`${CARD}${f.stopping ? 'Stopping safely' : 'Running'}\u0000${note} · ${parallel} at once`,
+      progressBar(share, Math.max(8, inner)), ...status.map(line => cut(line, inner))], width, boxed));
     out.push('');
 
     // The feed takes the bottom only when every pane keeps room to be worth watching.
@@ -213,10 +244,10 @@ export class LiveView {
     const h = fits(avail);
     if (n && h < (boxed ? 4 : 3)) {
       // Too short for panes: one line per try, still with what it is doing right now.
-      const nameW = Math.min(20, Math.max(...open.map(o => width_(nick(o.model.label)))) + 2), taskW = Math.min(34, Math.floor(width / 4));
+      const nameW = Math.min(28, Math.max(...open.map(o => width_(nick(o.model.label)))) + 2), taskW = Math.min(34, Math.floor(width / 4));
       for (const o of open) {
-        const on = o.id === this.focus, right = faint(` turn ${o.tail.transcript.turns} · ${clock(now - o.since)}`);
-        const left = `${on ? accent('▌') : ' '} ${bold(padTo(nick(o.model.label), nameW))}${muted(padTo(plain(o.task.title), taskW))}`;
+        const on = o.id === this.focus, right = faint(` ${budget(o, run, now)}`);
+        const left = `${on ? accent('▌') : ' '} ${bold(padTo(nick(o.model.label), nameW))}${padTo(tierTag(o.task.tier), 10)}${muted(padTo(plain(o.task.title), taskW))}`;
         const room = width - width_(left) - width_(right);
         const doing = room > 8 ? cut(conversation(o.tail.transcript, room - 1, true, 1)[0] ?? '', room - 1) : '';
         hits.push({ line: out.length, x0: 0, x1: width, act: clicks => this.pick(o, clicks) });
@@ -229,7 +260,7 @@ export class LiveView {
         const row = open.slice(r * cols, r * cols + cols), room = width - (row.length - 1);
         const ws = row.map((_, k) => Math.floor(room / row.length) + (k < room % row.length ? 1 : 0));
         const xs = ws.map((_, k) => ws.slice(0, k).reduce((a, b) => a + b + 1, 0));
-        const panes = row.map((o, k) => this.pane(o, ws[k]!, h, boxed, now));
+        const panes = row.map((o, k) => this.pane(o, ws[k]!, h, boxed, now, run));
         if (r && gap) out.push('');
         for (let i = 0; i < h; i++) {
           row.forEach((o, k) => hits.push({ line: out.length, x0: xs[k]!, x1: xs[k]! + ws[k]!, act: clicks => this.pick(o, clicks) }));
@@ -238,14 +269,14 @@ export class LiveView {
       }
     }
     if (withFeed && finished.length) {
-      const names = finished.map(t => nick(run!.models.find(m => m.id === t.model)?.label ?? t.model)), nameW = Math.min(20, Math.max(...names.map(width_)) + 2);
+      const names = finished.map(t => nick(run!.models.find(m => m.id === t.model)?.label ?? t.model)), nameW = Math.min(28, Math.max(...names.map(width_)) + 2);
       out.push('', ...cards([`${CARD}Finished\u0000newest first`, ...finished.map((t, i) => {
         const correct = t.checks.filter(c => c.dimension === 'correctness');
-        const what = !FINISHED.includes(t.status) ? 'not run' : STALL.includes(t.status) ? 'ran out' : solved(t) ? '' : `${correct.filter(c => c.passed).length}/${correct.length} checks`;
+        const what = !FINISHED.includes(t.status) ? 'not run' : t.status === 'timeout' ? 'out of time' : t.status === 'budget' ? 'out of turns' : solved(t) ? 'solved' : `${correct.filter(c => c.passed).length}/${correct.length} checks`;
         const made = t.tokens?.output ?? 0, tokens = t.tokens ? `${made < 1000 ? '<1k' : `${Math.round(made / 1000)}k`} tokens` : '';
-        const tail = `${padTo(what, 12)}${duration(t.wallMs).padStart(6)}${tokens.padStart(12)}`;
-        const task = run!.tasks.find(x => x.id === t.task)?.title ?? t.task;
-        return `${mark(t)} ${bold(padTo(names[i]!, nameW))}${padTo(plain(task), Math.max(8, inner - 2 - nameW - width_(tail)))}${faint(tail)}`;
+        const tail = `${padTo(what, 14)}${duration(t.wallMs).padStart(6)}${tokens.padStart(12)}`;
+        const task = run!.tasks.find(x => x.id === t.task);
+        return `${mark(t)} ${bold(padTo(names[i]!, nameW))}${padTo(tierTag(task?.tier), 10)}${padTo(plain(task?.title ?? t.task), Math.max(8, inner - 12 - nameW - width_(tail)))}${faint(tail)}`;
       })], width, boxed));
     }
     return { lines: out, hits };
@@ -257,14 +288,14 @@ export class LiveView {
   private title(o: Open): string { return `${nick(o.model.label)} · ${plain(o.task.title)}`; }
   private state(o: Open, now: number, run?: Run): string {
     const done = run?.trials.find(t => t.id === o.id);
-    return done ? `${mark(done)} finished` : `turn ${o.tail.transcript.turns} · ${clock(now - o.since)}`;
+    return done ? `${mark(done)} finished` : budget(o, run, now);
   }
-  private pane(o: Open, w: number, h: number, boxed: boolean, now: number): string[] {
+  private pane(o: Open, w: number, h: number, boxed: boolean, now: number, run?: Run): string[] {
     const on = o.id === this.focus, cw = boxed ? w - 4 : w, height = boxed ? h - 2 : h - 1;
     const body = conversation(o.tail.transcript, cw, true, height);
     if (!body.length) body.push(faint('Waiting for the first words…'));
-    if (boxed) return box(this.title(o), this.state(o, now), body, w, h, on);
-    const right = faint(this.state(o, now)), left = cut(`${on ? accent('▌ ') : ''}${bold(this.title(o))}`, Math.max(1, w - width_(right) - 2));
+    if (boxed) return box(this.title(o), this.state(o, now, run), body, w, h, on, '', tierTag(o.task.tier));
+    const right = faint(this.state(o, now, run)), left = cut(`${on ? accent('▌ ') : ''}${tierTag(o.task.tier)} ${bold(this.title(o))}`, Math.max(1, w - width_(right) - 2));
     return [`${left}${' '.repeat(Math.max(2, w - width_(left) - width_(right)))}${right}`, ...body];
   }
   private zoom(f: LiveFrame): string[] {
@@ -275,7 +306,7 @@ export class LiveView {
     if (this.top !== undefined && this.top >= all.length - h) this.top = undefined;
     const start = this.top ?? Math.max(0, all.length - h), body = all.slice(start, start + h);
     const where = this.top === undefined ? '' : `${start + 1}–${start + body.length} of ${all.length} · G newest`;
-    if (f.boxed) return box(this.title(o), this.state(o, f.now, f.watch.run), body, f.width, h + 2, true, where);
+    if (f.boxed) return box(this.title(o), this.state(o, f.now, f.watch.run), body, f.width, h + 2, true, where, tierTag(o.task.tier));
     return [`${bold(this.title(o))}  ${faint(this.state(o, f.now, f.watch.run))}`, ...body];
   }
 }
@@ -283,13 +314,13 @@ export class LiveView {
 /** Home during a run: how far it is and what each try is doing, in a few lines. */
 export function homeCard(watch: LiveWatch, inner: number, stopping: boolean, now: number): string[] {
   const { share, note } = progress(watch.run, now);
-  const nameW = Math.min(20, Math.max(0, ...watch.open.map(o => width_(nick(o.model.label)))) + 2);
+  const nameW = Math.min(28, Math.max(0, ...watch.open.map(o => width_(nick(o.model.label)))) + 2);
   return [
     `${CARD}${stopping ? 'Stopping safely' : 'Running'}\u0000${note}`,
     progressBar(share, Math.max(8, inner)),
     ...watch.open.map(o => {
-      const right = `turn ${o.tail.transcript.turns} · ${clock(now - o.since)}`;
-      return `${bold(padTo(nick(o.model.label), nameW))}${padTo(plain(o.task.title), Math.max(8, inner - nameW - width_(right) - 2))}  ${faint(right)}`;
+      const right = budget(o, watch.run, now);
+      return `${bold(padTo(nick(o.model.label), nameW))}${padTo(tierTag(o.task.tier), 10)}${padTo(plain(o.task.title), Math.max(8, inner - nameW - 10 - width_(right) - 2))}  ${faint(right)}`;
     }),
     `${accent('2')} ${faint('live view')}`,
   ];

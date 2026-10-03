@@ -13,7 +13,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **The leaderboard is strict, and nearly empty since the 900 s cap (2026-10-03).** Only tasks with their own 900–1800 s budget kept their tries. Rerun each model to refill it; Claude reruns spend plan quota, so ask first. A Pi model's card names its output-token limit.
 - **A run only makes missing tries.** Same model + same task and harness submission fingerprints + same settings = already done; `--fresh` forces a rerun. A grading-only change is regraded from saved files (`npm start -- regrade`, also run before every run).
 - **Four production-ops tasks on a simulated estate** (`checkout-hotfix`, `subscription-repair`, `bucket-residency`, `service-web`). Each try gets a variant (seed = try − 1) and reports its harm. A task's `world` module answers gcloud/kubectl/psql/gsutil in-process; nothing real is reachable, and the model is not told. Engine: `suites/personal/private/ops/`. Contract: `docs/suite-contract.md#world-tasks`. Pilots are stale after the scenario rework; the last Qwen run (before it) showed 0 simulation tells, down from 96.
-- Battery on Linux: `npm run check` clean · `npm test` **92/92** · `npm run test:suite` passes · `test:terminal`, `test:judge` not run this session.
+- Battery on Linux: `npm run check` clean · `npm test` **95/95** · `test:terminal` **fails before and after 2026-10-03's UI work**: "TUI did not mount" (its 1 s wait is likely too short with 300+ saved tries) · `test:judge` not run.
 
 ## Done this session
 

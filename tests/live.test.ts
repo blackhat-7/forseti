@@ -118,7 +118,7 @@ test('panes fill the window in a grid: side by side when wide, stacked when not,
   assert.doesNotMatch(narrow, /[╭╰│]/, 'no borders under 60 columns');
   assert.match(narrow, /Pane 3 is thinking\./);
   const short = plain(view(14).render(160));
-  assert.equal(short.filter(l => /Model \d\s+Task one\s+Pane \d is thinking\..*turn 1 · \d+s/.test(l)).length, 3, 'one status line per try');
+  assert.equal(short.filter(l => /Model \d\s+Task one\s+Pane \d is thinking\..*turn 1\/12 · \d+s of 90s/.test(l)).length, 3, 'one status line per try, its turns and time against their limits');
   const many = plain(liveRun(panes(8))(45).render(200));
   assert.ok(many.some(l => /Model 1 ·.*Model 2 ·.*Model 3 ·.*Model 4 ·/.test(l)) && many.some(l => /Model 5 ·.*Model 8 ·/.test(l)), 'eight tries in two rows of four');
 });

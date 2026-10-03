@@ -98,5 +98,7 @@ export type Run = {
   judge: JudgeConfig | null;
   options: RunOptions; models: ModelConfig[]; tasks: { id: string; title: string; hash: string; grading?: string; capabilities?: Capability[]; tier?: Tier; turns?: number; timeout?: number; tools?: number }[];
   planned: number; trials: Trial[];
+  /** Tries planned per model id, so progress can tell a slow local queue from fast parallel ones. */
+  plan?: Record<string, number>;
 };
 export type Progress = { completed: number; total: number; model: string; task: string; phase: string; runId: string };

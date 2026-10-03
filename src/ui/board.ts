@@ -1,7 +1,7 @@
 import { Text, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { LABEL, SKILL_NAME, TIER_NAME, bar, duration, byCapability, byTier, gate, harnesses, levelsNote, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from '../report.ts';
 import type { Run } from '../types.ts';
-import { CARD, MAX_TEXT, SERIES, amber, bold, count, faint, green, muted, nick, pct, plain, rateInk, rose, runWhen, statusInk, table, terminalText, width_ } from './kit.ts';
+import { CARD, MAX_TEXT, SERIES, amber, bold, count, faint, green, muted, nick, padTo, pct, plain, rateInk, rose, runWhen, statusInk, table, terminalText, width_ } from './kit.ts';
 
 /**
  * The comparison page. One page that answers, top to bottom: who is best, which gaps are real, and
@@ -27,20 +27,26 @@ export function comparisonPage(runs: Run[], width: number, everyTask: boolean, c
   // One chart answers the page's question: who is ahead, by how much, and at which difficulty.
   // Coverage shows only where tasks are missing, so a full row stays just a bar and a number.
   const cover = (n: number, total: number) => (n < total ? faint(` ${n}/${total}`) : '');
-  const nameW = Math.max(8, Math.min(34, Math.max(...names.map(width_)) + 2));
+  const nameW = Math.max(8, Math.min(40, Math.max(...names.map(width_)) + 2));
   // A bar too short to read is dropped, so the percentage itself stays on screen on a narrow terminal.
-  const room = Math.min(30, width - 4 - nameW - 18), barW = room < 6 ? 0 : room;
+  // Spread and coverage always show: a score without them overclaims. The wait and "not ranked"
+  // columns need about 32 more cells; where they would squeeze the bar below its full 30 they are
+  // dropped instead, because the bar is what the page is for and L opens every number.
+  const wide = width - 4 - nameW - 6 - 30 - 14 - 32 >= 0;
+  const room = Math.min(30, width - 4 - nameW - 18 - (wide ? 32 : 0)), barW = room < 6 ? 0 : room;
   const barLine = (i: number, lead: string, rate: number | null, tail: string) =>
     lead + pad(names[i]!, nameW) + (barW ? (cards[i]!.synthetic ? faint : SERIES[i % SERIES.length]!)(bar(rate, barW)) + ' ' : '') + bold(pct(rate).padStart(4)) + tail;
   const levels = levelsNote(cards);
   row(bold('Overall') + (levels ? faint(`   ${levels}`) : ''));
+  // Fixed columns after the score: the spread, then the wait for one right answer, then notes. A
+  // column, not a run-on tail, so the eye can read down it and nothing important is cut off first.
   for (const [i, { card, rank }] of ranked.entries()) {
-    // A control's answers are fixed, so a rerun spread would be a number about nothing.
     // A rerun spread means nothing for a control, or for a model not ranked yet.
     const error = card.synthetic || rank === null ? null : scoreError(card), graded = card.tasks.filter(t => t.rate !== null).length;
-    row(barLine(i, muted(String(rank ?? '–').padStart(2)) + '  ', card.score, faint(error === null ? '' : ` ±${Math.round(error * 100)}`)
-      + cover(graded, card.tasks.length) + (card.synthetic || card.perCorrectMs === null ? '' : faint(` · ${duration(card.perCorrectMs)} per correct`))
-      + (rank === null && !card.synthetic ? faint(' · too few tasks to rank') : '') + (card.notRun ? amber(` · ${card.notRun} not run`) : '')));
+    const base = faint(error === null ? '' : ` ±${Math.round(error * 100)}`) + cover(graded, card.tasks.length);
+    const wait = card.synthetic || card.perCorrectMs === null ? '' : `${duration(card.perCorrectMs)}/correct`;
+    const extra = wide ? `${muted(wait.padEnd(17))}${faint(rank === null && !card.synthetic ? 'not ranked' : '')}` : '';
+    row(barLine(i, muted(String(rank ?? '–').padStart(2)) + '  ', card.score, `${wide ? padTo(base, 12) : base}${extra}${card.notRun ? amber(` · ${card.notRun} not run`) : ''}`));
   }
   const tiers = cards.map(c => byTier(c, tasks));
   for (const [t, { tier, ids }] of (tiers[0]?.length ? tierSlices(tasks) : []).entries()) {

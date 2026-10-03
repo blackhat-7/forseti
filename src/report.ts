@@ -359,6 +359,14 @@ const HARNESS: Record<string, string> = { 'claude-code': 'Claude Code', pi: 'For
  * harness or settings, not more evidence. Every card is scored over the union of the selected
  * tasks, so a task one run never had reads "not graded" instead of shifting the columns.
  */
+/**
+ * A model name as a reader wants it: a GGUF file's shard suffix ("-00001-of-00002") and the
+ * quantizer's method tag ("-GSQ-RCO") say nothing about which model it is, and they push the
+ * quant itself out of a narrow column. A local card's token limit already says it is local.
+ */
+export function modelLabel(name: string): string {
+  return name.replace(/-\d{5}-of-\d{5}(?=$|\s)/, '').replace(/-GSQ-RCO(?=-)/, '').replace(/ · local( · \d+k tokens)$/, '$1');
+}
 /** "claude-sonnet-5-5" reads as "Claude Sonnet 5.5", "claude-haiku-4-5-20251001" as "Claude Haiku 4.5"; any other id as it is. */
 export function modelName(id: string): string {
   const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(id);
@@ -368,7 +376,7 @@ export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks
   const tasks = [...new Map(runs.toReversed().flatMap(r => r.tasks).map(t => [t.id, t])).values()].reverse();
   const entries = runs.flatMap(run => run.models.map(model => ({ run, model })));
   const groups = Map.groupBy(entries, ({ run, model }) => `${comparisonKey(run)} ${model.provider}/${model.model}/${model.thinking}`);
-  const name = (label: string) => clean(label).replace(/\s*·\s*via\s.*$/, '').trim();
+  const name = (label: string) => modelLabel(clean(label).replace(/\s*·\s*via\s.*$/, '').trim());
   // An alias like "sonnet" names whatever Claude Code maps it to, so the card says which model that was.
   const served = (trials: Trial[]) => { const ids = [...new Set(trials.flatMap(t => (t.served ? [t.served] : [])))]; return ids.length === 1 ? modelName(ids[0]!) : undefined; };
   const cards = [...groups.values()].map(members => {
