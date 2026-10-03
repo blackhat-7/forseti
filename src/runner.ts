@@ -18,14 +18,21 @@ import { laneOf, runTrial, type Job } from './trial.ts';
 import type { Config, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
 
 export { applicableDimensions, blankTrial, laneOf, rejectArtifacts, taskBudget, validateChecks, type Agent } from './trial.ts';
+/**
+ * Every try of one round comes before any of the next, so a run cut short by a crash or quota still
+ * covers every task once. Each round is shuffled, so no kind of task always meets the run's start or end.
+ */
 export function schedule(models: ModelConfig[], tasks: Task[], repeat: number, seed: number) {
   const jobs = [];
-  for (let r = 1; r <= repeat; r++) for (const task of tasks) for (const model of models) jobs.push({ model, task, repetition: r });
   let state = seed >>> 0;
-  for (let i = jobs.length - 1; i > 0; i--) {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    const j = Math.floor((state / 4294967296) * (i + 1));
-    [jobs[i], jobs[j]] = [jobs[j], jobs[i]];
+  for (let r = 1; r <= repeat; r++) {
+    const round = tasks.flatMap(task => models.map(model => ({ model, task, repetition: r })));
+    for (let i = round.length - 1; i > 0; i--) {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      const j = Math.floor((state / 4294967296) * (i + 1));
+      [round[i], round[j]] = [round[j]!, round[i]!];
+    }
+    jobs.push(...round);
   }
   return jobs;
 }

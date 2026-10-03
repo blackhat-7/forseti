@@ -95,6 +95,8 @@ test('strict settings, explicit billing, instruction-only rubrics and seeded sch
   assert.deepEqual(schedule(cfg().models, tasks, 2, 42), schedule(cfg().models, tasks, 2, 42));
   assert.notDeepEqual(schedule(cfg().models, tasks, 2, 42), schedule(cfg().models, tasks, 2, 43));
   assert.equal(schedule(cfg().models, tasks, 2, 42).length, tasks.length * cfg().models.length * 2);
+  const rounds = schedule(cfg().models, tasks, 2, 42).map(j => j.repetition);
+  assert.deepEqual(rounds, rounds.toSorted(), 'every first try comes before any second try');
   assert.equal(failureStatus('quota exhausted'), 'rate_limited');
   assert.equal(failureStatus('Forbidden', 403), 'auth_error');
   assert.equal(failureStatus('server error', 500), 'provider_error');
