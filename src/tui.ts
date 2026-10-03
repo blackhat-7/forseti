@@ -47,6 +47,8 @@ export class Dashboard implements Component, Focusable {
   private reportRuns: Run[] = [];
   /** The run in progress and every try in it, read from disk so a run started anywhere shows the same. */
   private watcher: LiveWatch;
+  /** Finished tries of the live run at the last look. */
+  private tries = 0;
   private liveView = new LiveView();
   /** The second last painted, so elapsed-time labels tick without repainting on every poll. */
   private second = 0;
@@ -94,8 +96,11 @@ export class Dashboard implements Component, Focusable {
     // A run started elsewhere (the CLI, another terminal) opens Live, as one started here does,
     // unless the user is in the middle of a panel.
     if (!was && this.watcher.id && !this.dialog && this.tab !== LIVE) { this.tab = LIVE; this.resetScroll(); }
-    // A run started elsewhere just ended: its results are new, so the leaderboard reloads.
-    if (ended && !this.controller) void this.app.refresh().then(() => this.repaint());
+    // Each finished try is saved at once, so the leaderboard reloads with it rather than waiting for
+    // the run to end; a run started elsewhere reloads once more when it ends.
+    const tries = this.live?.trials.length ?? 0, finished = tries > this.tries;
+    this.tries = tries;
+    if (finished || (ended && !this.controller)) void this.app.refresh().then(() => this.repaint());
     if (changed || ended || (this.watcher.id && second !== this.second)) { this.second = second; this.repaint(); }
   }
   /** Rows the body region actually gets: the window minus the 3-line header and 3-line footer. */

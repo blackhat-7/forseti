@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stripVTControlCharacters } from 'node:util';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { visibleWidth } from '@earendil-works/pi-tui';
 import { Dashboard } from '../src/tui.ts';
@@ -17,7 +17,7 @@ const line = (e: LiveEvent) => `${JSON.stringify(e)}\n`;
 const plain = (lines: string[]) => lines.map(l => stripVTControlCharacters(l));
 
 /** A run in progress with one try per model, each streaming `events` to its live.jsonl. */
-function liveRun(events: LiveEvent[][]) {
+function liveRun(events: LiveEvent[][], onRefresh = () => {}) {
   const root = mkdtempSync(join(ROOT, 'run-'));
   const models: ModelConfig[] = events.map((_, i) => ({ id: `m${i + 1}`, label: `Model ${i + 1} · local`, provider: 'local', model: 'x', auth: 'none', enabled: true, thinking: 'off' }));
   const auth = { mode: 'local server', billing: 'local' as const, ready: true, note: '' };
@@ -37,10 +37,10 @@ function liveRun(events: LiveEvent[][]) {
   const app = {
     root, config: { schema: 1, suite: 's', models, disabledTests: [], removedTests: [], judge: { ...DEFAULT_JUDGE }, local: { url: '' } },
     suite: { schema: 1, id: 's', title: 's', tasks: [] }, catalog: [], runs: [], localModels: undefined,
-    persist() {}, async refresh() {}, run: () => new Promise(() => {}), compare: () => '', exportReport: () => '', leaderboard: () => null,
+    persist() {}, async refresh() { onRefresh(); }, run: () => new Promise(() => {}), compare: () => '', exportReport: () => '', leaderboard: () => null,
     addModel() {}, addTest() {}, authFor: () => auth, setLocalUrl() {}, async probeLocal() { return []; },
   } as unknown as ConstructorParameters<typeof Dashboard>[0];
-  return (rows: number) => new Dashboard(app, () => {}, () => {}, () => rows);
+  return Object.assign((rows: number) => new Dashboard(app, () => {}, () => {}, () => rows), { root });
 }
 const panes = (n: number) => Array.from({ length: n }, (_, i): LiveEvent[] => [{ k: 'turn' }, { k: 'say', s: `Pane ${i + 1} is thinking.` }]);
 
@@ -192,4 +192,18 @@ test('a pane with a very long transcript renders fast', () => {
   const start = performance.now();
   ui.render(160);
   assert.ok(performance.now() - start < 50, `${(performance.now() - start).toFixed(1)} ms a frame`);
+});
+
+test('a finished try reloads the leaderboard without waiting for the run to end', () => {
+  let refreshes = 0;
+  const make = liveRun(panes(1), () => refreshes++), ui = make(30) as unknown as { watch(): void };
+  ui.watch();
+  const before = refreshes, path = join(make.root, 'runs', 'live', 'run.json');
+  const run = JSON.parse(readFileSync(path, 'utf8'));
+  run.trials.push({ id: '0001-m1-one', model: 'm1', task: 'one', repetition: 1, status: 'passed', checks: [] });
+  writeFileSync(path, JSON.stringify(run));
+  ui.watch();
+  assert.equal(refreshes, before + 1, 'one reload for the new try');
+  ui.watch();
+  assert.equal(refreshes, before + 1, 'nothing new, no reload');
 });
