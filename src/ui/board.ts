@@ -1,5 +1,5 @@
 import { Text, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
-import { LABEL, SKILL_NAME, TIER_NAME, bar, duration, byCapability, byTier, gate, harnesses, levelsNote, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from '../report.ts';
+import { LABEL, SKILL_NAME, TIER_NAME, bar, duration, tokenCount, byCapability, byTier, gate, harnesses, levelsNote, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from '../report.ts';
 import type { Run } from '../types.ts';
 import { CARD, MAX_TEXT, SERIES, amber, bold, count, faint, green, muted, nick, padTo, pct, plain, rateInk, rose, runWhen, statusInk, table, terminalText, width_ } from './kit.ts';
 
@@ -150,7 +150,7 @@ export function runLine(run: Run): string {
 function homeTable(ranked: ReturnType<typeof ranking<ReturnType<typeof scorecards>['cards'][number]>>, tasks: Run['tasks'], width: number): string[] {
   const cards = ranked.map(r => r.card), tiers = tierSlices(tasks), rows = cards.map(c => byTier(c, tasks));
   const names = cards.map(c => plain(c.label)), head = (n: string) => n.split(' · ')[0]!, tag = (n: string) => n.split(' · ').slice(1).join(' · ').replace(/ tokens$/, '');
-  const levelW = 10, speedW = 12, scoreW = 11, levelsW = tiers.length * levelW;
+  const levelW = 10, speedW = 21, scoreW = 11, levelsW = tiers.length * levelW;
   // Names give way before the level columns do: a long name shortens to 24 so the levels still fit.
   const want = Math.max(10, Math.min(38, Math.max(...names.map(width_)) + 2));
   const nameW = tiers.length && width - 4 - scoreW - levelsW - 12 < want ? Math.max(24, width - 4 - scoreW - levelsW - 12) : want;
@@ -160,7 +160,7 @@ function homeTable(ranked: ReturnType<typeof ranking<ReturnType<typeof scorecard
   const barW = Math.max(0, Math.min(24, width - fixed - (showLevels ? tiers.length * levelW : 0) - (showSpeed ? speedW : 0) - 2));
   const out: string[] = [];
   const header = '    ' + padTo('', nameW) + padTo(faint('overall'), barW + 1 + scoreW)
-    + (showLevels ? tiers.map(t => faint(TIER_NAME[t.tier].padStart(levelW - 2) + '  ')).join('') : '') + (showSpeed ? faint('per correct'.padStart(speedW)) : '');
+    + (showLevels ? tiers.map(t => faint(TIER_NAME[t.tier].padStart(levelW - 2) + '  ')).join('') : '') + (showSpeed ? faint('per correct: time · tokens'.padStart(speedW + 5)) : '');
   out.push(header);
   const partial = { any: false };
   for (const [i, { card, rank }] of ranked.entries()) {
@@ -177,7 +177,7 @@ function homeTable(ranked: ReturnType<typeof ranking<ReturnType<typeof scorecard
       const cell = r.rate === null ? '—' : pct(r.rate) + (r.tasks < r.total ? '*' : ' ');
       return (r.rate === null ? faint : rateInk(r.rate))(cell.padStart(levelW - 1)) + ' ';
     }).join('') : '';
-    const speed = showSpeed ? muted((card.synthetic || card.perCorrectMs === null ? '—' : duration(card.perCorrectMs)).padStart(speedW)) : '';
+    const speed = showSpeed ? muted((card.synthetic || card.perCorrectMs === null ? '—' : `${duration(card.perCorrectMs)} · ${tokenCount(card.tokensPerCorrect)}`).padStart(speedW)) : '';
     const lead = muted((ranked_ ? String(rank) : '–').padStart(2)) + '  ';
     // An unranked row rests on too few tasks to compare, so its bar is drawn faint, not in a series colour.
     out.push(lead + padTo(name, nameW) + (barW ? creditBar(card.score, card.checkScore, barW, card.synthetic || !ranked_ ? faint : paint) + ' ' : '') + score + ' ' + levels + speed + (card.notRun ? amber(` ${card.notRun} not run`) : ''));

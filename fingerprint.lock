@@ -1,7 +1,7 @@
 {
   "scheme": 2,
   "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
-  "grading": "fbad26bd61267834ceca53689f5f000065bc39bd54113588b7f16d08147289e5",
+  "grading": "222c9aca5f2b9f531a5ce4b385fc9140955b8ab505cce2977d2a2271c15ac208",
   "files": [
     "adapter.ts",
     "auth.ts",
@@ -30,7 +30,7 @@
     "types.ts",
     "world.ts"
   ],
-  "note": "Default time cap 180s -> 900s in config.ts; speed now reported apart. config.ts sits on the grading path; no grading rule changed.",
+  "note": "Default turn cap 12 -> 40 in config.ts; config.ts is on the grading path, no grading rule changed.",
   "equivalent": [
     {
       "was": "e9ef57a27baa290ca498be82e674e01d1fafb18b95b0ccbf4655d8f8d80d1404",

@@ -199,7 +199,7 @@ export class Dashboard implements Component, Focusable {
     if (data === 'p') { this.options.cache = !this.options.cache; return; }
     if (data === 't') { this.options.timeout = TIMEOUTS[(TIMEOUTS.indexOf(this.options.timeout) + 1) % TIMEOUTS.length] ?? 900; return; }
     if (data === 'P') { this.persist(() => { this.app.config.parallel = PARALLEL[(PARALLEL.indexOf(this.app.config.parallel ?? 1) + 1) % PARALLEL.length]; }); return; }
-    if (data === 'T') { this.options.maxTurns = TURNS[(TURNS.indexOf(this.options.maxTurns) + 1) % TURNS.length] ?? 12; return; }
+    if (data === 'T') { this.options.maxTurns = TURNS[(TURNS.indexOf(this.options.maxTurns) + 1) % TURNS.length] ?? 40; return; }
     const index = this.selection[this.tab]!;
     if (this.tab === MODELS) {
       if (data === 'a') { this.openPicker(); return; }

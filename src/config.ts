@@ -9,10 +9,13 @@ export const CAPABILITIES: Capability[] = ['evidence', 'restraint', 'exactness',
 export const TIERS: Tier[] = ['basic', 'standard', 'hard'];
 export const DIMENSIONS: Dimension[] = ['correctness', 'instructions', 'hygiene', 'tools', 'design'];
 
+// 40 turns: like the time cap, the turn cap stops a stuck try and does not judge working style.
+// At 12, passing tries already used 9-11 turns (Claude Haiku's slowest tenth 11), and a model that
+// works in small steps ran out on tasks it was solving. Effort is reported apart, as tokens.
 // 900s: the cap stops a stuck try, it does not judge speed. At 180s a local thinking model on a
 // consumer GPU timed out on tasks it was solving (Swift-Qwen3.8-27B: 9 of 57, its slowest tenth of
 // passes at 151s), so the limit scored the GPU. Speed is reported apart, as time to solve.
-export const DEFAULT_OPTIONS: RunOptions = { repeat: 2, seed: 42, lane: 'tools', timeout: 900, maxTurns: 12, maxTokens: 4096, allowMetered: false, cache: true };
+export const DEFAULT_OPTIONS: RunOptions = { repeat: 2, seed: 42, lane: 'tools', timeout: 900, maxTurns: 40, maxTokens: 4096, allowMetered: false, cache: true };
 /**
  * Off by default: the reviewer spends real quota, and a judged score is not reproducible the way
  * the rest of the suite is. The default reviewer is deliberately not an Anthropic model, because

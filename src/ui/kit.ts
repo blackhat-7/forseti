@@ -51,7 +51,7 @@ export const LOCAL_ROW = JUDGE_FIELDS.length;
 /** Per-trial time limit. A ladder rather than free entry: these are the values worth choosing. */
 export const TIMEOUTS = [60, 180, 300, 600, 900, 1800];
 /** Tool-call turns per trial. Too low censors outcomes; too high spends plan quota on stragglers. */
-export const TURNS = [6, 12, 20, 30, 50];
+export const TURNS = [12, 20, 40, 60, 100];
 /** Tries a run makes at once. Saved to your config; local-server models still go one at a time. */
 export const PARALLEL = [1, 2, 4, 8];
 export const dot = (on: boolean) => (on ? green('●') : faint('○'));

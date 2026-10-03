@@ -33,9 +33,19 @@ export function correctness(trials: Trial[]) {
  * median of its fully solved tries. `perCorrectMs` is all its counted time over the tries it fully
  * solved: the expected wait for one correct result when a failure is simply tried again.
  */
-export function timing(trials: Trial[]): { solveMs: number | null; perCorrectMs: number | null } {
+export function timing(trials: Trial[]): { solveMs: number | null; perCorrectMs: number | null; tokensPerCorrect: number | null } {
   const observed = trials.filter(scoredTry), wins = observed.filter(solved);
-  return { solveMs: median(wins.map(t => t.wallMs)), perCorrectMs: wins.length ? observed.reduce((sum, t) => sum + t.wallMs, 0) / wins.length : null };
+  // Output tokens are effort that does not depend on the hardware: thinking, replies and tool calls.
+  const counted = observed.filter(t => t.tokens), spent = counted.reduce((sum, t) => sum + t.tokens!.output, 0);
+  return {
+    solveMs: median(wins.map(t => t.wallMs)), perCorrectMs: wins.length ? observed.reduce((sum, t) => sum + t.wallMs, 0) / wins.length : null,
+    tokensPerCorrect: wins.length && counted.length === observed.length ? spent / wins.length : null,
+  };
+}
+/** "900", "12k", "1.4M": an effort figure, rounded the way people say it. */
+export function tokenCount(n: number | null): string {
+  if (n === null) return 'n/a';
+  return n < 1000 ? `${Math.round(n)}` : n < 1e6 ? `${Math.round(n / 1000)}k` : `${(n / 1e6).toFixed(1)}M`;
 }
 /** A duration as a person reads it: seconds under a minute and a half, then minutes. */
 export function duration(ms: number | null): string {
@@ -132,8 +142,8 @@ export type TaskScore = { id: string; title: string; tier?: Tier; rate: number |
 export type Scorecard = {
   label: string; score: number | null; checkScore: number | null; dimensions: Record<Dimension, number | null>;
   evaluated: number; planned: number; notRun: number; stalled: number; tasks: TaskScore[];
-  /** Speed, apart from correctness: see `timing`. */
-  solveMs: number | null; perCorrectMs: number | null;
+  /** Speed and effort, apart from correctness: see `timing`. */
+  solveMs: number | null; perCorrectMs: number | null; tokensPerCorrect: number | null;
   /** 'tier': each difficulty tier counts equally. 'task': every task counts equally. */
   weighting: 'tier' | 'task';
   /** Set when models cover different difficulty levels: the headline uses only these. */
@@ -167,7 +177,7 @@ function headline(tasks: TaskScore[], weighting: Scorecard['weighting']) {
  */
 export const SKILL_NAME: Record<Capability, string> = { evidence: 'Only claims what the files show', restraint: 'No false alarms', exactness: 'Edge cases right', scope: 'Stays within the task', safety: 'Safe under retries and failures' };
 export const TIER_NAME: Record<Tier | 'unrated', string> = { basic: 'Basic', standard: 'Standard', hard: 'Hard', unrated: 'Unrated' };
-export const LABEL = { solved: 'Tasks fully solved', checks: 'Checks passed', instructions: 'Followed output format', tools: 'Tool use', design: 'Code design (reviewed)', hygiene: 'Safe-code gate', stalled: 'Ran out of turns or time', solveTime: 'Typical solve', perCorrect: 'Time per correct result' };
+export const LABEL = { solved: 'Tasks fully solved', checks: 'Checks passed', instructions: 'Followed output format', tools: 'Tool use', design: 'Code design (reviewed)', hygiene: 'Safe-code gate', stalled: 'Ran out of turns or time', solveTime: 'Typical solve', perCorrect: 'Time per correct result', tokensPerCorrect: 'Tokens per correct result' };
 const tries = (n: number) => `${n} ${n === 1 ? 'try' : 'tries'}`;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /**
@@ -277,9 +287,23 @@ export const FINISHED: Trial['status'][] = ['passed', 'failed', ...STALL];
  */
 export function conditionsKey(run: Pick<Run, 'tasks' | 'options' | 'environment' | 'harnessHash' | 'judge'>, taskId: string): string {
   const task = run.tasks.find(t => t.id === taskId)!, o = run.options, e = run.environment;
-  return hash({ task: task.hash, harness: run.harnessHash, lane: o.lane, cache: o.cache,
-    turns: Math.max(o.maxTurns, task.turns ?? 0), timeout: Math.max(o.timeout, task.timeout ?? 0), judge: judgeIdentity(run.judge ?? null),
+  return hash({ task: task.hash, harness: run.harnessHash, lane: o.lane, cache: o.cache, judge: judgeIdentity(run.judge ?? null),
     platform: (e.os ?? '').split(' ').filter((_, i) => i !== 1).join(' '), python: e.python, pythonVersion: e.pythonVersion, proxy: e.proxyConfigured });
+}
+/** The turn and time limits a task's tries ran under: the run's, or the task's own where larger. */
+export function budget(run: Pick<Run, 'tasks' | 'options'>, taskId: string): { turns: number; timeout: number } {
+  const task = run.tasks.find(t => t.id === taskId);
+  return { turns: Math.max(run.options.maxTurns, task?.turns ?? 0), timeout: Math.max(run.options.timeout, task?.timeout ?? 0) };
+}
+/**
+ * Whether a recorded try stands as evidence under `now`'s limits. The model never sees its limits,
+ * so a try that finished inside them would have played out the same under higher ones: it counts
+ * wherever the limits are at least as high. A try that ran out was cut short by its limits, so it
+ * counts only under exactly those. Raising a limit therefore reruns only the tries it cut short.
+ */
+export function fitsBudget(run: Pick<Run, 'tasks' | 'options'>, trial: Pick<Trial, 'task' | 'status'>, now: Pick<Run, 'tasks' | 'options'>): boolean {
+  const was = budget(run, trial.task), is = budget(now, trial.task);
+  return STALL.includes(trial.status) ? was.turns === is.turns && was.timeout === is.timeout : was.turns <= is.turns && was.timeout <= is.timeout;
 }
 /**
  * The model as it ran: which model, how hard it thought, and the exact client flags that drove it.
@@ -290,7 +314,8 @@ export function modelKey(run: Pick<Run, 'environment' | 'options'>, model: Model
   const claude = model.provider === 'claude-code', e = run.environment;
   const tokens = claude ? '' : `/${run.options.maxTokens}`;
   // A run records each lane's client flags; runs from before mixed lanes recorded only their one lane's.
-  const flags = (claude ? e.claudeFlags : e.piFlags) ?? e.agentFlags ?? '';
+  // The turn limit is a budget, judged by fitsBudget, not part of the model: Claude Code never shows it to the model.
+  const flags = ((claude ? e.claudeFlags : e.piFlags) ?? e.agentFlags ?? '').replace(/--max-turns \d+/, '--max-turns N');
   // Claude Code's release changes its prompt and tools; a local server's context changes what fits.
   const local = localEntry(run, model);
   const release = claude ? `/cc${e.claudeVersion ?? '?'}` : local?.contextWindow ? `/ctx${local.contextWindow}` : '';
@@ -328,7 +353,7 @@ export function leaderboard(runs: Run[], suite: Pick<Task, 'id' | 'title' | 'tie
   const models = new Map<string, ModelConfig>(), tries = new Map<string, number>(), trials: Trial[] = [];
   for (const run of newestFirst) for (const t of run.trials) {
     const m = run.models.find(x => x.id === t.model)!;
-    if (m.provider === 'control' || !FINISHED.includes(t.status) || !run.tasks.some(x => x.id === t.task) || wanted.get(t.task) !== conditionsKey(run, t.task) || graded.get(t.task) !== gradedKey(run, t)) continue;
+    if (m.provider === 'control' || !FINISHED.includes(t.status) || !run.tasks.some(x => x.id === t.task) || wanted.get(t.task) !== conditionsKey(run, t.task) || !fitsBudget(run, t, now) || graded.get(t.task) !== gradedKey(run, t)) continue;
     const id = modelKey(run, m), pair = `${id} ${t.task}`, n = (tries.get(pair) ?? 0) + 1;
     // Cards pool by model name, so a Pi model's name carries what its key adds: the file behind a server
     // alias, and output tokens per turn. Claude cards keep pooling across Claude Code releases.
@@ -494,11 +519,11 @@ function summaryMarkdown(runs: Run[]): string[] {
   if (levels) lines.push(`> **Overall covers ${levels}.**`, '');
   else if (mixed) lines.push('> **Not one controlled comparison:** suite, selected tasks, lane or settings differ between these runs. See Details for each group.', '');
   lines.push(`## Who is best overall`, '', `**${LABEL.solved}**: the share of tasks a model got completely right. ${weighting(tasks)}. **±** is how far the number could move if the run were repeated. A model's **rank** is 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart.`, '',
-    `**Speed is shown, not ranked.** **${LABEL.solveTime}** is the median wall-clock time of a fully solved try. **${LABEL.perCorrect}** is all of a model's time over the tries it fully solved: how long you wait for one right answer if you retry failures. Both are on the hardware that ran the model.`, '',
-    `| Rank | Model |${tagged ? ' Harness |' : ''} ${LABEL.solved} | | ± | ${LABEL.solveTime} | ${LABEL.perCorrect} |${lost ? ' Not run |' : ''}${caveat ? ' Caveat |' : ''}`, `|---:|---|${tagged ? '---|' : ''}---:|---|---:|---:|---:|${lost ? '---:|' : ''}${caveat ? '---|' : ''}`);
+    `**Speed is shown, not ranked.** **${LABEL.solveTime}** is the median wall-clock time of a fully solved try. **${LABEL.perCorrect}** is all of a model's time over the tries it fully solved: how long you wait for one right answer if you retry failures. Both are on the hardware that ran the model. **${LABEL.tokensPerCorrect}** is the same for output tokens (thinking, replies, tool calls): effort that does not depend on hardware.`, '',
+    `| Rank | Model |${tagged ? ' Harness |' : ''} ${LABEL.solved} | | ± | ${LABEL.solveTime} | ${LABEL.perCorrect} | ${LABEL.tokensPerCorrect} |${lost ? ' Not run |' : ''}${caveat ? ' Caveat |' : ''}`, `|---:|---|${tagged ? '---|' : ''}---:|---|---:|---:|---:|---:|${lost ? '---:|' : ''}${caveat ? '---|' : ''}`);
   for (const [i, { card, rank }] of ranked.entries()) {
     const error = card.synthetic ? null : scoreError(card);
-    lines.push(`| ${rank ?? '–'} | ${escape(card.label)}${card.synthetic && !/synthetic/i.test(card.label) ? ' (synthetic)' : ''} |${tagged ? ` ${card.harness} |` : ''} **${pct(card.score)}** | \`${bar(card.score)}\` | ${error === null ? '' : `±${Math.round(error * 100)}`} | ${card.synthetic ? '' : duration(card.solveMs)} | ${card.synthetic ? '' : duration(card.perCorrectMs)} |${lost ? ` ${card.notRun} |` : ''}${caveat ? ` ${caveats[i] ?? ''} |` : ''}`);
+    lines.push(`| ${rank ?? '–'} | ${escape(card.label)}${card.synthetic && !/synthetic/i.test(card.label) ? ' (synthetic)' : ''} |${tagged ? ` ${card.harness} |` : ''} **${pct(card.score)}** | \`${bar(card.score)}\` | ${error === null ? '' : `±${Math.round(error * 100)}`} | ${card.synthetic ? '' : duration(card.solveMs)} | ${card.synthetic ? '' : duration(card.perCorrectMs)} | ${card.synthetic ? '' : tokenCount(card.tokensPerCorrect)} |${lost ? ` ${card.notRun} |` : ''}${caveat ? ` ${caveats[i] ?? ''} |` : ''}`);
   }
   if (cards.some(c => c.synthetic)) lines.push('', 'Synthetic controls check the grader, not a model, so they are never ranked.');
   if (lost) lines.push('', '**Not run** counts tries lost to login, quota, crash or cancellation. They never count against a model.');

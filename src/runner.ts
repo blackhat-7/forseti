@@ -12,7 +12,7 @@ import { MAX_ENTRIES, MAX_SUITE_BYTES, atomicJson, files, hash, inside, localDir
 import { makeJudgeCall, type JudgeCall } from './judge.ts';
 import { listLocalModels, LOCAL, shortName } from './local.ts';
 import { SANDBOX, checkSandbox, pythonExecutable } from './sandbox.ts';
-import { FINISHED, STALL, conditionsKey, gradedKey, gradingKey, modelKey, trialKey } from './report.ts';
+import { FINISHED, STALL, conditionsKey, fitsBudget, gradedKey, gradingKey, modelKey, trialKey } from './report.ts';
 import { applicableDimensions, gradeSubmission, loadGrader, rejectArtifacts, validateChecks } from './grade.ts';
 import { laneOf, runTrial, type Job } from './trial.ts';
 import type { Config, ModelConfig, Progress, Run, RunOptions, Task, Trial } from './types.ts';
@@ -150,7 +150,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     const draft = { ...now, tasks: taskEntries, environment };
     const done = new Map<string, number>();
     if (!options.fresh) for (const past of listRuns(root)) for (const t of past.trials) {
-      if (!FINISHED.includes(t.status) || !past.tasks.some(x => x.id === t.task) || !past.models.some(m => m.id === t.model)) continue;
+      if (!FINISHED.includes(t.status) || !past.tasks.some(x => x.id === t.task) || !past.models.some(m => m.id === t.model) || !fitsBudget(past, t, draft)) continue;
       const key = trialKey(past, t);
       done.set(key, (done.get(key) ?? 0) + 1);
     }

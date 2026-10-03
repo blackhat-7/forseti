@@ -13,7 +13,7 @@ import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
-import { byTier, duration, timing, sliceCard, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
+import { byTier, duration, timing, tokenCount, fitsBudget, sliceCard, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
 import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, regrade, gradeClosure, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -991,8 +991,10 @@ test('a try already on record under the same conditions is never run again', asy
     await assert.rejects(runBenchmark(dir, config, opts), /Nothing to run/);
     assert.equal((await runBenchmark(dir, config, { ...opts, repeat: 2 })).planned, 1, 'only the missing second try');
     assert.equal((await runBenchmark(dir, config, { ...opts, fresh: true })).planned, 1, '--fresh runs it anyway');
-    // A different condition is a different try: a larger turn budget is not the same experiment.
-    assert.equal((await runBenchmark(dir, config, { ...opts, maxTurns: opts.maxTurns + 1 })).planned, 1);
+    // Changed on purpose: the model never sees its limits, so a try that finished inside them stands
+    // under higher ones. Only lower limits, which might have cut it short, make it run again.
+    await assert.rejects(runBenchmark(dir, config, { ...opts, maxTurns: opts.maxTurns + 1 }), /Nothing to run/);
+    assert.equal((await runBenchmark(dir, config, { ...opts, maxTurns: opts.maxTurns - 1 })).planned, 1);
   } finally { if (saved === undefined) delete process.env.CEREBRAS_API_KEY; else process.env.CEREBRAS_API_KEY = saved; }
 });
 
@@ -1037,14 +1039,26 @@ test('the leaderboard keeps only tries recorded under today\'s conditions', () =
   assert.deepEqual(now.tasks.map(t => [t.id, t.tier]), [['a', 'standard']]);
 });
 
+test('raising a limit reruns only the tries it cut short', () => {
+  const at = (maxTurns: number, timeout: number) => ({ tasks: [{ id: 'a', title: 'A', hash: 'a' }], options: { ...DEFAULT_OPTIONS, maxTurns, timeout } });
+  const done = { task: 'a', status: 'failed' as const }, cut = { task: 'a', status: 'budget' as const };
+  assert.equal(fitsBudget(at(12, 180), done, at(40, 900)), true, 'a finished try stands under higher limits');
+  assert.equal(fitsBudget(at(40, 900), done, at(12, 900)), false, 'lower limits might have cut it short');
+  assert.equal(fitsBudget(at(12, 180), cut, at(40, 900)), false, 'a try that ran out is rerun under higher limits');
+  assert.equal(fitsBudget(at(12, 180), cut, at(12, 180)), true, 'and counts as unsolved under the same ones');
+});
+
 test('speed is reported apart from correctness: time to solve and time per correct result', () => {
   const m: ModelConfig = { id: 'q', label: 'q', provider: 'local', model: 'q', auth: 'none', enabled: true, thinking: 'off' };
   const tri = (status: Trial['status'], passed: boolean | null, wallMs: number) => ({ ...blankTrial(`q-${wallMs}`, m, { id: 'a' } as never, 1), status, wallMs,
     checks: passed === null ? [] : [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }] });
   // Two solved (60 s, 120 s), one wrong (30 s), one out of time (900 s), one lost to the provider.
   const trials = [tri('passed', true, 60_000), tri('passed', true, 120_000), tri('failed', false, 30_000), tri('timeout', null, 900_000), tri('provider_error', null, 5_000)];
-  assert.deepEqual(timing(trials), { solveMs: 90_000, perCorrectMs: (60_000 + 120_000 + 30_000 + 900_000) / 2 }, 'a stall costs time, a provider failure does not');
-  assert.deepEqual(timing([tri('failed', false, 30_000)]), { solveMs: null, perCorrectMs: null }, 'nothing solved, no time per correct result');
+  assert.deepEqual(timing(trials), { solveMs: 90_000, perCorrectMs: (60_000 + 120_000 + 30_000 + 900_000) / 2, tokensPerCorrect: null }, 'a stall costs time, a provider failure does not; no token counts, no token figure');
+  assert.deepEqual(timing([tri('failed', false, 30_000)]), { solveMs: null, perCorrectMs: null, tokensPerCorrect: null }, 'nothing solved, no time per correct result');
+  const spent = (t: Trial, output: number) => ({ ...t, tokens: { input: 0, output, cacheRead: 0, cacheWrite: 0 } });
+  assert.equal(timing([spent(tri('passed', true, 1), 3000), spent(tri('failed', false, 1), 1000)]).tokensPerCorrect, 4000, 'every counted try\'s output over the tries solved');
+  assert.equal(tokenCount(4000), '4k');
   assert.deepEqual([duration(45_000), duration(150_000), duration(7_200_000), duration(null)], ['45 s', '2.5 min', '2.0 h', 'n/a']);
   const card = scorecard('q', trials, [{ id: 'a', title: 'A' }], 5);
   assert.equal(card.perCorrectMs, 555_000);

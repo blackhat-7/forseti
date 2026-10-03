@@ -323,7 +323,7 @@ test('settings reach preflight and runtime, obey bounds and do not change while 
   assert.match(f.text(), /· 60s ·/, 'the ladder wraps');
   f.key('t', 't', 't', 't');
   f.key('T');
-  assert.match(f.text(), /· 20 turns ·/, 'the turn limit is reachable too');
+  assert.match(f.text(), /· 60 turns ·/, 'the turn limit is reachable too');
   assert.equal(f.calls.length, 0, 'changing a budget starts nothing');
   f.key('l', 'r', enter);
   assert.equal(f.calls[0]!.repeat, 20);
