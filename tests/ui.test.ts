@@ -7,6 +7,7 @@ import { visibleWidth } from '@earendil-works/pi-tui';
 import { Dashboard, terminalText } from '../src/tui.ts';
 import { DEFAULT_JUDGE } from '../src/config.ts';
 import { leaderboard } from '../src/report.ts';
+import { comparisonPage } from '../src/ui/board.ts';
 import type { CatalogEntry } from '../src/app.ts';
 import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite, Trial } from '../src/types.ts';
 
@@ -986,4 +987,19 @@ test('sections are rounded cards with their title in the border, and plain headi
   const narrow = f.ui.render(50).map(stripVTControlCharacters).join('\n');
   assert.doesNotMatch(narrow, /[╭╰│]/, 'under 60 columns borders would eat the content');
   assert.match(narrow, /Models/);
+});
+
+test('the home leaderboard stays inside the window however many models it holds', () => {
+  const tasks = (['basic', 'standard', 'hard'] as const).flatMap(tier => [1, 2, 3].map(k => ({ id: `${tier}${k}`, title: `${tier} ${k}`, hash: `${tier}${k}`, tier })));
+  for (const n of [2, 6, 12, 20]) {
+    const models: ModelConfig[] = Array.from({ length: n }, (_, k) => ({ id: `m${k}`, label: `Qwen3.8-Model-${k}B-IQ3_XXS · local · 32k tokens`, provider: 'local', model: `model-${k}`, auth: 'none', enabled: true, thinking: 'xhigh' }));
+    const trials = models.flatMap((m, k) => tasks.map((t, j) => ({ id: `${m.id}-${t.id}`, model: m.id, task: t.id, repetition: 1, status: (j + k) % 3 ? 'passed' as const : 'failed' as const,
+      checks: [{ id: 'c', dimension: 'correctness' as const, passed: Boolean((j + k) % 3), evidence: '' }], wallMs: 60_000, tokens: { input: 0, output: 4000, cacheRead: 0, cacheWrite: 0 } }) as unknown as Trial));
+    const run = { schema: 1, id: 'r', created: '2026-01-01', status: 'completed', suite: 's', suiteHash: 's', harnessHash: 'h', environment: {}, judge: null, options, models, tasks, planned: trials.length, trials } as Run;
+    for (const width of [60, 80, 132, 200]) {
+      const lines = comparisonPage([run], width, false, true);
+      lines.forEach(l => assert.ok(visibleWidth(l) <= width, `${n} models at ${width}: a line is ${visibleWidth(l)} wide`));
+      if (width >= 132 && n <= 12) assert.ok(lines.some(l => /Hard · 3 tasks/.test(stripVTControlCharacters(l))), `${n} models at ${width}: the level charts show`);
+    }
+  }
 });

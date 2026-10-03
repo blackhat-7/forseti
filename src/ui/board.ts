@@ -1,7 +1,7 @@
 import { Text, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { LABEL, SKILL_NAME, TIER_NAME, bar, duration, tokenCount, byCapability, byTier, gate, harnesses, levelsNote, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, weighting } from '../report.ts';
 import type { Run } from '../types.ts';
-import { CARD, MAX_TEXT, SERIES, amber, bold, count, faint, green, muted, nick, padTo, pct, plain, rateInk, rose, runWhen, statusInk, table, terminalText, width_ } from './kit.ts';
+import { CARD, MAX_TEXT, SERIES, amber, bold, count, faint, green, ink, muted, nick, padTo, pct, plain, rateInk, rose, runWhen, statusInk, table, terminalText, width_ } from './kit.ts';
 
 /**
  * The comparison page. One page that answers, top to bottom: who is best, which gaps are real, and
@@ -21,7 +21,7 @@ export function comparisonPage(runs: Run[], width: number, everyTask: boolean, c
 
   // One line of context; the harness caveat is a clause on it, not a paragraph above the chart.
   const caveat = tagged ? ' · different harnesses, so each gap includes the harness' : mixed ? ' · runs differ in settings, so not one controlled comparison' : '';
-  row(muted(`${cards.some(c => !c.synthetic) ? count(cards.filter(c => !c.synthetic).length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}`) + amber(caveat));
+  row(truncateToWidth(muted(`${cards.some(c => !c.synthetic) ? count(cards.filter(c => !c.synthetic).length, 'model') : count(cards.length, 'synthetic control')} · ${count(tasks.length, 'task')} · ${triesLabel(cards)}`) + amber(caveat), width, '…'));
   row();
 
   if (chartOnly) { out.push(...homeTable(ranked, tasks, width)); return out; }
@@ -159,8 +159,11 @@ function homeTable(ranked: ReturnType<typeof ranking<ReturnType<typeof scorecard
   const showSpeed = showLevels && width - fixed - tiers.length * levelW - speedW >= 12;
   const barW = Math.max(0, Math.min(24, width - fixed - (showLevels ? tiers.length * levelW : 0) - (showSpeed ? speedW : 0) - 2));
   const out: string[] = [];
+  // As many charts across as fit; the rest go underneath. Narrower than one chart, the level columns stay.
+  const charts = tiers.length > 0 && width >= chartWidth(cards.length, columnWidth(cards.length, width));
+  if (charts && showLevels) return homeWithCharts(ranked, tasks, width, nameW, barW + (showSpeed ? 0 : 0), rows, tiers);
   const header = '    ' + padTo('', nameW) + padTo(faint('overall'), barW + 1 + scoreW)
-    + (showLevels ? tiers.map(t => faint(TIER_NAME[t.tier].padStart(levelW - 2) + '  ')).join('') : '') + (showSpeed ? faint('per correct: time · tokens'.padStart(speedW + 5)) : '');
+    + (showLevels ? tiers.map(t => faint(TIER_NAME[t.tier].padStart(levelW - 2) + '  ')).join('') : '') + (showSpeed ? faint('time · tokens / correct'.padStart(speedW)) : '');
   out.push(header);
   const partial = { any: false };
   for (const [i, { card, rank }] of ranked.entries()) {
@@ -180,13 +183,14 @@ function homeTable(ranked: ReturnType<typeof ranking<ReturnType<typeof scorecard
     const speed = showSpeed ? muted((card.synthetic || card.perCorrectMs === null ? '—' : `${duration(card.perCorrectMs)} · ${tokenCount(card.tokensPerCorrect)}`).padStart(speedW)) : '';
     const lead = muted((ranked_ ? String(rank) : '–').padStart(2)) + '  ';
     // An unranked row rests on too few tasks to compare, so its bar is drawn faint, not in a series colour.
-    out.push(lead + padTo(name, nameW) + (barW ? creditBar(card.score, card.checkScore, barW, card.synthetic || !ranked_ ? faint : paint) + ' ' : '') + score + ' ' + levels + speed + (card.notRun ? amber(` ${card.notRun} not run`) : ''));
+    out.push(lead + padTo(name, nameW) + (barW ? creditBar(card.score, card.checkScore, barW, ranked_ && !card.synthetic) + ' ' : '') + score + ' ' + levels + speed + (card.notRun ? amber(` ${card.notRun} not run`) : ''));
   }
   const notes = [levelsNote(cards) ? `Overall covers ${levelsNote(cards)!.replace(/^./, c => c.toLowerCase())}.` : '',
-    cards.some(c => (c.checkScore ?? 0) > (c.score ?? 0) + 0.005) ? '█ tasks fully solved, the score   ▓ checks passed on the rest, partial credit' : '',
+    cards.some(c => (c.checkScore ?? 0) > (c.score ?? 0) + 0.005) ? `${SOLVED('█')} tasks fully solved, the score   ${CREDIT('█')} checks passed on the rest, partial credit` : '',
     partial.any || rows.some(r => r.some(x => x.rate !== null && x.tasks < x.total)) ? '* not every task has a try yet.' : '',
     ranked.some(r => r.rank === null && !r.card.synthetic) ? '– not ranked: tries on under half the tasks.' : ''].filter(Boolean);
-  if (notes.length) out.push('', ...notes.map(n => faint(n)));
+  // The legend carries its own colour swatches, so it is not wrapped in one colour like the notes.
+  if (notes.length) out.push('', ...notes.map(n => (n.includes('\x1b[') ? n.replace(/(tasks fully solved, the score|checks passed on the rest, partial credit)/g, m => faint(m)) : faint(n))));
   return out;
 }
 
@@ -194,8 +198,113 @@ function homeTable(ranked: ReturnType<typeof ranking<ReturnType<typeof scorecard
  * Solid up to the share of tasks fully solved, which is the score, then a lighter shade up to the
  * share of checks passed: a hard task 7 of 8 right shows as progress without being counted as done.
  */
-function creditBar(solved: number | null, checks: number | null, w: number, paint: (s: string) => string): string {
+function creditBar(solved: number | null, checks: number | null, w: number, ranked: boolean): string {
   if (solved === null) return faint('·'.repeat(w));
   const full = Math.round(Math.max(0, Math.min(1, solved)) * w), credit = Math.max(full, Math.round(Math.max(0, Math.min(1, checks ?? solved)) * w));
-  return paint('█'.repeat(full)) + paint('▓'.repeat(credit - full)) + faint('░'.repeat(w - credit));
+  const [strong, soft] = ranked ? [SOLVED, CREDIT] : [muted, TRACK];
+  return strong('█'.repeat(full)) + soft('█'.repeat(credit - full)) + TRACK('─'.repeat(w - credit));
+}
+// Every bar is one colour, so its length is the only thing compared; the row's name says whose it
+// is. Partial credit is the same hue, dimmed, so it reads as "almost" and never as the score.
+const SOLVED = ink(127, 180, 202), CREDIT = ink(78, 112, 128), TRACK = ink(66, 70, 68);
+
+/** Six hues far apart on the wheel, bright enough on the dark backdrop to tell apart at a glance. */
+const KEYS = [ink(97, 175, 239), ink(232, 152, 80), ink(128, 200, 110), ink(178, 140, 230), ink(230, 110, 130), ink(220, 200, 90), ink(80, 200, 190), ink(200, 200, 200)];
+const key = (i: number) => KEYS[i % KEYS.length]!;
+const CHART_H = 7, LABEL_LINES = 3;
+/** A bar's column: 9 cells for a few models, down to 6 so up to ~20 models still fit one chart across. */
+const columnWidth = (n: number, width: number) => Math.max(6, Math.min(9, Math.floor((width - 3) / Math.max(1, n))));
+const chartWidth = (n: number, colW: number) => Math.max(18, n * colW + 3);
+
+/**
+ * Home with the level charts: a ranked table (letter, name, overall bar, score, speed), then one
+ * vertical chart per difficulty level, side by side. Each chart sorts its own columns, highest
+ * first, with the value on top and the model's letter below, in the model's colour.
+ */
+function homeWithCharts(ranked: ReturnType<typeof ranking<ReturnType<typeof scorecards>['cards'][number]>>, tasks: Run['tasks'], width: number, nameW: number, _barW: number, rows: ReturnType<typeof byTier>[], tiers: ReturnType<typeof tierSlices>): string[] {
+  const cards = ranked.map(r => r.card), names = cards.map(c => plain(c.label));
+  const head = (n: string) => n.split(' · ')[0]!, tag = (n: string) => n.split(' · ').slice(1).join(' · ').replace(/ tokens$/, '');
+  const speedW = 21, scoreW = 11;
+  const barW = Math.max(8, Math.min(28, width - 8 - nameW - scoreW - speedW - 2));
+  const out: string[] = [faint('     ' + ' '.repeat(nameW) + padTo('overall', barW + 1 + scoreW) + 'time · tokens / correct'.padStart(speedW))];
+  for (const [i, { card, rank }] of ranked.entries()) {
+    const on = rank !== null || card.synthetic, error = card.synthetic || rank === null ? null : scoreError(card);
+    const short = card.tasks.some(t => t.rate === null);
+    const t = tag(names[i]!), room = nameW - 2 - (t ? width_(t) + 1 : 0), full = head(names[i]!);
+    const shown = width_(full) <= room ? full : `${full.slice(0, Math.max(4, Math.floor(room * 0.4)))}…${full.slice(-Math.max(4, room - Math.max(4, Math.floor(room * 0.4)) - 1))}`;
+    const name = `${on ? bold(shown) : muted(shown)}${t ? faint(` ${t}`) : ''}`;
+    const score = `${(on ? bold : muted)(pct(card.score).padStart(4))}${faint(short ? '*' : ' ')} ${faint((error === null ? '' : `±${Math.round(error * 100)}`).padEnd(4))}`;
+    const speed = muted((card.synthetic || card.perCorrectMs === null ? '—' : `${duration(card.perCorrectMs)} · ${tokenCount(card.tokensPerCorrect)}`).padStart(speedW));
+    const lead = `${muted((rank === null ? '–' : String(rank)).padStart(2))} ${(on ? key(i) : faint)('■')} `;
+    out.push(lead + padTo(name, nameW) + creditBar(card.score, card.checkScore, barW, on && !card.synthetic) + ' ' + score + ' ' + speed + (card.notRun ? amber(` ${card.notRun} not run`) : ''));
+  }
+  out.push('');
+  // The charts, side by side when they fit, otherwise one under another.
+  const colW = columnWidth(cards.length, width), labels = shortLabels(cards.map(c => head(plain(c.label))), colW);
+  const blocks = tiers.map((t, k) => levelChart(TIER_NAME[t.tier], t.ids.size, colW, cards.map((c, i) => ({ i, label: labels[i]!, rate: rows[i]![k]!.rate, partial: rows[i]![k]!.tasks < rows[i]![k]!.total, on: ranked[i]!.rank !== null || c.synthetic }))));
+  const w = chartWidth(cards.length, colW), gap = '   ', across = Math.max(1, Math.min(blocks.length, Math.floor((width + 3) / (w + 3))));
+  for (let b = 0; b < blocks.length; b += across) {
+    const group = blocks.slice(b, b + across);
+    for (let r = 0; r < group[0]!.length; r++) out.push(group.map(g => padTo(g[r] ?? '', w)).join(gap));
+    if (b + across < blocks.length) out.push('');
+  }
+  const notes = [levelsNote(cards) ? `Overall covers ${levelsNote(cards)!.replace(/^./, c => c.toLowerCase())}.` : '',
+    cards.some(c => (c.checkScore ?? 0) > (c.score ?? 0) + 0.005) ? 'partial' : '',
+    rows.some(r => r.some(x => x.rate !== null && x.tasks < x.total)) || cards.some(c => c.tasks.some(t => t.rate === null)) ? '* not every task has a try yet.' : '',
+    ranked.some(r => r.rank === null && !r.card.synthetic) ? '– not ranked: tries on under half the tasks; drawn grey.' : ''].filter(Boolean);
+  if (notes.length) out.push('', ...notes.map(n => (n === 'partial' ? `${SOLVED('█')} ${faint('fully solved, the score')}   ${CREDIT('█')} ${faint('checks passed on the rest, partial credit')}` : faint(n))));
+  return out;
+}
+
+/** One level's vertical chart: columns sorted highest first, value on top, the model's letter below. */
+function levelChart(title: string, tasks: number, COL_W: number, cols: { i: number; label: string[]; rate: number | null; partial: boolean; on: boolean }[]): string[] {
+  const sorted = [...cols].sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1));
+  const out = [`${bold(title)} ${faint(`· ${tasks} tasks`)}`, ''];
+  const barW = Math.max(2, COL_W - 4);
+  const tops = sorted.map(c => (c.rate === null ? 0 : Math.max(0, Math.min(1, c.rate)) * CHART_H));
+  // The value sits just above its own bar, so the eye reads the number where the bar ends.
+  for (let r = CHART_H; r >= 0; r--) {
+    out.push(' ' + sorted.map((c, k) => {
+      const paint = c.on ? key(c.i) : faint, h = tops[k]!;
+      const centre = (text: string, visible: number) => `${' '.repeat(Math.floor((COL_W - 1 - visible) / 2))}${text}`;
+      if (c.rate === null) return padTo(r === 0 ? centre(faint('—'), 1) : '', COL_W);
+      const value = `${Math.round(c.rate * 100)}%${c.partial ? '*' : ''}`;
+      if (r === Math.ceil(h) || (h === 0 && r === 0)) return padTo(centre((c.on ? bold : faint)(value), value.length), COL_W);
+      if (r >= h) return ' '.repeat(COL_W);
+      const fill = Math.min(1, h - r), eighth = Math.round(fill * 8);
+      const cell = eighth >= 8 ? '█'.repeat(barW) : eighth <= 0 ? ' '.repeat(barW) : '▁▂▃▄▅▆▇'[eighth - 1]!.repeat(barW);
+      return padTo(centre(paint(cell), barW), COL_W);
+    }).join(''));
+  }
+  out.push(faint('─'.repeat(sorted.length * COL_W + 1)));
+  // The model's short name sits under its own bar, in its colour, wrapped to the column.
+  for (let line = 0; line < LABEL_LINES; line++) {
+    const row = sorted.map(c => { const text = c.label[line] ?? ''; return padTo(`${' '.repeat(Math.max(0, Math.floor((COL_W - 1 - width_(text)) / 2)))}${(c.on ? key(c.i) : faint)(text)}`, COL_W); });
+    if (row.some(cell => cell.trim())) out.push(' ' + row.join(''));
+  }
+  return out;
+}
+
+/**
+ * Names short enough to sit under a bar: words most models share (a family and version such as
+ * "Qwen3.8", or "Claude") say nothing about which bar is which, so they go, and the rest wraps to
+ * the column. "Swift-Qwen3.8-27B-Q4_K_S" reads as "Swift 27B / Q4_K_S".
+ */
+function shortLabels(names: string[], COL_W: number): string[][] {
+  const words = names.map(n => n.split(/[\s-]+/).filter(Boolean));
+  const shared = (w: string) => words.filter(ws => ws.includes(w)).length * 2 >= names.length && names.length > 2;
+  const w = COL_W - 1;
+  return words.map(ws => {
+    const kept = ws.filter(x => !shared(x));
+    const lines: string[] = [];
+    for (const word of (kept.length ? kept : ws)) {
+      const piece = word.length > w ? `${word.slice(0, w - 1)}…` : word;
+      if (lines.length && width_(`${lines.at(-1)} ${piece}`) <= w) lines[lines.length - 1] += ` ${piece}`;
+      else lines.push(piece);
+    }
+    // Too many lines: keep the first and the last (the quant), and shorten what is between.
+    if (lines.length <= LABEL_LINES) return lines;
+    const middle = lines.slice(1, -1).join(' ');
+    return [lines[0]!, middle.length > w ? `${middle.slice(0, w - 1)}…` : middle, lines.at(-1)!];
+  });
 }
