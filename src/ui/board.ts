@@ -58,8 +58,10 @@ export function comparisonPage(runs: Run[], width: number, everyTask: boolean, c
   for (const [t, { tier, ids }] of (tiers[0]?.length ? tierSlices(tasks) : []).entries()) {
     row();
     row(bold(TIER_NAME[tier]) + faint(` · ${count(ids.size, 'task')}`));
-    for (const [i, rows] of tiers.entries()) {
-      const on = ranked[i]!.rank !== null || cards[i]!.synthetic, r = rows[t]!;
+    // Each level reads highest first; a model's colour stays its own, so it is still found by colour.
+    const order = tiers.map((_, i) => i).sort((a, b) => (tiers[b]![t]!.rate ?? -1) - (tiers[a]![t]!.rate ?? -1));
+    for (const i of order) {
+      const on = ranked[i]!.rank !== null || cards[i]!.synthetic, r = tiers[i]![t]!;
       row(`    ${nameCell(i, on)}${draw(i, r.rate, null, on)}${tail(r.rate, '', cover(r.tasks, r.total), on)}`);
     }
   }

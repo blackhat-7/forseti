@@ -17,7 +17,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## Done this session
 
-- Claude Code models can be pinned by full ID: `claude-code-claude-sonnet-5` is added, not yet run. Board cards key on the served model, so Haiku 4.5 and 5.5 (both once the `haiku` alias) are apart.
+- Claude Code models can be pinned by full ID: `claude-code-claude-sonnet-5` is added, not yet run. Board cards key on the served model, so Haiku 4.5 and 5.5 (both once the `haiku` alias) are apart. Level sections on the board sort by their own score.
 
 ## Next
 
