@@ -354,14 +354,16 @@ export function leaderboard(runs: Run[], suite: Pick<Task, 'id' | 'title' | 'tie
   for (const run of newestFirst) for (const t of run.trials) {
     const m = run.models.find(x => x.id === t.model)!;
     if (m.provider === 'control' || !FINISHED.includes(t.status) || !run.tasks.some(x => x.id === t.task) || wanted.get(t.task) !== conditionsKey(run, t.task) || !fitsBudget(run, t, now) || graded.get(t.task) !== gradedKey(run, t)) continue;
-    const id = modelKey(run, m), pair = `${id} ${t.task}`, n = (tries.get(pair) ?? 0) + 1;
+    // An alias like "haiku" has served more than one model over time, so a Claude try is keyed by the one it got.
+    const served = m.provider === 'claude-code' ? t.served : undefined;
+    const id = `${modelKey(run, m)}${served ? `/${served}` : ''}`, pair = `${id} ${t.task}`, n = (tries.get(pair) ?? 0) + 1;
     // Cards pool by model name, so a Pi model's name carries what its key adds: the file behind a server
     // alias, and output tokens per turn. Claude cards keep pooling across Claude Code releases.
     const file = localEntry(run, m)?.file, pi = m.provider !== 'claude-code';
     if (!models.has(id)) models.set(id, { ...m, id, ...(pi ? {
       model: `${m.model}${file ? `/${file}` : ''}/${run.options.maxTokens}`,
       label: `${m.label} · ${Math.round(run.options.maxTokens / 1024)}k tokens`,
-    } : {}) });
+    } : served ? { model: served, label: modelName(served) } : {}) });
     tries.set(pair, n);
     trials.push({ ...t, model: id, repetition: n });
   }

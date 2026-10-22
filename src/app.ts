@@ -6,7 +6,7 @@ import { CLAUDE_CODE_MODELS } from './claudecode.ts';
 import { DEFAULT_OPTIONS, loadConfig, loadSuite, saveConfig } from './config.ts';
 import { atomicJson, inside, localDir, put, slug } from './files.ts';
 import { listLocalModels, LOCAL, localUrl, shortName } from './local.ts';
-import { comparisonReport, leaderboard } from './report.ts';
+import { comparisonReport, leaderboard, modelName } from './report.ts';
 import { conditionsNow, listRuns, readRun, runBenchmark } from './runner.ts';
 import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite } from './types.ts';
 
@@ -39,6 +39,8 @@ export class App {
     this.catalog.unshift(
       ...(this.localModels ?? []),
       ...CLAUDE_CODE_MODELS.map(id => ({ provider: 'claude-code', id, name: `Claude ${id} · via Claude Code`, auth: authInfo({ provider: 'claude-code', auth: 'cli' as const }) })),
+      // Pinned, because no alias reaches it once a newer Sonnet ships.
+      { provider: 'claude-code', id: 'claude-sonnet-5', name: `${modelName('claude-sonnet-5')} · via Claude Code`, auth: authInfo({ provider: 'claude-code', auth: 'cli' as const }) },
       ...['reference', 'baseline'].map(id => ({ provider: 'control', id, name: `${id} · synthetic control`, auth: authInfo({ provider: 'control', auth: 'none' as const }) })),
     );
   }

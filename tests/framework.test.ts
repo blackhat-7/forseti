@@ -107,6 +107,7 @@ test('strict settings, explicit billing, instruction-only rubrics and seeded sch
   assert.doesNotThrow(() => judge({ provider: 'claude-code', model: 'haiku', auth: 'cli' }));
   assert.throws(() => judge({ provider: 'claude-code', model: 'haiku', auth: 'pi' }), /auth "cli"/);
   assert.throws(() => judge({ provider: 'claude-code', model: 'gpt-5.5', auth: 'cli' }), /one of/);
+  assert.doesNotThrow(() => judge({ provider: 'claude-code', model: 'claude-sonnet-5', auth: 'cli' }), 'a full ID pins an older model');
   assert.throws(() => judge({ provider: 'openai-codex', auth: 'cli' }), /only for the claude-code provider/);
   assert.throws(() => judge({ provider: 'control', model: 'reference' }), /not a synthetic control/);
   assert.throws(() => judge({ repeat: 0 }), /1–5/);
@@ -1034,6 +1035,10 @@ test('the leaderboard keeps only tries recorded under today\'s conditions', () =
   // Output tokens per turn are part of a Pi model, so the board's cards keep two limits apart too.
   const wider = { ...served('r7', '2026-02-05', 'Qwen-A'), options: { ...DEFAULT_OPTIONS, maxTokens: 32768 } };
   assert.deepEqual(scorecards([leaderboard([served('r5', '2026-02-03', 'Qwen-A'), wider], suite, today)!]).cards.map(c => c.label).sort(), ['local · 32k tokens', 'local · 4k tokens']);
+  // A Claude alias that moved to a newer model is two cards, each named with its version.
+  const servedBy = (run: Run, model: string) => ({ ...run, trials: run.trials.map(t => ({ ...t, served: model })) });
+  const moves = leaderboard([servedBy(older, 'claude-opus-4-5-20251101'), servedBy({ ...older, id: 'r8', created: '2026-01-02' }, 'claude-opus-5-5')], suite, today)!;
+  assert.deepEqual(scorecards([moves]).cards.map(c => c.label).sort(), ['Claude Opus 4.5', 'Claude Opus 5.5']);
   // The suite decides tiers and membership: a relabelled task moves, a removed one leaves.
   const now = leaderboard([older, newer], [{ ...suite[0]!, tier: 'standard' }], today)!;
   assert.deepEqual(now.tasks.map(t => [t.id, t.tier]), [['a', 'standard']]);

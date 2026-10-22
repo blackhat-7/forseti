@@ -3,7 +3,7 @@
 Handoff note. Rewritten at the end of every session, never appended to. Cap 40 lines.
 Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
-**Last session:** 2026-10-03
+**Last session:** 2026-10-22
 
 ## State
 
@@ -13,11 +13,11 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **The leaderboard keeps today's conditions only.** A finished try counts under any limits at least its own, so older tries came back after the 40-turn/900 s change. A Pi model's card names its output-token limit. Claude reruns spend plan quota: ask first.
 - **A run only makes missing tries.** Same model + same task and harness submission fingerprints + same settings = already done; `--fresh` forces a rerun. A grading-only change is regraded from saved files (`npm start -- regrade`, also run before every run).
 - **Four production-ops tasks on a simulated estate** (`checkout-hotfix`, `subscription-repair`, `bucket-residency`, `service-web`). Each try gets a variant (seed = try − 1) and reports its harm. A task's `world` module answers gcloud/kubectl/psql/gsutil in-process; nothing real is reachable, and the model is not told. Engine: `suites/personal/private/ops/`. Contract: `docs/suite-contract.md#world-tasks`. Pilots are stale after the scenario rework; the last Qwen run (before it) showed 0 simulation tells, down from 96.
-- Battery on Linux: `npm run check` clean · `npm test` **95/95** · `test:terminal` **fails before and after 2026-10-03's UI work**: "TUI did not mount" (its 1 s wait is likely too short with 300+ saved tries) · `test:judge` not run.
+- Battery on Linux: `npm run check` clean · `npm test` **98/98** · `test:terminal` **fails before and after 2026-10-03's UI work**: "TUI did not mount" (its 1 s wait is likely too short with 300+ saved tries) · `test:judge` not run.
 
 ## Done this session
 
-- Local models behind a server alias are named by the file the server loaded. Board reloads after each finished try. First tries of every task run before any second try. 180 s → 900 s cap, speed columns. Strata (Flash-Next IQ3_S) can crash mid-run: its engine hit an out-of-range assertion once.
+- Claude Code models can be pinned by full ID: `claude-code-claude-sonnet-5` is added, not yet run. Board cards key on the served model, so Haiku 4.5 and 5.5 (both once the `haiku` alias) are apart.
 
 ## Next
 
@@ -32,9 +32,9 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **Run local thinking models with `--tokens 32768`.** At the default 4096, Qwen at xhigh fills a turn with thinking and stops at turn 2.
 - **If `npm test` fails on `fingerprint.lock`, you changed how tries run.** Only `src/trial.ts` and its imports count, without comments or layout. Record it with `npm run fingerprint -- "why"` only if intended. A Claude Code update also resets Claude tries.
 - **Parallel Opus subagents drain the plan's 5-hour window fast.** Four here plus four in another project's session took it from 70% to 100% in about 30 minutes; the benchmark trials were ~2% of that. Run agents one at a time, or on Sonnet. Pilot with Haiku and Sonnet first; run Opus only where both fail.
-- **A prompt that lists expected behaviours makes a bug hunt easy.** It points at every defect.
 - **The Linux sandbox denies `exec` of anything, even Python.** A grader that needs a subprocess fails with `PermissionError`.
 - **`--safe-mode` disables every MCP server.** The Claude Code lane uses `--restricted`. Do not switch back.
 - **`forseti.json` holds the local server address; never commit it.** Model `local-local` follows whatever the aliased server loaded (`src/runner.ts` `loadedFile`); no renaming needed.
 - **Running `python3` against a fixture writes `__pycache__` into it.** Always `python3 -B`.
+- **The sandbox needs Python from `/usr`.** With `~/.nix-profile` first in `PATH`, 16 tests fail and the CLI refuses to start. Run with `PATH="/usr/bin:$PATH"`.
 - `TMPDIR="$PWD/.tmp"` is required for `npm ci` and `npm run test:terminal`. `CLAUDE.md` is a symlink to `AGENTS.md`; edit `AGENTS.md`.

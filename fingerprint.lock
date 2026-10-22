@@ -1,7 +1,7 @@
 {
   "scheme": 2,
   "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
-  "grading": "222c9aca5f2b9f531a5ce4b385fc9140955b8ab505cce2977d2a2271c15ac208",
+  "grading": "698745db32b75ac141a4b60e62811b6c532ab6e08bb054223ff04f78225ac102",
   "files": [
     "adapter.ts",
     "auth.ts",
@@ -30,7 +30,7 @@
     "types.ts",
     "world.ts"
   ],
-  "note": "Default turn cap 12 -> 40 in config.ts; config.ts is on the grading path, no grading rule changed.",
+  "note": "Claude Code models may be pinned by full ID (claude-sonnet-5); config validation only, grading unchanged",
   "equivalent": [
     {
       "was": "e9ef57a27baa290ca498be82e674e01d1fafb18b95b0ccbf4655d8f8d80d1404",

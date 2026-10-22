@@ -36,6 +36,8 @@ function unique(ids: string[], name: string) {
   ids.forEach(slug);
   if (new Set(ids).size !== ids.length) throw new Error(`Duplicate ${name}`);
 }
+/** An alias follows whatever Claude Code maps it to; a full ID pins one model, such as an older release. */
+const claudeCodeModel = (model: string) => CLAUDE_CODE_MODELS.includes(model as never) || /^claude-[a-z]+-\d+(-\d+)*$/.test(model);
 export function validateConfig(root: string, value: Config): Config {
   if (!value || value.schema !== 1 || !Array.isArray(value.models) || !Array.isArray(value.disabledTests) || !Array.isArray(value.removedTests)) throw new Error('Invalid forseti.json schema');
   text(value.suite, 'suite path'); inside(root, value.suite);
@@ -46,7 +48,7 @@ export function validateConfig(root: string, value: Config): Config {
     slug(m.id); text(m.label, 'model label', 200); text(m.provider, 'provider', 100); text(m.model, 'model ID', 500);
     if (!['pi', 'env', 'none', 'cli'].includes(m.auth) || typeof m.enabled !== 'boolean' || !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(m.thinking)) throw new Error(`Invalid model settings: ${m.id}`);
     if (m.provider === 'control' && (!['reference', 'baseline'].includes(m.model) || m.auth !== 'none')) throw new Error('Unknown control');
-    if (m.provider === 'claude-code' && (m.auth !== 'cli' || !CLAUDE_CODE_MODELS.includes(m.model as never))) throw new Error(`Claude Code models use auth "cli" and one of: ${CLAUDE_CODE_MODELS.join(', ')}`);
+    if (m.provider === 'claude-code' && (m.auth !== 'cli' || !claudeCodeModel(m.model))) throw new Error(`Claude Code models use auth "cli" and one of: ${CLAUDE_CODE_MODELS.join(', ')}, or a full ID like claude-sonnet-5`);
     if ((m.auth === 'cli') !== (m.provider === 'claude-code')) throw new Error('auth "cli" is only for the claude-code provider');
     if (m.provider === LOCAL && m.auth !== 'none') throw new Error('A local server model uses auth "none": the server is your own and no credential is sent');
     if (m.provider !== 'control' && m.provider !== LOCAL && m.auth === 'none') throw new Error('Live providers require explicit Pi or environment auth');
@@ -64,7 +66,7 @@ export function validateJudge(j: JudgeConfig): void {
   // A synthetic control has no model behind it, so it cannot review anything.
   if (j.provider === 'control') throw new Error('The reviewer must be a real model, not a synthetic control');
   if (j.provider === LOCAL) throw new Error('The reviewer cannot be a local server model');
-  if (j.provider === 'claude-code' && (j.auth !== 'cli' || !CLAUDE_CODE_MODELS.includes(j.model as never))) throw new Error(`A Claude Code reviewer uses auth "cli" and one of: ${CLAUDE_CODE_MODELS.join(', ')}`);
+  if (j.provider === 'claude-code' && (j.auth !== 'cli' || !claudeCodeModel(j.model))) throw new Error(`A Claude Code reviewer uses auth "cli" and one of: ${CLAUDE_CODE_MODELS.join(', ')}, or a full ID like claude-sonnet-5`);
   if ((j.auth === 'cli') !== (j.provider === 'claude-code')) throw new Error('Reviewer auth "cli" is only for the claude-code provider');
 }
 export function loadConfig(root: string): Config {
