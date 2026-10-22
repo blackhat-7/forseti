@@ -13,7 +13,7 @@ import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
-import { byTier, duration, timing, tokenCount, fitsBudget, sliceCard, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts } from '../src/report.ts';
+import { byTier, duration, timing, tokenCount, fitsBudget, sliceCard, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts, verdictText } from '../src/report.ts';
 import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, regrade, gradeClosure, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -240,14 +240,14 @@ test('ranks share a place when the run cannot tell models apart, and pool only l
   const ranked = ranking(cards);
   // One task apart is inside the noise, so a and b share first; c is clearly behind both.
   assert.deepEqual(ranked.map(r => [r.card.label, r.rank]), [['a', 1], ['b', 1], ['c', 3], ['control-reference', null]], 'a synthetic control is listed, never ranked');
-  const said = verdicts(ranked);
+  const said = verdicts(ranked).map(verdictText);
   assert.match(said[0]!, /^a and b are tied: 8 points apart/);
   assert.match(said[1]!, /^b beats c: 50 points apart, more than the \d+ needed\.$/);
 
   // Ties chain: b is tied with both a and c, but a clearly beats c, and the ranks must not hide that.
   const chain = ranking(scorecards([run('1', [[a!, 10], [b!, 8], [d!, 6]])]).cards);
   assert.deepEqual(chain.map(r => r.rank), [1, 1, 2], 'a model is ranked below every model that clearly beats it');
-  assert.ok(verdicts(chain).some(v => /^a beats d/.test(v)), 'and the model that beats it is named');
+  assert.ok(verdicts(chain).map(verdictText).some(v => /^a beats d/.test(v)), 'and the model that beats it is named');
 
   // The same model under the same comparison key is one candidate measured twice.
   const pooled = scorecards([run('1', [[a!, 11]]), run('2', [[a!, 11]])]).cards;

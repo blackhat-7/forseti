@@ -479,16 +479,16 @@ test('the comparison page ranks with ties, splits by difficulty and names each h
   assert.match(text, /^\s+1\s+Claude opus\s+[█▏▎▍▌▋▊▉░]+\s+88% ±/m);
   assert.match(text, /^\s+1\s+Claude sonnet\s+[█▏▎▍▌▋▊▉░]+\s+75% ±/m, 'inside the noise, so it shares first place');
   assert.match(text, /^\s+3\s+qwen-local\s+[█▏▎▍▌▋▊▉░]+\s+25% ±/m);
-  assert.match(text, /^\s+–\s+Reference · synthetic\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m, 'a control is shown, never ranked, and carries no ±');
+  assert.match(text, /^\s+–\s+Reference synthetic\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m, 'a control is shown, never ranked, and carries no ±');
   // One bar per model in Overall and in each of the two difficulty groups: pooled, so never a second Sonnet line per group.
   assert.equal(text.match(/Claude sonnet\s+[█▏▎▍▌▋▊▉░]/g)?.length, 3, 'pooled into one card');
-  assert.match(text, /Claude opus and Claude sonnet are tied: 13 points apart/);
+  assert.match(text, /Claude opus\s+tied with\s+Claude sonnet\s+13 pts apart/);
   assert.match(text, /different harnesses, so each gap includes the harness/);
   // The difficulty table became one chart: a bar per model under each difficulty heading. Places
   // were dropped when the page was decluttered; the verdict still says which gaps are real.
   const basic = text.slice(text.indexOf('Basic · 8 tasks'), text.indexOf('Hard · 4 tasks')), hard = text.slice(text.indexOf('Hard · 4 tasks'), text.indexOf('\n\n', text.indexOf('Hard · 4 tasks')));
-  for (const [pattern, where] of [[/Claude opus\s+[█▏▎▍▌▋▊▉░]+\s+100%/, basic], [/Claude sonnet\s+[█▏▎▍▌▋▊▉░]+\s+100%/, basic], [/qwen-local\s+[█▏▎▍▌▋▊▉░]+\s+50%/, basic], [/Reference · synthetic\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m, basic],
-    [/Claude opus\s+[█▏▎▍▌▋▊▉░]+\s+75%/, hard], [/Claude sonnet\s+[█▏▎▍▌▋▊▉░]+\s+50%/, hard], [/qwen-local\s+[█▏▎▍▌▋▊▉░]+\s+0%/, hard], [/Reference · synthetic\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m, hard]] as const) assert.match(where, pattern);
+  for (const [pattern, where] of [[/Claude opus\s+[█▏▎▍▌▋▊▉░]+\s+100%/, basic], [/Claude sonnet\s+[█▏▎▍▌▋▊▉░]+\s+100%/, basic], [/qwen-local\s+[█▏▎▍▌▋▊▉░]+\s+50%/, basic], [/Reference synthetic\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m, basic],
+    [/Claude opus\s+[█▏▎▍▌▋▊▉░]+\s+75%/, hard], [/Claude sonnet\s+[█▏▎▍▌▋▊▉░]+\s+50%/, hard], [/qwen-local\s+[█▏▎▍▌▋▊▉░]+\s+0%/, hard], [/Reference synthetic\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m, hard]] as const) assert.match(where, pattern);
   assert.match(text, /Edge cases right \(12\)/);
   assert.match(text, /Task number 11\s+0\/3 ✗\s+0\/6 ✗\s+0\/3 ✗\s+3\/3 ✓/, 'hardest first, one column per model');
   assert.match(text, /4 tasks every model solved/, 'rows with no difference fold away');
@@ -513,7 +513,7 @@ test('a model that ran out of turns says so beside its score', () => {
   f.key('5', ' ', 'c');
   const text = f.text(120);
   // Reworded from a "Stalled" column to a sentence under the ranking, in plain words.
-  assert.match(text, /ran out of turns or time on 1 try \(counted as unsolved\)/);
+  assert.match(text, /Ran out of turns or time, counted as unsolved: [^\n]*×1/);
   // Changed 2026-09-27: a stall used to be left out of the score. Tasks now size their own budget,
   // so running out is an unsolved try and the score says 50%, not 100%.
   assert.match(text, /Example model\s+[█▏▎▍▌▋▊▉░]+\s+50%/);
@@ -543,14 +543,14 @@ test('a tier or skill cell the provider left short says so, and earns no place',
   f.key('5', ' ', 'c');
   const text = f.text(120);
   // Decluttered: stars, footnotes and places became an inline "1/2" wherever tasks lack a finished try.
-  assert.match(text, /refused model\s+[█▏▎▍▌▋▊▉░]+\s+100% ±\d+ 1\/2/, 'the rank line says what the score rests on');
+  assert.match(text, /refused model\s+[█▏▎▍▌▋▊▉░]+\s+100% ±\d+\s+1\/2/, 'the rank line says what the score rests on');
   const hard = text.slice(text.indexOf('Hard · 2 tasks'));
-  assert.match(hard, /refused model\s+[█▏▎▍▌▋▊▉░]+\s+100% 1\/2/);
+  assert.match(hard, /refused model\s+[█▏▎▍▌▋▊▉░]+\s+100%\s+1\/2/);
   assert.match(hard, /solves model\s+[█▏▎▍▌▋▊▉░]+\s+100%\s*$/m);
   assert.match(hard, /stalls model\s+[█▏▎▍▌▋▊▉░]+\s+50%\s*$/m, 'a stall is scored, not a gap');
   assert.match(text, /Hard one\s+·\s+2\/2 ✓\s+0\/2 ✗ out×2/, 'a stalled try sits in the denominator, compact when narrow');
   for (const width of [40, 80, 120]) f.ui.render(width).forEach(row => assert.ok(visibleWidth(row) <= width, `width ${width}: ${visibleWidth(row)}`));
-  assert.match(f.text(40), /100% ±\d+ 1\/2/, 'coverage survives a narrow terminal');
+  assert.match(f.text(40), /100% ±\d+\s+1\/2/, 'coverage survives a narrow terminal');
 });
 
 test('every run states which credential it will use, reviewer included', () => {
@@ -744,7 +744,7 @@ test('the comparison says who is better at what, and only where the run can tell
   f.key('5', ' ', 'c');
   let text = f.text(120);
   // Reworded from "overall  Strong model over Weak model  +67 pts" to the page's one verdict sentence.
-  assert.match(text, /Strong model beats Weak model: 67 points apart, more than the \d+ needed/, 'the overall gap is stated as a verdict');
+  assert.match(text, /Strong model\s+beats\s+Weak model\s+\+67 pts needs \d+/, 'the overall gap is stated as a verdict, one aligned row');
   // Places per skill were dropped when the page was decluttered; the skill row shows each model's score.
   assert.match(text, /Only claims what the files show \(2\)\s+100%\s+0%/, 'and so is the kind of task it comes from');
   assert.match(text, /Safe under retries and failures \(1\)\s+100%\s+100%/, 'a kind of task with no gap shows none');
@@ -763,7 +763,7 @@ test('the comparison says who is better at what, and only where the run can tell
   f.key('c');
   text = f.text(120);
   // Reworded from "nothing clears the bar": a shared rank and a plain sentence say the same thing.
-  assert.match(text, /Strong model and Weak model are tied/);
+  assert.match(text, /Strong model\s+tied with\s+Weak model/);
   assert.match(text, /not a ranking/);
   assert.match(text, /^\s+1\s+Strong model.*\n\s+1\s+Weak model/m, 'a tie shares a rank');
   assert.doesNotMatch(text, /Strong model beats/);
@@ -776,7 +776,7 @@ test('the comparison says who is better at what, and only where the run can tell
   f.key('c');
   text = f.text(120);
   // Reworded from "tied overall: Strong model ≈ Weak model".
-  assert.match(text, /Strong model and Weak model are tied/);
+  assert.match(text, /Strong model\s+tied with\s+Weak model/);
   assert.match(text, /Only claims what the files show \(2\)\s+100%\s+0%/);
   assert.doesNotMatch(text, /Strong model beats Weak model:/);
 });

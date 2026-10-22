@@ -93,6 +93,33 @@
       "auth": "none",
       "enabled": false,
       "thinking": "xhigh"
+    },
+    {
+      "id": "local-local",
+      "label": "local server",
+      "provider": "local",
+      "model": "local",
+      "auth": "none",
+      "enabled": false,
+      "thinking": "xhigh"
+    },
+    {
+      "id": "local-qwen3-8-flash-next-iq3-s",
+      "label": "qwen3.8-flash-next-iq3_s · local",
+      "provider": "local",
+      "model": "qwen3.8-flash-next-iq3_s",
+      "auth": "none",
+      "enabled": false,
+      "thinking": "xhigh"
+    },
+    {
+      "id": "local-swift-1-5-iq3-xxs",
+      "label": "swift-1.5-iq3_xxs · local",
+      "provider": "local",
+      "model": "swift-1.5-iq3_xxs",
+      "auth": "none",
+      "enabled": true,
+      "thinking": "xhigh"
     }
   ],
   "judge": {
@@ -106,5 +133,5 @@
   "local": {
     "url": "http://100.64.0.1:6868"
   },
-  "parallel": 4
+  "parallel": 3
 }

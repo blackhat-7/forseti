@@ -447,29 +447,35 @@ export function ranking<T extends ModelCard>(cards: T[]): { card: T; rank: numbe
   return [...real.map(card => ({ card, rank: 1 + real.filter(other => beats(other, card)).length })),
     ...cards.filter(c => !real.includes(c)).map(card => ({ card, rank: null }))];
 }
+/** One gap between two models: `a` is ahead, and `clear` says whether this run can tell them apart. */
+export type Verdict = { a: ModelCard; b: ModelCard; gap: number; bar: number; clear: boolean };
 /**
- * One plain sentence per neighbouring pair in the ranking, so the reader is told which gaps are
- * real instead of inferring it from bars. Where a model is tied with its neighbour but still ranks
- * lower, the model that clearly beats it is named, so every step in rank has a stated reason.
+ * One verdict per neighbouring pair in the ranking, so the reader is told which gaps are real
+ * instead of inferring it from bars. Where a model is tied with its neighbour but still ranks
+ * lower, the model that clearly beats it is named too, so every step in rank has a stated reason.
  */
-export function verdicts(ranked: { card: ModelCard; rank: number | null }[]): string[] {
+export function verdicts(ranked: { card: ModelCard; rank: number | null }[]): Verdict[] {
   const real = ranked.filter(r => r.rank !== null);
-  const points = (n: number) => Math.round(n * 100);
-  const say = (a: ModelCard, b: ModelCard) => {
-    const call = separated(a, b)!;
-    return call.clear
-      ? `${a.label} beats ${b.label}: ${points(call.gap)} points apart, more than the ${points(call.bar)} needed.`
-      : `${a.label} and ${b.label} are tied: ${points(call.gap)} points apart, and this run needs ${points(call.bar)} to tell them apart.`;
-  };
-  const pairs = real.slice(1).flatMap(({ card, rank }, i) => {
+  const call = (a: ModelCard, b: ModelCard): Verdict => ({ a, b, ...separated(a, b)! });
+  return real.slice(1).flatMap(({ card, rank }, i) => {
     const above = real[i]!;
-    if (separated(above.card, card)!.clear || rank === above.rank) return [say(above.card, card)];
+    if (separated(above.card, card)!.clear || rank === above.rank) return [call(above.card, card)];
     const winner = real.slice(0, i).findLast(o => o.card.score! > card.score! && separated(o.card, card)!.clear);
-    return [say(above.card, card), ...(winner ? [say(winner.card, card)] : [])];
+    return [call(above.card, card), ...(winner ? [call(winner.card, card)] : [])];
   });
-  // Everyone sharing first place is the one case where the listed order could still be read as a ranking.
-  return real.length > 1 && real.every(r => r.rank === 1) ? [...pairs, 'No model clearly beats another in this run, so the order above is not a ranking.'] : pairs;
 }
+export function verdictText(v: Verdict): string {
+  const points = (n: number) => Math.round(n * 100);
+  return v.clear
+    ? `${v.a.label} beats ${v.b.label}: ${points(v.gap)} points apart, more than the ${points(v.bar)} needed.`
+    : `${v.a.label} and ${v.b.label} are tied: ${points(v.gap)} points apart, and this run needs ${points(v.bar)} to tell them apart.`;
+}
+/** Everyone sharing first place is the one case where the listed order could still be read as a ranking. */
+export function noLeader(ranked: { rank: number | null }[]): boolean {
+  const real = ranked.filter(r => r.rank !== null);
+  return real.length > 1 && real.every(r => r.rank === 1);
+}
+export const NO_LEADER = 'No model clearly beats another in this run, so the order above is not a ranking.';
 /** Hardest tier first, and within a tier the task models found hardest first. */
 export function taskOrder(cards: Scorecard[], tasks: Run['tasks']): number[] {
   const rank = (t: RunTask) => (t.tier ? 2 - TIERS.indexOf(t.tier) : 3);
@@ -527,7 +533,7 @@ function summaryMarkdown(runs: Run[]): string[] {
   }
   if (cards.some(c => c.synthetic)) lines.push('', 'Synthetic controls check the grader, not a model, so they are never ranked.');
   if (lost) lines.push('', '**Not run** counts tries lost to login, quota, crash or cancellation. They never count against a model.');
-  const calls = verdicts(ranked), stalls = cards.map(stallNote).filter(n => n !== null);
+  const calls = [...verdicts(ranked).map(verdictText), ...(noLeader(ranked) ? [NO_LEADER] : [])], stalls = cards.map(stallNote).filter(n => n !== null);
   if (calls.length) lines.push('', '**Can this run tell them apart?** A gap counts only when it is bigger than two standard errors of the difference.', '', ...calls.map(v => `- ${escape(v)}`));
   if (stalls.length) lines.push('', ...stalls.map(n => `- ${escape(n)}`));
   lines.push('', '## Where each model is strong or weak', '');
