@@ -3,7 +3,7 @@
 Handoff note. Rewritten at the end of every session, never appended to. Cap 40 lines.
 Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
-**Last session:** 2026-10-22
+**Last session:** 2026-11-10
 
 ## State
 
@@ -13,15 +13,16 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 - **The leaderboard keeps today's conditions only.** A finished try counts under any limits at least its own, so older tries came back after the 40-turn/900 s change. A Pi model's card names its output-token limit. Claude reruns spend plan quota: ask first.
 - **A run only makes missing tries.** Same model + same task and harness submission fingerprints + same settings = already done; `--fresh` forces a rerun. A grading-only change is regraded from saved files (`npm start -- regrade`, also run before every run).
 - **Four production-ops tasks on a simulated estate** (`checkout-hotfix`, `subscription-repair`, `bucket-residency`, `service-web`). Each try gets a variant (seed = try − 1) and reports its harm. A task's `world` module answers gcloud/kubectl/psql/gsutil in-process; nothing real is reachable, and the model is not told. Engine: `suites/personal/private/ops/`. Contract: `docs/suite-contract.md#world-tasks`. Pilots are stale after the scenario rework; the last Qwen run (before it) showed 0 simulation tells, down from 96.
-- Battery on Linux: `npm run check` clean · `npm test` **98/98** · `test:terminal` **fails before and after 2026-10-03's UI work**: "TUI did not mount" (its 1 s wait is likely too short with 300+ saved tries) · `test:judge` not run.
+- Battery on Linux: `npm run check` clean · `npm test` **100/100** · `test:terminal` **fails before and after 2026-10-03's UI work**: "TUI did not mount" (its 1 s wait is likely too short with 300+ saved tries) · `test:judge` not run.
 
 ## Done this session
 
-- Claude Code models can be pinned by full ID: `claude-code-claude-sonnet-5` is added, not yet run. Board cards key on the served model, so Haiku 4.5 and 5.5 (both once the `haiku` alias) are apart. Level sections on the board sort by their own score.
+- **Harness versions.** `fingerprint.lock` numbers each harness (`npm start -- versions`); `npm run fingerprint` starts a new one when how tries run changes, and a grading change updates the current one. `npm start -- leaderboard --version N` and `V` on Home read an older version's board. v1 is every try before 2026-11-10 (8 models); **v2 is empty until rerun**.
+- **v2: Claude Code may start subagents** (same tools and sandbox), a Claude Code model may run through a wrapper (`command` in forseti.json, e.g. `["claude-local", "--offline"]`), and each Claude Code try records `estimatedCost` at API prices from the CLI's per-model costs (Claude models only); the report shows `$ per solved try`.
 
 ## Next
 
-`PLAN.md`: pilot the three ops tasks on Haiku and Sonnet, then read the transcripts for realism bugs. Ask the owner before spending Claude quota.
+Measure the claude-local modes on `lock-refresh` and `sheet-eval` (local alone fails both, Opus solves both): does a local main agent ask Opus, and what does a solve cost? Then `PLAN.md`. Ask the owner before spending Claude quota.
 
 ## Gotchas
 

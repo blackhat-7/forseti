@@ -19,19 +19,21 @@ export const CLAUDE_CODE_MODELS = ['opus', 'sonnet', 'haiku', 'fable'] as const;
  * scores and stall counts were not comparable. `Bash` stays denied — it is unsandboxed and
  * networked — and the Pi lane's own interpreter is supplied instead.
  */
-export const CLAUDE_CODE_ALLOWED = `Read,Write,Edit,Glob,Grep,${MCP_ALLOWED}`;
+export const CLAUDE_CODE_ALLOWED = `Read,Write,Edit,Glob,Grep,Agent,${MCP_ALLOWED}`;
 /**
  * Actually removes tools. `--allowedTools` only pre-approves; without this the session still
- * carries Bash, web access and subagents, which this lane must not have: it runs outside the
- * Python sandbox, and network/subagent access would also make it a different benchmark.
+ * carries Bash and web access, which this lane must not have: they run outside the Python
+ * sandbox and could reach the network or the private verifiers. Subagents stay: they are part of
+ * what the client offers, get the same tools and sandbox as the main agent, and denying them
+ * measured a weaker client.
  */
-export const CLAUDE_CODE_DENIED = 'Bash,Task,WebFetch,WebSearch,NotebookEdit,Workflow,SendMessage,RemoteTrigger,CronCreate,CronDelete,CronList,ScheduleWakeup,EnterWorktree,ExitWorktree';
+export const CLAUDE_CODE_DENIED = 'Bash,WebFetch,WebSearch,NotebookEdit,Workflow,SendMessage,RemoteTrigger,CronCreate,CronDelete,CronList,ScheduleWakeup,EnterWorktree,ExitWorktree';
 
 /**
  * A reviewer only reads the prompt and answers, so it gets no tools at all — not even Read.
  * `--allowedTools` alone would only pre-approve; the tools have to be denied to be absent.
  */
-export const CLAUDE_CODE_JUDGE_DENIED = `${CLAUDE_CODE_DENIED},Read,Write,Edit,Glob,Grep,TodoWrite,BashOutput,KillShell`;
+export const CLAUDE_CODE_JUDGE_DENIED = `${CLAUDE_CODE_DENIED},Agent,Task,Read,Write,Edit,Glob,Grep,TodoWrite,BashOutput,KillShell`;
 
 let binary: string | undefined;
 export function claudeCodeBinary(): string {
@@ -93,11 +95,11 @@ export function readTrace(path: string): ToolEvent[] {
   });
 }
 /** Shared child-process plumbing: bounded output, killed on abort or deadline. `onLine` sees each stdout line as it arrives. */
-function runCli(args: string[], prompt: string, cwd: string, timeoutMs: number, signal: AbortSignal, onLine: (line: string) => void = () => {}) {
+function runCli(command: string[], args: string[], prompt: string, cwd: string, timeoutMs: number, signal: AbortSignal, onLine: (line: string) => void = () => {}) {
   const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' };
   for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_PROFILE']) delete env[key];
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
-    const child = spawn(claudeCodeBinary(), [...args, prompt], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command[0], [...command.slice(1), ...args, prompt], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '', size = 0, pending = '';
     const stop = () => child.kill('SIGTERM');
     const timer = setTimeout(stop, timeoutMs);
@@ -127,7 +129,7 @@ function runCli(args: string[], prompt: string, cwd: string, timeoutMs: number, 
  * Every failure throws: the caller turns that into a note on the trial, never a model failure.
  */
 export async function reviewWithClaudeCode(model: string, prompt: string, cwd: string, timeoutMs: number, signal: AbortSignal): Promise<string> {
-  const { stdout, stderr, code } = await runCli(claudeCodeJudgeArgs(model), prompt, cwd, timeoutMs, signal);
+  const { stdout, stderr, code } = await runCli([claudeCodeBinary()], claudeCodeJudgeArgs(model), prompt, cwd, timeoutMs, signal);
   const parsed = resultMessage(stdout);
   const detail = [parsed?.result, stderr.trim()].find(t => t) ?? '';
   if (!parsed || typeof parsed.result !== 'string' || parsed.is_error || code !== 0) {
@@ -154,6 +156,8 @@ export function resultMessage(stdout: string): CliResult | undefined {
 type CliResult = {
   result?: string; is_error?: boolean; subtype?: string; num_turns?: number; stop_reason?: string;
   total_cost_usd?: number; duration_ms?: number; duration_api_ms?: number;
+  /** Per model, priced by the CLI at API rates. A local model behind a wrapper is priced as if it were Claude. */
+  modelUsage?: Record<string, { costUSD?: number }>;
   usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
 };
 /** What one `stream-json` line shows of the try, in the shape the Pi lane streams. */
@@ -172,6 +176,15 @@ export function liveEvents(line: string): LiveEvent[] {
   if (m.type !== 'user' || !Array.isArray(m.message?.content)) return [];
   return (m.message.content as { type?: string; is_error?: boolean; content?: unknown }[]).filter(b => b?.type === 'tool_result')
     .map(b => ({ k: 'result', ok: !b.is_error, s: (typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '')).slice(0, 2000) }));
+}
+/** Subagents the main agent started: its Agent tool calls, outside any subagent's own messages. */
+export function subagentCalls(stdout: string): number {
+  return stdout.split('\n').reduce((n, line) => {
+    let m: { type?: string; parent_tool_use_id?: string | null; message?: { content?: { type?: string; name?: string }[] } };
+    try { m = JSON.parse(line); } catch { return n; }
+    if (m.type !== 'assistant' || m.parent_tool_use_id || !Array.isArray(m.message?.content)) return n;
+    return n + m.message.content.filter(b => b?.type === 'tool_use' && (b.name === 'Agent' || b.name === 'Task')).length;
+  }, 0);
 }
 const LIMIT = /usage limit|session limit|weekly limit|rate.?limit|hit your (opus|sonnet|haiku|fable) limit|spend limit/i;
 const AUTH = /not logged in|\/login|authentication|unauthori[sz]ed|oauth|invalid api key|credential/i;
@@ -204,12 +217,13 @@ export async function runClaudeCode(
     args: [fileURLToPath(new URL('mcpserver.ts', import.meta.url)), root, tracePath, ...(world ? [world.module, world.report, `--seed=${world.seed}`] : []), ...(task.tools ? [`--calls=${toolLimit(task)}`] : [])],
   } } }), { mode: 0o600 });
   const prompt = world ? task.prompt : `${task.prompt}\n\nWork only inside this directory. Public files:\n${Object.keys(files(root)).join('\n') || '(empty)'}`;
-  const args = claudeCodeArgs(model.model, options.maxTurns, configPath, world ? `Read,Write,Edit,Glob,Grep,mcp__${TERMINAL.server}__${TERMINAL.name}` : CLAUDE_CODE_ALLOWED);
-  record({ type: 'claude-code', binary: claudeCodeBinary(), args });
+  const args = claudeCodeArgs(model.model, options.maxTurns, configPath, world ? `Read,Write,Edit,Glob,Grep,Agent,mcp__${TERMINAL.server}__${TERMINAL.name}` : CLAUDE_CODE_ALLOWED);
+  const command = model.command ?? [claudeCodeBinary()];
+  record({ type: 'claude-code', binary: claudeCodeBinary(), ...(model.command ? { command } : {}), args });
   notify(`claude code · ${model.model}`);
 
   const start = performance.now();
-  const { stdout, stderr, code } = await runCli(args, prompt, root, options.timeout * 1000, signal, line => liveEvents(line).forEach(live));
+  const { stdout, stderr, code } = await runCli(command, args, prompt, root, options.timeout * 1000, signal, line => liveEvents(line).forEach(live));
   trial.modelMs = performance.now() - start;
   // Recovered whatever the outcome: the trace is the only record of what the model did, and a
   // censored or failed trial is exactly when it is worth having.
@@ -220,7 +234,9 @@ export async function runClaudeCode(
 
   const parsed = resultMessage(stdout);
   // Keep the raw streams: a silent or malformed exit is only diagnosable if they are recorded.
-  record({ type: 'claude-code-result', code, subtype: parsed?.subtype, turns: parsed?.num_turns, usage: parsed?.usage, stdout: stdout.slice(0, 4000), stderr: stderr.slice(0, 2000) });
+  record({ type: 'claude-code-result', code, subtype: parsed?.subtype, turns: parsed?.num_turns, usage: parsed?.usage, modelUsage: parsed?.modelUsage, subagents: subagentCalls(stdout), stdout: stdout.slice(0, 4000), stderr: stderr.slice(0, 2000) });
+  // What the Claude models in the session would have cost at API rates; a local model is free.
+  if (parsed?.modelUsage) trial.estimatedCost = Object.entries(parsed.modelUsage).filter(([m]) => m.startsWith('claude-')).reduce((sum, [, u]) => sum + (u.costUSD ?? 0), 0);
   // `??` would stop at an empty string, which is exactly what a silent CLI failure produces.
   // Only the result text and stderr are classified: matching over the whole session transcript
   // turns any mention of a limit inside the model's own reasoning into a fake rate_limited.

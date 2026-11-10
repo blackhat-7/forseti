@@ -7,7 +7,7 @@ import { DEFAULT_OPTIONS, loadConfig, loadSuite, saveConfig } from './config.ts'
 import { atomicJson, inside, localDir, put, slug } from './files.ts';
 import { listLocalModels, LOCAL, localUrl, shortName } from './local.ts';
 import { comparisonReport, leaderboard, modelName } from './report.ts';
-import { conditionsNow, listRuns, readRun, runBenchmark } from './runner.ts';
+import { conditionsNow, listRuns, readRun, runBenchmark, harnessVersions } from './runner.ts';
 import type { AuthInfo, Config, ModelConfig, Progress, Run, RunOptions, Suite } from './types.ts';
 
 export type CatalogEntry = { provider: string; id: string; name: string; auth: AuthInfo };
@@ -22,9 +22,14 @@ export class App {
   /** Today's conditions, computed once: hashing the code and suite on every render would be wasted work. */
   private now?: ReturnType<typeof conditionsNow>;
   constructor(root: string) { this.root = root; }
+  /** The harness version the leaderboard reads; undefined is today's. */
+  version?: number;
   leaderboard(): Run | null {
     this.now ??= conditionsNow(this.root, this.config, { ...DEFAULT_OPTIONS });
-    return leaderboard(this.runs, this.suite.tasks, this.now);
+    const v = this.version === undefined ? undefined : harnessVersions(this.root).find(x => x.version === this.version);
+    if (this.version !== undefined && !v) throw new Error(`No harness version ${this.version}. See npm start -- versions.`);
+    // An older version is today's conditions with the code that ran and graded its tries.
+    return leaderboard(this.runs, this.suite.tasks, v ? { ...this.now, harnessHash: v.harness, gradingHash: v.grading } : this.now);
   }
   async refresh(): Promise<void> {
     this.now = undefined;

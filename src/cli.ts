@@ -8,7 +8,7 @@ import { authInfo, defaultAuth, ENV_KEYS } from './auth.ts';
 import { DEFAULT_OPTIONS, loadSuite } from './config.ts';
 import { atomicJson, clean } from './files.ts';
 import { LOCAL } from './local.ts';
-import { conditionsNow, gradeClosure, harnessFiles, regrade } from './runner.ts';
+import { conditionsNow, gradeClosure, harnessFiles, harnessVersions, recordVersion, regrade } from './runner.ts';
 import { SCHEME } from './fingerprint.ts';
 import { findTells } from './tells.ts';
 import { comparisonReport } from './report.ts';
@@ -36,6 +36,8 @@ const help = `FORSETI  ·  evidence-first LLM benchmarks
                   [--allow-metered] [--no-cache] [--fresh] [--parallel N]
   npm start -- parallel N                     How many tries a run makes at once (default 1)
   npm start -- leaderboard                    Every comparable finished try, all runs
+  npm start -- leaderboard --version N        The same for an older harness version
+  npm start -- versions                       Harness versions and what changed in each
   npm start -- regrade                        Grade saved tries again by today's graders; calls no model
   npm start -- tells [RUN_ID]                 Where a model suspected an ops task's estate is not real
   npm start -- runs
@@ -51,7 +53,7 @@ async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, strict: true, options: {
     help: { type: 'boolean', short: 'h' }, models: { type: 'string' }, tests: { type: 'string' }, repeat: { type: 'string' }, seed: { type: 'string' },
     lane: { type: 'string' }, timeout: { type: 'string' }, turns: { type: 'string' }, tokens: { type: 'string' },
-    'allow-metered': { type: 'boolean' }, 'no-cache': { type: 'boolean' }, fresh: { type: 'boolean' }, parallel: { type: 'string' }, auth: { type: 'string' }, prompt: { type: 'string' }, expect: { type: 'string' },
+    version: { type: 'string' }, 'allow-metered': { type: 'boolean' }, 'no-cache': { type: 'boolean' }, fresh: { type: 'boolean' }, parallel: { type: 'string' }, auth: { type: 'string' }, prompt: { type: 'string' }, expect: { type: 'string' },
   } });
   if (values.help) { console.log(help); return; }
   const root = realpathSync(process.cwd());
@@ -121,7 +123,9 @@ async function main() {
     const note = positionals.slice(1).join(' ').trim();
     if (!note) throw new Error('Say what changed: npm run fingerprint -- "what changed and why it matters"');
     const now = conditionsNow(root, app.config, DEFAULT_OPTIONS, 'any'), before = JSON.parse(readFileSync(join(root, 'fingerprint.lock'), 'utf8'));
-    atomicJson(root, 'fingerprint.lock', { scheme: SCHEME, harness: now.harnessHash, grading: now.gradingHash, files: Object.keys(harnessFiles(root)), gradingFiles: Object.keys(harnessFiles(root, gradeClosure)), note, ...(before.equivalent ? { equivalent: before.equivalent } : {}) });
+    const versions = recordVersion(before.versions ?? [], { harness: now.harnessHash, grading: now.gradingHash!, note, date: new Date().toISOString().slice(0, 10) });
+    atomicJson(root, 'fingerprint.lock', { scheme: SCHEME, harness: now.harnessHash, grading: now.gradingHash, files: Object.keys(harnessFiles(root)), gradingFiles: Object.keys(harnessFiles(root, gradeClosure)), note, ...(before.equivalent ? { equivalent: before.equivalent } : {}), versions });
+    console.log(`Harness version ${versions.at(-1)!.version}.`);
     console.log(`Recorded harness ${now.harnessHash.slice(0, 12)}, grading ${now.gradingHash!.slice(0, 12)}. A new harness reruns tries when asked for; new grading only regrades them: npm start -- regrade.`); return;
   }
   if (command === 'regrade') {
@@ -152,7 +156,13 @@ async function main() {
     return;
   }
   if (command === 'runs') { for (const r of app.runs) console.log(`${r.id}  ${r.status}  ${r.trials.length}/${r.planned}  ${r.options.lane}`); return; }
+  if (command === 'versions') {
+    const versions = harnessVersions(root);
+    for (const v of versions) console.log(clean(`v${v.version}  ${v.date}  ${v.note}${v === versions.at(-1) ? '  (current)' : ''}`));
+    return;
+  }
   if (command === 'leaderboard') {
+    if (values.version) app.version = Number(values.version);
     const board = app.leaderboard();
     if (!board) throw new Error('No finished tries yet. Start with `npm start -- run`.');
     console.log(comparisonReport([board])); return;

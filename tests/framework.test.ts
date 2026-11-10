@@ -14,8 +14,8 @@ import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConf
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
 import { byTier, duration, timing, tokenCount, fitsBudget, sliceCard, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts, verdictText } from '../src/report.ts';
-import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, regrade, gradeClosure, rejectArtifacts, runBenchmark, schedule, validateChecks } from '../src/runner.ts';
-import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage } from '../src/claudecode.ts';
+import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, regrade, gradeClosure, rejectArtifacts, runBenchmark, schedule, validateChecks, recordVersion } from '../src/runner.ts';
+import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage, subagentCalls } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
 import { OPERATOR_PROMPT, openWorld } from '../src/world.ts';
 import { findTells, SUSPICION } from '../src/tells.ts';
@@ -502,7 +502,10 @@ test('Claude Code runs under the first-party login, never an API key, and never 
   for (const flag of ['--restricted', '--permission-mode dontAsk', '--permission-prompts none', '--max-turns 7', '--model sonnet']) assert.ok(args.includes(flag), flag);
   // --allowedTools only pre-approves; only --disallowedTools removes a tool from the session.
   assert.ok(args.includes(`--disallowedTools ${CLAUDE_CODE_DENIED}`), 'tools must be denied, not merely left un-approved');
-  for (const denied of ['Bash', 'Task', 'WebFetch', 'WebSearch']) assert.ok(CLAUDE_CODE_DENIED.split(',').includes(denied), denied);
+  for (const denied of ['Bash', 'WebFetch', 'WebSearch']) assert.ok(CLAUDE_CODE_DENIED.split(',').includes(denied), denied);
+  // Subagents are part of the client: allowed for a candidate, never for the reviewer.
+  assert.ok(CLAUDE_CODE_ALLOWED.split(',').includes('Agent') && !CLAUDE_CODE_DENIED.split(',').some(t => t === 'Agent' || t === 'Task'));
+  assert.ok(CLAUDE_CODE_JUDGE_DENIED.split(',').includes('Agent') && CLAUDE_CODE_JUDGE_DENIED.split(',').includes('Task'));
   assert.ok(!args.includes('--bare'), '--bare would drop the subscription login and demand an API key');
   assert.ok(!args.includes('--safe-mode'), 'safe mode disables every MCP server, so this lane could not be given a Python tool');
   assert.ok(args.includes('--strict-mcp-config') && args.includes('--mcp-config /tmp/mcp.json'), 'only Forseti supplies MCP servers here');
@@ -1158,6 +1161,35 @@ test('a change to how a try runs or is graded is recorded on purpose, by whoever
   assert.deepEqual(Object.keys(harnessFiles(root, gradeClosure)), lock.gradingFiles);
 });
 
+
+test('a wrapped Claude Code counts its subagents and prices only the Claude models in it', () => {
+  const lines = [
+    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', name: 'Agent' }, { type: 'tool_use', name: 'Read' }] } },
+    // A subagent's own Agent call is not the main agent starting one.
+    { type: 'assistant', parent_tool_use_id: 'toolu_1', message: { content: [{ type: 'tool_use', name: 'Agent' }] } },
+    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', name: 'Task' }] } },
+    { type: 'result', result: 'done', modelUsage: { 'claude-opus-5-5': { costUSD: 0.25 }, 'qwen-local': { costUSD: 3 } } },
+  ].map(l => JSON.stringify(l)).join('\n');
+  assert.equal(subagentCalls(lines), 2);
+  assert.deepEqual(resultMessage(lines)?.modelUsage, { 'claude-opus-5-5': { costUSD: 0.25 }, 'qwen-local': { costUSD: 3 } });
+
+  // A command is for Claude Code models only, and lets them name a model only the wrapper knows.
+  const wrapped: ModelConfig = { id: 'cc-local', label: 'local', provider: 'claude-code', model: 'local', auth: 'cli', enabled: true, thinking: 'off', command: ['claude-local', '--offline'] };
+  assert.doesNotThrow(() => validateConfig(root, { ...cfg(), models: [wrapped] }));
+  assert.throws(() => validateConfig(root, { ...cfg(), models: [{ ...wrapped, command: undefined }] }), /Claude Code models use/);
+  assert.throws(() => validateConfig(root, { ...cfg(), models: [{ ...wrapped, command: [] }] }), /Invalid command/);
+  assert.throws(() => validateConfig(root, { ...cfg(), models: [{ ...wrapped, provider: 'openai-codex', auth: 'pi' }] }), /Invalid command/);
+});
+
+test('a change to how tries run starts a harness version; a grading change updates the current one', () => {
+  let v = recordVersion([], { harness: 'a', grading: 'g1', note: 'first', date: 'd1' });
+  assert.deepEqual(v, [{ version: 1, harness: 'a', grading: 'g1', note: 'first', date: 'd1' }]);
+  // Same tries, graded again: still version 1, so its leaderboard reads the regraded scores.
+  v = recordVersion(v, { harness: 'a', grading: 'g2', note: 'grading only', date: 'd2' });
+  assert.deepEqual(v, [{ version: 1, harness: 'a', grading: 'g2', note: 'first', date: 'd1' }]);
+  v = recordVersion(v, { harness: 'b', grading: 'g3', note: 'subagents allowed', date: 'd3' });
+  assert.deepEqual(v.map(x => [x.version, x.harness, x.note]), [[1, 'a', 'first'], [2, 'b', 'subagents allowed']]);
+});
 
 test('a Claude Code alias is named by the exact model it served', () => {
   assert.equal(modelName('claude-sonnet-5-5'), 'Claude Sonnet 5.5');

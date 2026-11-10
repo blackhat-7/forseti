@@ -55,6 +55,8 @@ export type ModelConfig = {
   id: string; label: string; provider: string; model: string;
   auth: 'pi' | 'env' | 'none' | 'cli'; enabled: boolean;
   thinking: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  /** Claude Code only: the command that starts the CLI, such as a wrapper that runs it against a local model. Default `claude`. */
+  command?: string[];
 };
 /**
  * The reviewer model behind the `design` dimension. It is part of the harness, not a candidate:

@@ -1,7 +1,7 @@
 {
   "scheme": 2,
-  "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
-  "grading": "698745db32b75ac141a4b60e62811b6c532ab6e08bb054223ff04f78225ac102",
+  "harness": "63a19454d0db56d4c0d36a52e359579df4b61467b8e647aa9184331699b73522",
+  "grading": "90916f4915684961a997794660724973f931c45df1103b08e53cb9c7601b668c",
   "files": [
     "adapter.ts",
     "auth.ts",
@@ -30,7 +30,7 @@
     "types.ts",
     "world.ts"
   ],
-  "note": "Claude Code models may be pinned by full ID (claude-sonnet-5); config validation only, grading unchanged",
+  "note": "Claude Code may start subagents (same tools and sandbox as the main agent), may run through a wrapper command such as claude-local, and records API-price cost per try",
   "equivalent": [
     {
       "was": "e9ef57a27baa290ca498be82e674e01d1fafb18b95b0ccbf4655d8f8d80d1404",
@@ -61,6 +61,22 @@
       "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
       "grading": "c30afb7b27991a4caa28465ef0bd114dabcc63c6d728565aa8d6af86a286254f",
       "note": "Seeds and harm figures reach only tasks with a world; every other task's fingerprint, tools and arguments are unchanged."
+    }
+  ],
+  "versions": [
+    {
+      "version": 1,
+      "harness": "93ca806c74510b5dea914427ec0abdb19ad1441880b78e6efe4f7803c1e89965",
+      "grading": "698745db32b75ac141a4b60e62811b6c532ab6e08bb054223ff04f78225ac102",
+      "note": "Claude Code without subagents; every try recorded before harness versions existed",
+      "date": "2026-11-10"
+    },
+    {
+      "version": 2,
+      "harness": "63a19454d0db56d4c0d36a52e359579df4b61467b8e647aa9184331699b73522",
+      "grading": "90916f4915684961a997794660724973f931c45df1103b08e53cb9c7601b668c",
+      "note": "Claude Code may start subagents (same tools and sandbox as the main agent), may run through a wrapper command such as claude-local, and records API-price cost per try",
+      "date": "2026-11-10"
     }
   ]
 }

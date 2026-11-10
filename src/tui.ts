@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { harnessVersions } from './runner.ts';
 import { join } from 'node:path';
 import {
   Input, SelectList, ProcessTerminal, TuiAltScreen, Text, ScrollView, VStack,
@@ -20,7 +21,7 @@ import { LiveView, homeCard } from './ui/running.ts';
 const HOME = 0, LIVE = 1, MODELS = 2, TESTS = 3, RUNS = 4, SETTINGS = 5;
 /** The header's brand mark; `headerHits` needs its exact width to know where the pills start. */
 const BRAND = '◆ forseti';
-type UIApp = Pick<App, 'root' | 'config' | 'suite' | 'runs' | 'catalog' | 'localModels' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'leaderboard' | 'addModel' | 'addTest' | 'authFor' | 'setLocalUrl' | 'probeLocal'>;
+type UIApp = Pick<App, 'root' | 'version' | 'config' | 'suite' | 'runs' | 'catalog' | 'localModels' | 'persist' | 'refresh' | 'run' | 'compare' | 'exportReport' | 'leaderboard' | 'addModel' | 'addTest' | 'authFor' | 'setLocalUrl' | 'probeLocal'>;
 type Dialog = 'picker' | 'auth' | 'test' | 'delete' | 'cancel' | 'preflight' | 'billing' | 'report' | 'evidence' | 'help' | 'local';
 
 export class Dashboard implements Component, Focusable {
@@ -194,6 +195,12 @@ export class Dashboard implements Component, Focusable {
       const board = this.app.leaderboard();
       if (!board) throw new Error('No finished tries yet. Start with r.');
       this.report = terminalReport(comparisonReport([board])); this.reportRuns = [board]; this.reportOffset = 0; this.reportMode = 'summary'; this.dialog = 'report'; return;
+    }
+    // Older harness versions keep their own leaderboard; V steps back through them, then to today's.
+    if (data === 'V' && this.tab === HOME) {
+      const versions = harnessVersions(this.app.root).map(v => v.version).slice(0, -1).reverse();
+      this.app.version = versions[this.app.version === undefined ? 0 : versions.indexOf(this.app.version) + 1];
+      return;
     }
     if (data === 'l') { this.options.lane = this.options.lane === 'tools' ? 'prompt' : 'tools'; return; }
     if (data === 'p') { this.options.cache = !this.options.cache; return; }
@@ -515,7 +522,9 @@ export class Dashboard implements Component, Focusable {
       // The answer comes first: how the models compare, from every comparable try on record.
       const board = this.app.leaderboard();
       row();
-      head('Leaderboard', board ? 'L for the full page' : '');
+      const version = harnessVersions(this.app.root).find(v => v.version === this.app.version);
+      head(version ? `Leaderboard · harness v${version.version}` : 'Leaderboard', `${board ? 'L for the full page · ' : ''}V for older versions`);
+      if (version) prose(`${version.date} · ${version.note}`, faint);
       row();
       if (board) this.miniChart(board, inner).forEach(line => row(line));
       else prose('No finished tries yet. Press r to run the suite.', faint);

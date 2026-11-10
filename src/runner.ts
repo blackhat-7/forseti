@@ -145,7 +145,7 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     const taskEntries = tasks.map(t => now.tasks.find(e => e.id === t.id)!);
     // Each model runs in its own family's lane, so one run can hold both; a model's client flags are those of its lane.
     const environment = { node: process.version, ...now.environment, sandbox: SANDBOX, pi: '0.85.1', agent: lanes.size > 1 ? 'mixed' : lanes.has('claude-code') ? 'claude-code' : 'pi',
-      claudeFlags: claudeCodeArgs('MODEL', options.maxTurns).join(' '), piFlags: 'pi-agent-core 0.85.1', ...(lanes.has('claude-code') ? { claudeVersion: claudeVersion() } : {}), catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null, ...(fileOf(m) ? { file: fileOf(m) } : {}) } : catalogModels.getModel(m.provider, m.model))) };
+      claudeFlags: claudeCodeArgs('MODEL', options.maxTurns).join(' '), piFlags: 'pi-agent-core 0.85.1', ...(lanes.has('claude-code') ? { claudeVersion: claudeVersion() } : {}), catalog: JSON.stringify(models.map(m => m.provider === 'control' ? { control: m.model } : m.provider === 'claude-code' ? { claudeCode: m.model, ...(m.command ? { command: m.command } : {}) } : m.provider === LOCAL ? { local: m.model, url: config.local.url, contextWindow: contexts[m.model] ?? null, ...(fileOf(m) ? { file: fileOf(m) } : {}) } : catalogModels.getModel(m.provider, m.model))) };
     // Only the tries not already on record under these exact conditions are run; see trialKey.
     const draft = { ...now, tasks: taskEntries, environment };
     const done = new Map<string, number>();
@@ -226,7 +226,8 @@ export function readRun(root: string, id: string, active = activeRunId(root)): R
   try { const regraded = JSON.parse(readFileSync(inside(root, `runs/${id}/regrade.json`), 'utf8')) as Record<string, Partial<Trial>>; for (const trial of run.trials) Object.assign(trial, regraded[trial.id]); } catch { /* Never regraded. */ }
   // Claude Code's first log line names the model behind the alias; the try's log keeps it.
   for (const trial of run.trials) {
-    if (trial.served || !run.models.some(m => m.id === trial.model && m.provider === 'claude-code')) continue;
+    // A wrapped CLI logs every model it routes to, so its first Claude name is not what served the try.
+    if (trial.served || !run.models.some(m => m.id === trial.model && m.provider === 'claude-code' && !m.command)) continue;
     try { trial.served = /\\"model\\":\\"(claude-[a-z0-9-]+)\\"/.exec(readFileSync(inside(root, `runs/${id}/trials/${trial.id}/events.jsonl`), 'utf8'))?.[1]; } catch { /* no log, no name */ }
   }
   refingerprint(root, run);
@@ -267,6 +268,20 @@ function refingerprint(root: string, run: Run): void {
   if (cache.claudeVersion && !run.environment.claudeVersion) run.environment.claudeVersion = cache.claudeVersion;
 }
 /** Harness fingerprints fingerprint.lock declares equal to a later pair, each with the reason. */
+/**
+ * A numbered harness: what tries ran under, so a leaderboard can be read for each. A new number
+ * starts only when how tries run changes; a grading change regrades the same tries, so it updates
+ * the version in place.
+ */
+export type HarnessVersion = { version: number; harness: string; grading: string; note: string; date: string };
+export function harnessVersions(root: string): HarnessVersion[] {
+  try { return (JSON.parse(readFileSync(inside(root, 'fingerprint.lock'), 'utf8')) as { versions?: HarnessVersion[] }).versions ?? []; } catch { return []; }
+}
+export function recordVersion(versions: HarnessVersion[], next: Omit<HarnessVersion, 'version'>): HarnessVersion[] {
+  const last = versions.at(-1);
+  if (last?.harness === next.harness) return [...versions.slice(0, -1), { ...last, grading: next.grading }];
+  return [...versions, { version: (last?.version ?? 0) + 1, ...next }];
+}
 function equivalences(root: string): { was: string; harness: string; grading: string }[] {
   try { return (JSON.parse(readFileSync(inside(root, 'fingerprint.lock'), 'utf8')) as { equivalent?: { was: string; harness: string; grading: string }[] }).equivalent ?? []; } catch { return []; }
 }
