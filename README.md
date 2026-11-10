@@ -61,7 +61,7 @@ Keys: `1`–`6` switch tabs, `r` starts a run, `?` lists everything else.
 
 ## What it tests
 
-32 tasks in three tiers (`basic`, `standard`, `hard`), each scored separately so easy tasks can't pad a strong model's number. Most are code: fix a shared parser, write an exact SQL query, reconcile three sources that disagree.
+32 tasks in three tiers (`basic`, `standard`, `hard`), each scored separately so easy tasks can't pad a strong model's number. 10 that every model solved are retired (`removedTests` in `forseti.json`), so 22 run and count. Most are code: fix a shared parser, write an exact SQL query, reconcile three sources that disagree.
 
 **Production operations.** Four hard tasks put the model on call:
 

@@ -2,7 +2,18 @@
   "schema": 1,
   "suite": "suites/personal/suite.json",
   "disabledTests": [],
-  "removedTests": [],
+  "removedTests": [
+    "ticket-sla",
+    "double-delivery",
+    "zip-manifest",
+    "artifact-contract",
+    "pause-correction",
+    "regression-boundary",
+    "order-pricing",
+    "incident-window",
+    "event-ledger",
+    "retry-rollup"
+  ],
   "models": [
     {
       "id": "control-reference",
@@ -120,6 +131,61 @@
       "auth": "none",
       "enabled": true,
       "thinking": "xhigh"
+    },
+    {
+      "id": "claude-code-claude-sonnet-5",
+      "label": "Claude Sonnet 5 · via Claude Code",
+      "provider": "claude-code",
+      "model": "claude-sonnet-5",
+      "auth": "cli",
+      "enabled": true,
+      "thinking": "off"
+    },
+    {
+      "id": "claude-code-claude-opus-4-6",
+      "label": "Claude Opus 4.6 · via Claude Code",
+      "provider": "claude-code",
+      "model": "claude-opus-4-6",
+      "auth": "cli",
+      "enabled": false,
+      "thinking": "off"
+    },
+    {
+      "id": "claude-local-offline",
+      "label": "Local alone · claude-local --offline",
+      "provider": "claude-code",
+      "model": "local",
+      "auth": "cli",
+      "enabled": false,
+      "thinking": "off",
+      "command": [
+        "claude-local",
+        "--offline"
+      ]
+    },
+    {
+      "id": "claude-local-local",
+      "label": "Local main, asks Opus · claude-local",
+      "provider": "claude-code",
+      "model": "local",
+      "auth": "cli",
+      "enabled": false,
+      "thinking": "off",
+      "command": [
+        "claude-local"
+      ]
+    },
+    {
+      "id": "claude-local-opus",
+      "label": "Opus main, local helpers · claude-local",
+      "provider": "claude-code",
+      "model": "claude-opus-5-5",
+      "auth": "cli",
+      "enabled": false,
+      "thinking": "off",
+      "command": [
+        "claude-local"
+      ]
     }
   ],
   "judge": {

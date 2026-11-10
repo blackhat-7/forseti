@@ -29,7 +29,8 @@ export class App {
     const v = this.version === undefined ? undefined : harnessVersions(this.root).find(x => x.version === this.version);
     if (this.version !== undefined && !v) throw new Error(`No harness version ${this.version}. See npm start -- versions.`);
     // An older version is today's conditions with the code that ran and graded its tries.
-    return leaderboard(this.runs, this.suite.tasks, v ? { ...this.now, harnessHash: v.harness, gradingHash: v.grading } : this.now);
+    const tasks = this.suite.tasks.filter(t => !this.config.removedTests.includes(t.id));
+    return leaderboard(this.runs, tasks, v ? { ...this.now, harnessHash: v.harness, gradingHash: v.grading } : this.now);
   }
   async refresh(): Promise<void> {
     this.now = undefined;

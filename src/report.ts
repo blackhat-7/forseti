@@ -321,7 +321,9 @@ export function modelKey(run: Pick<Run, 'environment' | 'options'>, model: Model
   const release = claude ? `/cc${e.claudeVersion ?? '?'}` : local?.contextWindow ? `/ctx${local.contextWindow}` : '';
   // Behind a server alias, the file it loaded; recorded only then, so older local tries keep their key.
   const file = local?.file ? `/${local.file}` : '';
-  return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(flags).slice(0, 12)}${release}${file}`;
+  // A wrapper decides what runs, so the same model name behind another command is another candidate.
+  const command = model.command ? `/${hash(model.command).slice(0, 12)}` : '';
+  return `${model.provider}/${model.model}/${model.thinking}${tokens}/${hash(flags).slice(0, 12)}${release}${file}${command}`;
 }
 function localEntry(run: Pick<Run, 'environment'>, model: ModelConfig): { contextWindow?: number; file?: string } | undefined {
   try { return (JSON.parse(run.environment.catalog ?? '[]') as { local?: string; contextWindow?: number; file?: string }[]).find(c => c.local === model.model); } catch { return undefined; }

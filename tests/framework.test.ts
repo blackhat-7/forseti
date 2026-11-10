@@ -1179,6 +1179,12 @@ test('a wrapped Claude Code counts its subagents and prices only the Claude mode
   assert.throws(() => validateConfig(root, { ...cfg(), models: [{ ...wrapped, command: undefined }] }), /Claude Code models use/);
   assert.throws(() => validateConfig(root, { ...cfg(), models: [{ ...wrapped, command: [] }] }), /Invalid command/);
   assert.throws(() => validateConfig(root, { ...cfg(), models: [{ ...wrapped, provider: 'openai-codex', auth: 'pi' }] }), /Invalid command/);
+  // The same model name behind another command is another candidate: it neither pools nor counts as done.
+  const run = { environment: { claudeFlags: '-p', claudeVersion: '2' }, options: { maxTokens: 4096 } } as unknown as Run;
+  const plain = { ...wrapped, command: undefined };
+  assert.notEqual(modelKey(run, wrapped), modelKey(run, { ...wrapped, command: ['claude-local'] }));
+  assert.notEqual(modelKey(run, wrapped), modelKey(run, plain));
+  assert.equal(modelKey(run, plain), modelKey(run, { ...plain }), 'a model without a command keeps its key');
 });
 
 test('a change to how tries run starts a harness version; a grading change updates the current one', () => {
