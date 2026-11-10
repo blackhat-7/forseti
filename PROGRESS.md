@@ -7,7 +7,7 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 
 ## State
 
-- **32 tasks, 22 active.** `hard` 7 · `standard` 10 · `basic` 5. The other 10 every model solved; they are retired in `removedTests` (`forseti.json`), so runs skip them and the board leaves them out (`src/app.ts`). Claude models skip `basic`. A task may set its own `turns`/`timeout`; the effective budget is the larger of the run's and the task's.
+- **32 tasks, 22 active.** `hard` 7 · `standard` 10 · `basic` 5. The other 10 every model solved; they are retired in `removedTests` (`forseti.json`), so runs skip them and the board leaves them out (`src/app.ts`). A task may set its own `turns`/`timeout`; the effective budget is the larger of the run's and the task's.
 - **Scoring:** correctness is the headline; speed and effort are shown apart (`Typical solve`, `Time per correct result`, `Tokens per correct result`), never ranked. Default caps 40 turns / 900 s stop stuck tries; running out still counts as unsolved. Raising a cap reruns only tries it cut short (`fitsBudget`).
 - **The rebuilt hard tier separates, on one try each.** `lock-refresh` and `sheet-eval`: Haiku ✗, Sonnet ✗, Opus ✓. `crew-schedule` and `log-query`: Haiku ✗, Sonnet ✓. Detail in `docs/transcript-research.md`. Not yet a measurement.
 - **The leaderboard keeps today's conditions only.** A finished try counts under any limits at least its own, so older tries came back after the 40-turn/900 s change. A Pi model's card names its output-token limit. Claude reruns spend plan quota: ask first.
