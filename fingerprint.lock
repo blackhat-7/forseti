@@ -1,7 +1,7 @@
 {
   "scheme": 2,
-  "harness": "63a19454d0db56d4c0d36a52e359579df4b61467b8e647aa9184331699b73522",
-  "grading": "90916f4915684961a997794660724973f931c45df1103b08e53cb9c7601b668c",
+  "harness": "de9cb9ac26aec030953e94558f0a540e0d4827380e56a2d3aad183e203c25eab",
+  "grading": "61da095c15ca8362808d56546599d65dfeee83713c7f5f79b3eebfa37cdee7c7",
   "files": [
     "adapter.ts",
     "auth.ts",
@@ -30,7 +30,7 @@
     "types.ts",
     "world.ts"
   ],
-  "note": "Claude Code may start subagents (same tools and sandbox as the main agent), may run through a wrapper command such as claude-local, and records API-price cost per try",
+  "note": "Claude Code lane lists the python tool from the first turn (alwaysLoad), not behind ToolSearch",
   "equivalent": [
     {
       "was": "e9ef57a27baa290ca498be82e674e01d1fafb18b95b0ccbf4655d8f8d80d1404",
@@ -76,6 +76,13 @@
       "harness": "63a19454d0db56d4c0d36a52e359579df4b61467b8e647aa9184331699b73522",
       "grading": "90916f4915684961a997794660724973f931c45df1103b08e53cb9c7601b668c",
       "note": "Claude Code may start subagents (same tools and sandbox as the main agent), may run through a wrapper command such as claude-local, and records API-price cost per try",
+      "date": "2026-11-10"
+    },
+    {
+      "version": 3,
+      "harness": "de9cb9ac26aec030953e94558f0a540e0d4827380e56a2d3aad183e203c25eab",
+      "grading": "61da095c15ca8362808d56546599d65dfeee83713c7f5f79b3eebfa37cdee7c7",
+      "note": "Claude Code lane lists the python tool from the first turn (alwaysLoad), not behind ToolSearch",
       "date": "2026-11-10"
     }
   ]

@@ -215,6 +215,8 @@ export async function runClaudeCode(
   writeFileSync(configPath, JSON.stringify({ mcpServers: { [server]: {
     command: process.execPath,
     args: [fileURLToPath(new URL('mcpserver.ts', import.meta.url)), root, tracePath, ...(world ? [world.module, world.report, `--seed=${world.seed}`] : []), ...(task.tools ? [`--calls=${toolLimit(task)}`] : [])],
+    // The task's only way to run code: listed from the first turn, not behind ToolSearch.
+    alwaysLoad: true,
   } } }), { mode: 0o600 });
   const prompt = world ? task.prompt : `${task.prompt}\n\nWork only inside this directory. Public files:\n${Object.keys(files(root)).join('\n') || '(empty)'}`;
   const args = claudeCodeArgs(model.model, options.maxTurns, configPath, world ? `Read,Write,Edit,Glob,Grep,Agent,mcp__${TERMINAL.server}__${TERMINAL.name}` : CLAUDE_CODE_ALLOWED);
