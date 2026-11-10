@@ -1,7 +1,6 @@
 # Forseti — agent guide
 
-**Every session, read these four files first, in order. They are short on purpose.**
-`AGENTS.md` (this file) · `PROGRESS.md` (where things stand) · `PLAN.md` (what to do next) · `DECISIONS.md` (why things are the way they are).
+Rules and commands only. Current state, the task plan and the decision log live in the maintainer's notes, outside this repository.
 
 ## What this is
 
@@ -30,14 +29,10 @@ npm run demo                       # 36 synthetic trials, no provider needed
 
 ## Session routine
 
-1. **Orient.** Read the four files. Run `git log --oneline -5`, then `npm run check && npm test`. Confirm reality matches `PROGRESS.md`. Say so if it does not.
-2. **Pick one task** — the top unchecked line in `PLAN.md`. Mark it `[~]`.
-3. **Do only that task.** Read the code before changing it.
-4. **Verify** with the task's own done-check plus `npm run check && npm test`.
-5. **Leave the trail.** Tick `[x]` in `PLAN.md`. Rewrite `PROGRESS.md`. Append to `DECISIONS.md` if you chose something a later reader might undo. Commit saying what and why, then `git push`.
-6. **Stop.** Tests green, nothing half-done.
-
-**A task is not finished until step 5 is finished.** Report honestly at step 4: a failing check gets written down, never worked around.
+1. **Orient.** Run `git log --oneline -5`, then `npm run check && npm test`.
+2. **Do one task.** Read the code before changing it.
+3. **Verify** with the task's own done-check plus `npm run check && npm test`. A failing check gets written down, never worked around.
+4. **Commit** saying what and why, then `git push`. Stop with tests green and nothing half-done.
 
 ## Project rules
 
@@ -54,13 +49,6 @@ npm run demo                       # 36 synthetic trials, no provider needed
 
 ## Writing rules
 
-These keep the four files usable by a fresh reader with no memory of this session.
-
-- **Write for someone who knows nothing.** No "as discussed", no "the usual approach". Name files, flags and commands.
-- **Plain words, short sentences, one idea each.** State the fact, not the story around it.
-- **Rewrite `PROGRESS.md`, never append to it.** It is a handoff note, not a log. Delete what is no longer true.
-- **Size caps, enforced:** `AGENTS.md` ≤ 80 lines · `PROGRESS.md` ≤ 40 lines · `PLAN.md` one line per task · `DECISIONS.md` ≤ 3 lines per entry.
-- Past this cap, cut, do not continue. Detail belongs in `docs/`, code comments or the commit message.
-- **Record gotchas, not narrative.** If you hit a trap, the next agent will too. One line, in `PROGRESS.md`.
 - Code comments say **why**, never what.
-- The finished history of this project is `docs/history.md`. Read it only when you need the reason behind something the four files do not explain. Never add to it.
+- Detail belongs in `docs/`, code comments or the commit message.
+- The finished history of this project is `docs/history.md`. Read it only when you need the reason behind something. Never add to it.

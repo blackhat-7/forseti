@@ -174,13 +174,6 @@ Coverage: [transcript sampling and task rationale](transcript-research.md). Boun
 
 ## Working on this
 
-Four short files carry everything a new session needs, so no one has to remember the last one.
+[AGENTS.md](../AGENTS.md) says how to work here: commands, session routine, rules. `CLAUDE.md` is a symlink to it.
 
-| | |
-|---|---|
-| [AGENTS.md](../AGENTS.md) | how to work here: commands, session routine, rules. `CLAUDE.md` is a symlink to it. |
-| [PROGRESS.md](../PROGRESS.md) | where things stand right now, and the traps. Rewritten each session. |
-| [PLAN.md](../PLAN.md) | the ordered task list. Top unchecked line is next. |
-| [DECISIONS.md](../DECISIONS.md) | why things are the way they are. Append only. |
-
-The finished milestone-by-milestone log is [docs/history.md](history.md). Read it for reasons the four files do not explain; nothing is added to it.
+The finished milestone-by-milestone log is [docs/history.md](history.md). Read it for the reasons behind earlier choices; nothing is added to it.
