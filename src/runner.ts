@@ -178,7 +178,8 @@ export async function runBenchmark(root: string, config: Config, options: RunOpt
     const blockedModels = new Map<string, string>();
     const ctx = { runDir, snapshot, options, local: config.local.url, contexts, judge, judgeCall, signal,
       blocked: (job: Job) => blockedProviders.get(job.model.provider) ?? blockedModels.get(job.model.id) };
-    await inParallel(jobs, options.parallel ?? 1, job => job.model.provider === LOCAL, async (job, i) => {
+    // A wrapped Claude Code model (claude-local) runs on the same local GPU.
+    await inParallel(jobs, options.parallel ?? 1, job => job.model.provider === LOCAL || !!job.model.command, async (job, i) => {
       const notify = (phase: string) => onProgress({ completed: run.trials.length, total: jobs.length, task: job.task.title, model: job.model.label, phase, runId: id });
       const trial: Trial = await runTrial({ ...ctx, notify }, job, `${String(i + 1).padStart(4, '0')}-${job.model.id}-${job.task.id}`);
       if (['auth_error', 'rate_limited'].includes(trial.status)) blockedProviders.set(job.model.provider, `${trial.status} in ${trial.id}; no retries, account switching or paid fallback. ${trial.error}`);
