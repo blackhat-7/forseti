@@ -1,5 +1,5 @@
 import { Text, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
-import { LABEL, SKILL_NAME, TIER_NAME, bar, duration, tokenCount, byCapability, byTier, gate, harnesses, levelsNote, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, noLeader, NO_LEADER, weighting } from '../report.ts';
+import { LABEL, SKILL_NAME, TIER_NAME, bar, dollars, duration, tokenCount, byCapability, byTier, gate, harnesses, levelsNote, ranking, scoreError, scorecards, skillSlices, stallNote, taskCell, taskOrder, tierSlices, triesLabel, verdicts, noLeader, NO_LEADER, weighting } from '../report.ts';
 import type { Run } from '../types.ts';
 import { CARD, MAX_TEXT, SERIES, amber, bold, count, faint, green, ink, muted, nick, padTo, pct, plain, rateInk, rose, runWhen, statusInk, table, terminalText, width_ } from './kit.ts';
 
@@ -34,8 +34,8 @@ export function comparisonPage(runs: Run[], width: number, everyTask: boolean, c
   };
   // Columns after the bar: score, spread, coverage, then the wait and effort for one right answer.
   const cover = (n: number, total: number) => (n < total ? `${n}/${total}` : '');
-  const wide = width - 4 - nameW - 24 - 16 - 26 >= 0;
-  const barW = Math.max(0, Math.min(28, width - 4 - nameW - 16 - (wide ? 26 : 0) - 1));
+  const effortW = 32, wide = width - 4 - nameW - 24 - 16 - effortW - 2 >= 0;
+  const barW = Math.max(0, Math.min(28, width - 4 - nameW - 16 - (wide ? effortW + 2 : 0) - 1));
   const draw = (i: number, rate: number | null, credit: number | null, on: boolean) => {
     const paint = !on || cards[i]!.synthetic ? faint : SERIES[i % SERIES.length]!;
     if (!barW) return '';
@@ -47,12 +47,14 @@ export function comparisonPage(runs: Run[], width: number, everyTask: boolean, c
     `${(on ? bold : muted)(pct(rate).padStart(4))} ${faint(spread.padEnd(4))} ${faint(covered.padEnd(6))}`;
 
   const levels = levelsNote(cards);
-  row(bold('Overall') + (levels ? faint(`   ${levels}`) : '') + (wide ? ' '.repeat(Math.max(2, nameW + 4 + barW + 1 + 16 - 7 - (levels ? width_(levels) + 3 : 0))) + faint('time · tokens per correct') : ''));
+  // The heading names money only when some model has a price; it sits right-aligned over its figures.
+  const effortHead = cards.some(c => !c.synthetic && c.costPerCorrect !== null) ? 'time · tokens · $ per correct' : 'time · tokens per correct';
+  row(bold('Overall') + (levels ? faint(`   ${levels}`) : '') + (wide ? ' '.repeat(Math.max(2, nameW + 4 + barW + 1 + 16 + effortW - 7 - (levels ? width_(levels) + 3 : 0) - effortHead.length)) + faint(effortHead) : ''));
   for (const [i, { card, rank }] of ranked.entries()) {
     // A rerun spread means nothing for a control, or for a model not ranked yet.
     const on = rank !== null || card.synthetic, error = card.synthetic || rank === null ? null : scoreError(card), graded = card.tasks.filter(t => t.rate !== null).length;
-    const effort = card.synthetic || card.perCorrectMs === null ? '' : `${duration(card.perCorrectMs)} · ${tokenCount(card.tokensPerCorrect)}`;
-    row(`${muted(String(rank ?? '–').padStart(2))}  ${nameCell(i, on)}${draw(i, card.score, card.checkScore, on)}${tail(card.score, error === null ? '' : `±${Math.round(error * 100)}`, cover(graded, card.tasks.length), on)}${wide ? muted(effort.padStart(24)) : ''}${card.notRun ? amber(` · ${card.notRun} not run`) : ''}`);
+    const effort = card.synthetic || card.perCorrectMs === null ? '' : `${duration(card.perCorrectMs)} · ${tokenCount(card.tokensPerCorrect)}${card.costPerCorrect === null ? '' : ` · ${dollars(card.costPerCorrect)}`}`;
+    row(`${muted(String(rank ?? '–').padStart(2))}  ${nameCell(i, on)}${draw(i, card.score, card.checkScore, on)}${tail(card.score, error === null ? '' : `±${Math.round(error * 100)}`, cover(graded, card.tasks.length), on)}${wide ? muted(effort.padStart(effortW)) : ''}${card.notRun ? amber(` · ${card.notRun} not run`) : ''}`);
   }
   const tiers = cards.map(c => byTier(c, tasks));
   for (const [t, { tier, ids }] of (tiers[0]?.length ? tierSlices(tasks) : []).entries()) {

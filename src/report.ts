@@ -33,14 +33,22 @@ export function correctness(trials: Trial[]) {
  * median of its fully solved tries. `perCorrectMs` is all its counted time over the tries it fully
  * solved: the expected wait for one correct result when a failure is simply tried again.
  */
-export function timing(trials: Trial[]): { solveMs: number | null; perCorrectMs: number | null; tokensPerCorrect: number | null } {
+export function timing(trials: Trial[]): { solveMs: number | null; perCorrectMs: number | null; tokensPerCorrect: number | null; costPerCorrect: number | null } {
   const observed = trials.filter(scoredTry), wins = observed.filter(solved);
   // Output tokens are effort that does not depend on the hardware: thinking, replies and tool calls.
   const counted = observed.filter(t => t.tokens), spent = counted.reduce((sum, t) => sum + t.tokens!.output, 0);
+  // Only when every counted try has a price: a partial sum would understate what a solve costs.
+  const priced = observed.every(t => t.estimatedCost !== null), cost = observed.reduce((sum, t) => sum + (t.estimatedCost ?? 0), 0);
   return {
     solveMs: median(wins.map(t => t.wallMs)), perCorrectMs: wins.length ? observed.reduce((sum, t) => sum + t.wallMs, 0) / wins.length : null,
     tokensPerCorrect: wins.length && counted.length === observed.length ? spent / wins.length : null,
+    costPerCorrect: wins.length && priced ? cost / wins.length : null,
   };
+}
+/** "$0.42", "$12": dollars to the precision a reader compares them at. */
+export function dollars(n: number | null): string {
+  if (n === null) return 'n/a';
+  return n < 10 ? `$${n.toFixed(2)}` : `$${Math.round(n)}`;
 }
 /** "900", "12k", "1.4M": an effort figure, rounded the way people say it. */
 export function tokenCount(n: number | null): string {
@@ -143,7 +151,7 @@ export type Scorecard = {
   label: string; score: number | null; checkScore: number | null; dimensions: Record<Dimension, number | null>;
   evaluated: number; planned: number; notRun: number; stalled: number; tasks: TaskScore[];
   /** Speed and effort, apart from correctness: see `timing`. */
-  solveMs: number | null; perCorrectMs: number | null; tokensPerCorrect: number | null;
+  solveMs: number | null; perCorrectMs: number | null; tokensPerCorrect: number | null; costPerCorrect: number | null;
   /** 'tier': each difficulty tier counts equally. 'task': every task counts equally. */
   weighting: 'tier' | 'task';
   /** Set when models cover different difficulty levels: the headline uses only these. */
@@ -177,7 +185,7 @@ function headline(tasks: TaskScore[], weighting: Scorecard['weighting']) {
  */
 export const SKILL_NAME: Record<Capability, string> = { evidence: 'Only claims what the files show', restraint: 'No false alarms', exactness: 'Edge cases right', scope: 'Stays within the task', safety: 'Safe under retries and failures' };
 export const TIER_NAME: Record<Tier | 'unrated', string> = { basic: 'Basic', standard: 'Standard', hard: 'Hard', unrated: 'Unrated' };
-export const LABEL = { solved: 'Tasks fully solved', checks: 'Checks passed', instructions: 'Followed output format', tools: 'Tool use', design: 'Code design (reviewed)', hygiene: 'Safe-code gate', stalled: 'Ran out of turns or time', solveTime: 'Typical solve', perCorrect: 'Time per correct result', tokensPerCorrect: 'Tokens per correct result' };
+export const LABEL = { solved: 'Tasks fully solved', checks: 'Checks passed', instructions: 'Followed output format', tools: 'Tool use', design: 'Code design (reviewed)', hygiene: 'Safe-code gate', stalled: 'Ran out of turns or time', solveTime: 'Typical solve', perCorrect: 'Time per correct result', tokensPerCorrect: 'Tokens per correct result', costPerCorrect: 'Cost per correct result' };
 const tries = (n: number) => `${n} ${n === 1 ? 'try' : 'tries'}`;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /**
@@ -530,11 +538,11 @@ function summaryMarkdown(runs: Run[]): string[] {
   if (levels) lines.push(`> **Overall covers ${levels}.**`, '');
   else if (mixed) lines.push('> **Not one controlled comparison:** suite, selected tasks, lane or settings differ between these runs. See Details for each group.', '');
   lines.push(`## Who is best overall`, '', `**${LABEL.solved}**: the share of tasks a model got completely right. ${weighting(tasks)}. **±** is how far the number could move if the run were repeated. A model's **rank** is 1 + how many models clearly beat it, so a shared rank means this run cannot tell them apart.`, '',
-    `**Speed is shown, not ranked.** **${LABEL.solveTime}** is the median wall-clock time of a fully solved try. **${LABEL.perCorrect}** is all of a model's time over the tries it fully solved: how long you wait for one right answer if you retry failures. Both are on the hardware that ran the model. **${LABEL.tokensPerCorrect}** is the same for output tokens (thinking, replies, tool calls): effort that does not depend on hardware.`, '',
-    `| Rank | Model |${tagged ? ' Harness |' : ''} ${LABEL.solved} | | ± | ${LABEL.solveTime} | ${LABEL.perCorrect} | ${LABEL.tokensPerCorrect} |${lost ? ' Not run |' : ''}${caveat ? ' Caveat |' : ''}`, `|---:|---|${tagged ? '---|' : ''}---:|---|---:|---:|---:|---:|${lost ? '---:|' : ''}${caveat ? '---|' : ''}`);
+    `**Speed is shown, not ranked.** **${LABEL.solveTime}** is the median wall-clock time of a fully solved try. **${LABEL.perCorrect}** is all of a model's time over the tries it fully solved: how long you wait for one right answer if you retry failures. Both are on the hardware that ran the model. **${LABEL.tokensPerCorrect}** is the same for output tokens (thinking, replies, tool calls): effort that does not depend on hardware. **${LABEL.costPerCorrect}** is the same for money, at API list prices: a subscription is not billed this, and a local model is free.`, '',
+    `| Rank | Model |${tagged ? ' Harness |' : ''} ${LABEL.solved} | | ± | ${LABEL.solveTime} | ${LABEL.perCorrect} | ${LABEL.tokensPerCorrect} | ${LABEL.costPerCorrect} |${lost ? ' Not run |' : ''}${caveat ? ' Caveat |' : ''}`, `|---:|---|${tagged ? '---|' : ''}---:|---|---:|---:|---:|---:|---:|${lost ? '---:|' : ''}${caveat ? '---|' : ''}`);
   for (const [i, { card, rank }] of ranked.entries()) {
     const error = card.synthetic ? null : scoreError(card);
-    lines.push(`| ${rank ?? '–'} | ${escape(card.label)}${card.synthetic && !/synthetic/i.test(card.label) ? ' (synthetic)' : ''} |${tagged ? ` ${card.harness} |` : ''} **${pct(card.score)}** | \`${bar(card.score)}\` | ${error === null ? '' : `±${Math.round(error * 100)}`} | ${card.synthetic ? '' : duration(card.solveMs)} | ${card.synthetic ? '' : duration(card.perCorrectMs)} | ${card.synthetic ? '' : tokenCount(card.tokensPerCorrect)} |${lost ? ` ${card.notRun} |` : ''}${caveat ? ` ${caveats[i] ?? ''} |` : ''}`);
+    lines.push(`| ${rank ?? '–'} | ${escape(card.label)}${card.synthetic && !/synthetic/i.test(card.label) ? ' (synthetic)' : ''} |${tagged ? ` ${card.harness} |` : ''} **${pct(card.score)}** | \`${bar(card.score)}\` | ${error === null ? '' : `±${Math.round(error * 100)}`} | ${card.synthetic ? '' : duration(card.solveMs)} | ${card.synthetic ? '' : duration(card.perCorrectMs)} | ${card.synthetic ? '' : tokenCount(card.tokensPerCorrect)} | ${card.synthetic ? '' : dollars(card.costPerCorrect)} |${lost ? ` ${card.notRun} |` : ''}${caveat ? ` ${caveats[i] ?? ''} |` : ''}`);
   }
   if (cards.some(c => c.synthetic)) lines.push('', 'Synthetic controls check the grader, not a model, so they are never ranked.');
   if (lost) lines.push('', '**Not run** counts tries lost to login, quota, crash or cancellation. They never count against a model.');

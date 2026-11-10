@@ -13,7 +13,7 @@ import { createHandler, MCP_ALLOWED } from '../src/mcpserver.ts';
 import { DEFAULT_CONFIG, DEFAULT_JUDGE, DEFAULT_OPTIONS, loadSuite, validateConfig, validateJudge, validateOptions } from '../src/config.ts';
 import { atomicJson, files, inside, localDir, put } from '../src/files.ts';
 import { listLocalModels, LOCAL, localModels, localUrl, shortName } from '../src/local.ts';
-import { byTier, duration, timing, tokenCount, fitsBudget, sliceCard, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts, verdictText } from '../src/report.ts';
+import { byTier, dollars, duration, timing, tokenCount, fitsBudget, sliceCard, modelName, comparisonKey, conditionsKey, leaderboard, levelsNote, modelKey, comparisonReport, correctness, dimensionScore, median, ranking, scorecard, scorecards, scoreError, separated, sliceGap, slicePlaces, stalled, checkShare, taskCell, ungradedNote, verdicts, verdictText } from '../src/report.ts';
 import { applicableDimensions, conditionsNow, inParallel, laneOf, blankTrial, harnessFiles, listRuns, readRun, regrade, gradeClosure, rejectArtifacts, runBenchmark, schedule, validateChecks, recordVersion } from '../src/runner.ts';
 import { CLAUDE_CODE_ALLOWED, CLAUDE_CODE_DENIED, CLAUDE_CODE_JUDGE_DENIED, claudeCodeArgs, claudeCodeJudgeArgs, classify, liveEvents, resultMessage, subagentCalls } from '../src/claudecode.ts';
 import { checkSandbox, runPython } from '../src/sandbox.ts';
@@ -1067,11 +1067,15 @@ test('speed is reported apart from correctness: time to solve and time per corre
     checks: passed === null ? [] : [{ id: 'c', dimension: 'correctness' as const, passed, evidence: '' }] });
   // Two solved (60 s, 120 s), one wrong (30 s), one out of time (900 s), one lost to the provider.
   const trials = [tri('passed', true, 60_000), tri('passed', true, 120_000), tri('failed', false, 30_000), tri('timeout', null, 900_000), tri('provider_error', null, 5_000)];
-  assert.deepEqual(timing(trials), { solveMs: 90_000, perCorrectMs: (60_000 + 120_000 + 30_000 + 900_000) / 2, tokensPerCorrect: null }, 'a stall costs time, a provider failure does not; no token counts, no token figure');
-  assert.deepEqual(timing([tri('failed', false, 30_000)]), { solveMs: null, perCorrectMs: null, tokensPerCorrect: null }, 'nothing solved, no time per correct result');
+  assert.deepEqual(timing(trials), { solveMs: 90_000, perCorrectMs: (60_000 + 120_000 + 30_000 + 900_000) / 2, tokensPerCorrect: null, costPerCorrect: null }, 'a stall costs time, a provider failure does not; no token counts, no token figure');
+  assert.deepEqual(timing([tri('failed', false, 30_000)]), { solveMs: null, perCorrectMs: null, tokensPerCorrect: null, costPerCorrect: null }, 'nothing solved, no time per correct result');
   const spent = (t: Trial, output: number) => ({ ...t, tokens: { input: 0, output, cacheRead: 0, cacheWrite: 0 } });
   assert.equal(timing([spent(tri('passed', true, 1), 3000), spent(tri('failed', false, 1), 1000)]).tokensPerCorrect, 4000, 'every counted try\'s output over the tries solved');
   assert.equal(tokenCount(4000), '4k');
+  const priced = (t: Trial, usd: number | null) => ({ ...t, estimatedCost: usd });
+  assert.equal(timing([priced(tri('passed', true, 1), 0.3), priced(tri('failed', false, 1), 0.5)]).costPerCorrect, 0.8, 'every counted try\'s cost over the tries solved');
+  assert.equal(timing([priced(tri('passed', true, 1), 0.3), priced(tri('failed', false, 1), null)]).costPerCorrect, null, 'an unpriced try leaves no cost figure rather than a low one');
+  assert.deepEqual([dollars(0.42), dollars(12.4), dollars(null)], ['$0.42', '$12', 'n/a']);
   assert.deepEqual([duration(45_000), duration(150_000), duration(7_200_000), duration(null)], ['45 s', '2.5 min', '2.0 h', 'n/a']);
   const card = scorecard('q', trials, [{ id: 'a', title: 'A' }], 5);
   assert.equal(card.perCorrectMs, 555_000);
