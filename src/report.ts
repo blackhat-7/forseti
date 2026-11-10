@@ -404,7 +404,8 @@ export function modelName(id: string): string {
 export function scorecards(runs: Run[]): { cards: ModelCard[]; tasks: Run['tasks']; mixed: boolean } {
   const tasks = [...new Map(runs.toReversed().flatMap(r => r.tasks).map(t => [t.id, t])).values()].reverse();
   const entries = runs.flatMap(run => run.models.map(model => ({ run, model })));
-  const groups = Map.groupBy(entries, ({ run, model }) => `${comparisonKey(run)} ${model.provider}/${model.model}/${model.thinking}`);
+  // A wrapper decides what runs, so the same model name behind another command is another card.
+  const groups = Map.groupBy(entries, ({ run, model }) => `${comparisonKey(run)} ${model.provider}/${model.model}/${model.thinking}${model.command ? ` ${model.command.join(' ')}` : ''}`);
   const name = (label: string) => modelLabel(clean(label).replace(/\s*·\s*via\s.*$/, '').trim());
   // An alias like "sonnet" names whatever Claude Code maps it to, so the card says which model that was.
   const served = (trials: Trial[]) => { const ids = [...new Set(trials.flatMap(t => (t.served ? [t.served] : [])))]; return ids.length === 1 ? modelName(ids[0]!) : undefined; };

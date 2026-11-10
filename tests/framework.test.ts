@@ -1042,6 +1042,11 @@ test('the leaderboard keeps only tries recorded under today\'s conditions', () =
   const servedBy = (run: Run, model: string) => ({ ...run, trials: run.trials.map(t => ({ ...t, served: model })) });
   const moves = leaderboard([servedBy(older, 'claude-opus-4-5-20251101'), servedBy({ ...older, id: 'r8', created: '2026-01-02' }, 'claude-opus-5-5')], suite, today)!;
   assert.deepEqual(scorecards([moves]).cards.map(c => c.label).sort(), ['Claude Opus 4.5', 'Claude Opus 5.5']);
+  // The same model name behind two wrapper commands is two cards, not one pooled under the first label.
+  const offline = { ...m('offline'), model: 'local', label: 'Local alone', command: ['claude-local', '--offline'] };
+  const helped = { ...m('helped'), model: 'local', label: 'Local asks Opus', command: ['claude-local'] };
+  const wrappedRun = base('r9', '2026-02-06', 'H', [offline, helped], [['offline', 'a', 'failed'], ['helped', 'a', 'passed']]);
+  assert.deepEqual(scorecards([leaderboard([wrappedRun], suite, today)!]).cards.map(c => c.label).sort(), ['Local alone', 'Local asks Opus']);
   // The suite decides tiers and membership: a relabelled task moves, a removed one leaves.
   const now = leaderboard([older, newer], [{ ...suite[0]!, tier: 'standard' }], today)!;
   assert.deepEqual(now.tasks.map(t => [t.id, t.tier]), [['a', 'standard']]);
