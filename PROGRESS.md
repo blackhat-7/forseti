@@ -25,7 +25,6 @@ Finished history: `docs/history.md`. Next task: `PLAN.md`. Rules: `AGENTS.md`.
 Measure the claude-local modes on `lock-refresh` and `sheet-eval` (local alone fails both, Opus solves both): does a local main agent ask Opus, and what does a solve cost? Then `PLAN.md`. Ask the owner before spending Claude quota.
 
 ## Gotchas
-
 - **subscription-repair holds ~370 MB of SQLite per world.** Several ops tries at once need memory.
 - **A world's outputs must read like the real tool, byte for byte.** Unknown commands get the real tool's error, never an invented success. `ONLY=<task> npm run test:suite` checks one task's controls.
 - **`render(w, 'body')` reuses the last frame drawn at that width.** A test that changes state must render the header (or `'all'`) first.
