@@ -90,6 +90,7 @@ DATA = {
 REFERENCE_CODE = '''"""Shipment pricing under the carrier tariff (reference implementation)."""
 import datetime
 import json
+import math
 from decimal import ROUND_HALF_UP, Decimal
 
 DATA = json.loads(__DATA__)
@@ -143,8 +144,8 @@ def quote(shipment):
     charges = dict.fromkeys(["base", "discount", "residential", "delivery_area", "handling", "oversize",
                              "peak", "signature", "saturday", "fuel"], 0)
     for package in shipment["packages"]:
-        actual = max(1, -(-Decimal(str(package["weight"])) // 1))
-        actual = int(actual)
+        # math.ceil, not -(-x // 1): Decimal's // truncates toward zero, so that idiom rounds 2.2 down to 2.
+        actual = max(1, math.ceil(Decimal(str(package["weight"]))))
         sides = sorted((half_up(Decimal(str(package[k]))) for k in ("length", "width", "height")), reverse=True)
         girth = sides[0] + 2 * (sides[1] + sides[2])
         if actual > 150 or girth > 165:
@@ -696,7 +697,7 @@ def cases():
         ship("2026-04-06", "ground", dest=Z(P[70])), ship("2026-06-17", "ground", dest=Z(P[71]), residential=True),
         ship("2026-06-17", "overnight", dest=Z(P[71]), signature="adult"),
         ship("2026-08-26", "express", dest=Z(DAS[9]), saturday=True, signature="direct", residential=True),
-        ship("2026-11-18", "ground", dest=Z(P[71]), residential=True, packages=((10, 50, 10, 10),)),
+        ship("2026-11-18", "ground", dest=Z(P[71]), residential=True, packages=((60, 20, 12, 10),)),
         ship("2026-12-31", "overnight", dest=Z(P[72])),
     ]
     c["options"] = [
