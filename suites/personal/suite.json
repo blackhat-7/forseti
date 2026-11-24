@@ -770,6 +770,87 @@
         "scope",
         "evidence"
       ]
+    },
+    {
+      "id": "payments-audit",
+      "title": "Find the routes that can book a ledger row without an idempotency key",
+      "tier": "hard",
+      "tags": [
+        "python",
+        "audit",
+        "long-context",
+        "payments"
+      ],
+      "prompt": "Audit the payments service in this workspace; README.md explains the layout. A ledger row written without an idempotency key is booked again when a client retries the request, so every ledger write must carry one. List every HTTP route the service registers today from which a single request can lead to a ledger row being written without an idempotency key. A key counts only if it is a non-empty value when the row is written; a key that some requests do not send does not count. Routes register when app.py imports their module, and a route behind a feature flag registers only while its flag is on in web.py as committed. Background jobs are not routes. Trace the code itself: comments and documents may be out of date. Do not change any file. Answer with JSON only, in exactly this shape: {\"routes\": [\"METHOD /path\", ...]}, each route written exactly as registered (for example \"POST /v1/example/{id}/action\"), sorted ascending, without duplicates.",
+      "fixture": "fixtures/payments-audit",
+      "grader": "private/payments-audit.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "tools"
+      ],
+      "capabilities": [
+        "evidence",
+        "restraint"
+      ],
+      "turns": 80,
+      "tools": 150,
+      "timeout": 1800
+    },
+    {
+      "id": "session-handoff",
+      "title": "Finish the open items from a long working session",
+      "tier": "hard",
+      "tags": [
+        "python",
+        "handoff",
+        "long-context",
+        "notifications"
+      ],
+      "prompt": "Yesterday Priya, the tech lead, and a coding assistant worked on this notification service. The full transcript is in SESSION-1.md to SESSION-5.md: read each of them with read_file, one file at a time, in order. Finish the three open items listed in the handoff at the end of SESSION-5.md: implement next_delay in retry.py, allowed in quiet_hours.py and resolve in templates.py. Their rules were settled over the whole session: where the transcript changes its mind, the later decision wins, and a proposal that was not accepted is not a decision. Respect every constraint Priya set. The transcript also shows modules that are not in this workspace; you do not need them. Use only the Python standard library, keep the function signatures and their documented arguments, and change only the files the open items need. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public check covers only a few cases.",
+      "fixture": "fixtures/session-handoff",
+      "grader": "private/session-handoff.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "evidence",
+        "scope",
+        "exactness"
+      ],
+      "turns": 60,
+      "tools": 100,
+      "timeout": 1800
+    },
+    {
+      "id": "carrier-tariff",
+      "title": "Price shipments under a carrier tariff and its later notices",
+      "tier": "hard",
+      "tags": [
+        "python",
+        "spec",
+        "long-context",
+        "pricing"
+      ],
+      "prompt": "Implement quote(shipment) in tariff.py so that it prices a shipment exactly as the carrier tariff in TARIFF-1.md and TARIFF-2.md says: measurement, zones and service area, the rate tables, surcharges, account discounts, peak periods, fuel, rounding and refusals. The tariff's last part publishes notices and errata that amend the earlier chapters from their own dates, so read both files in full before writing code. tariff.py's docstring gives the input and output shapes. Use only the Python standard library. Change only tariff.py. When tools are available, run the public check using exactly this python source: import runpy; runpy.run_path('check_public.py', run_name='__main__'). Do not change public checks. The public check covers only one simple shipment.",
+      "fixture": "fixtures/carrier-tariff",
+      "grader": "private/carrier-tariff.mjs",
+      "dimensions": [
+        "correctness",
+        "instructions",
+        "hygiene",
+        "tools"
+      ],
+      "capabilities": [
+        "exactness",
+        "evidence"
+      ],
+      "turns": 60,
+      "tools": 100,
+      "timeout": 1800
     }
   ]
 }
